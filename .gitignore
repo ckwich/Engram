@@ -1,0 +1,7 @@
+venv/
+data/
+*.pyc
+__pycache__/
+mcp_config.json
+engram_export_*.json
+ENGRAM_IMPORT_SUMMARY.md
