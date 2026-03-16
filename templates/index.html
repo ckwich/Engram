@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Engram — Memory Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ── Header ────────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">ENGRAM <span>memory dashboard</span></div>
+  <div class="stats">
+    <div><span class="num" id="stat-memories">{{ stats.total_memories }}</span> memories</div>
+    <div><span class="num" id="stat-chunks">{{ stats.total_chunks }}</span> chunks</div>
+  </div>
+</header>
+
+<!-- ── Layout ────────────────────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- Sidebar: Tag Filtering -->
+  <aside class="sidebar">
+    <h3>Tags</h3>
+    <ul class="tag-list" id="tag-list">
+      <li class="active" data-tag="">All</li>
+      {% for tag in all_tags %}
+      <li data-tag="{{ tag }}">{{ tag }}</li>
+      {% endfor %}
+    </ul>
+  </aside>
+
+  <!-- Main Content -->
+  <div class="main">
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="Semantic search across memories..." autocomplete="off">
+      </div>
+      <div class="view-toggle">
+        <button class="btn active" data-view="grid" title="Grid view">Grid</button>
+        <button class="btn" data-view="list" title="List view">List</button>
+      </div>
+      <button class="btn btn-cyan" onclick="openCreateModal()">+ New</button>
+    </div>
+
+    <!-- Search Results (hidden by default) -->
+    <div id="search-results" class="search-results hidden"></div>
+
+    <!-- Memory Cards -->
+    <div id="memory-container" class="memory-grid">
+      {% if memories %}
+        {% for m in memories %}
+        <div class="memory-card" data-key="{{ m.key }}" data-tags="{{ m.tags | join(',') }}" onclick="openViewModal('{{ m.key }}')">
+          <div class="title">{{ m.title }}</div>
+          <div class="key">{{ m.key }}</div>
+          <div class="meta">
+            <span>{{ m.chunk_count }} chunks</span>
+            <span>{{ m.chars }} chars</span>
+            <span>{{ m.updated_at[:10] if m.updated_at else '' }}</span>
+          </div>
+          <div class="tags">
+            {% for t in m.tags %}
+            <span class="tag-chip">{{ t }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">
+          <div class="icon">&#x1f9e0;</div>
+          <p>No memories stored yet. Click <strong>+ New</strong> to create one.</p>
+        </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Create/Edit Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-create">
+  <div class="modal">
+    <h2 id="modal-create-title">New Memory</h2>
+    <div class="form-group">
+      <label>Template</label>
+      <div style="display:flex; gap:0.5rem;">
+        <button class="btn btn-sm" onclick="applyTemplate('project')">Project</button>
+        <button class="btn btn-sm" onclick="applyTemplate('decision')">Decision</button>
+        <button class="btn btn-sm" onclick="applyTemplate('reference')">Reference</button>
+        <button class="btn btn-sm" onclick="applyTemplate('snippet')">Snippet</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Key (unique identifier)</label>
+      <input type="text" id="form-key" placeholder="e.g. project/auth-design">
+    </div>
+    <div class="form-group">
+      <label>Title</label>
+      <input type="text" id="form-title" placeholder="Human-readable title">
+    </div>
+    <div class="form-group">
+      <label>Tags (comma-separated)</label>
+      <input type="text" id="form-tags" placeholder="e.g. architecture, auth">
+    </div>
+    <div class="form-group">
+      <label>Content (Markdown supported)</label>
+      <textarea id="form-content" placeholder="Memory content..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-create')">Cancel</button>
+      <button class="btn btn-cyan" id="btn-save" onclick="saveMemory()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── View Memory Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-view">
+  <div class="modal">
+    <h2 id="view-title">Memory</h2>
+    <div class="meta text-muted" id="view-meta" style="font-size:0.8rem; margin-bottom:0.75rem;"></div>
+    <div class="tags" id="view-tags" style="margin-bottom:0.75rem;"></div>
+    <pre id="view-content" style="max-height:400px; overflow-y:auto;">Loading...</pre>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="btn-delete" onclick="deleteCurrentMemory()">Delete</button>
+      <button class="btn" onclick="editCurrentMemory()">Edit</button>
+      <button class="btn" onclick="closeModal('modal-view')">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ───────────────────────────────────────────────────────────────────
+let currentView = 'grid';
+let activeTag = '';
+let currentViewKey = null;
+let searchTimeout = null;
+let editMode = false;
+
+// ── View Toggle ─────────────────────────────────────────────────────────────
+document.querySelectorAll('.view-toggle .btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.view-toggle .btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentView = btn.dataset.view;
+    const container = document.getElementById('memory-container');
+    container.className = currentView === 'grid' ? 'memory-grid' : 'memory-list';
+  });
+});
+
+// ── Tag Filtering ───────────────────────────────────────────────────────────
+document.getElementById('tag-list').addEventListener('click', e => {
+  const li = e.target.closest('li');
+  if (!li) return;
+  document.querySelectorAll('#tag-list li').forEach(l => l.classList.remove('active'));
+  li.classList.add('active');
+  activeTag = li.dataset.tag;
+  filterByTag();
+});
+
+function filterByTag() {
+  document.querySelectorAll('.memory-card').forEach(card => {
+    if (!activeTag) { card.classList.remove('hidden'); return; }
+    const tags = (card.dataset.tags || '').split(',');
+    card.classList.toggle('hidden', !tags.includes(activeTag));
+  });
+}
+
+// ── Search ──────────────────────────────────────────────────────────────────
+const searchInput = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+const memoryContainer = document.getElementById('memory-container');
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  const q = searchInput.value.trim();
+  if (!q) {
+    searchResults.classList.add('hidden');
+    memoryContainer.classList.remove('hidden');
+    return;
+  }
+  searchTimeout = setTimeout(() => doSearch(q), 300);
+});
+
+async function doSearch(query) {
+  memoryContainer.classList.add('hidden');
+  searchResults.classList.remove('hidden');
+  searchResults.innerHTML = '<div class="text-muted" style="padding:1rem;">Searching...</div>';
+
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=10`);
+    const results = await res.json();
+    if (!results.length) {
+      searchResults.innerHTML = '<div class="empty-state"><p>No results found.</p></div>';
+      return;
+    }
+    searchResults.innerHTML = results.map(r => `
+      <div class="search-result" data-key="${esc(r.key)}" data-chunk-id="${r.chunk_id}">
+        <div class="result-header">
+          <span class="score">${(r.score * 100).toFixed(0)}%</span>
+          <span class="result-title">${esc(r.title)}</span>
+        </div>
+        <div class="result-meta">key: ${esc(r.key)} &middot; chunk: ${r.chunk_id}</div>
+        <div class="snippet">${esc(r.snippet)}</div>
+        <div class="tags mt-1">${(r.tags || []).map(t => `<span class="tag-chip">${esc(t)}</span>`).join('')}</div>
+        <div class="expanded-container"></div>
+      </div>
+    `).join('');
+
+    // Click to expand chunk
+    searchResults.querySelectorAll('.search-result').forEach(el => {
+      el.addEventListener('click', () => expandResult(el));
+    });
+  } catch (err) {
+    searchResults.innerHTML = `<div class="text-muted" style="padding:1rem;">Search error: ${err.message}</div>`;
+  }
+}
+
+async function expandResult(el) {
+  const container = el.querySelector('.expanded-container');
+  if (container.querySelector('.expanded-view')) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const key = el.dataset.key;
+  const chunkId = parseInt(el.dataset.chunkId);
+
+  try {
+    const res = await fetch(`/api/chunk/${encodeURIComponent(key)}/${chunkId}`);
+    const chunk = await res.json();
+    container.innerHTML = `
+      <div class="expanded-view">
+        <pre>${esc(chunk.text || chunk.error || 'No content')}</pre>
+        <div class="actions">
+          <button class="btn btn-sm btn-cyan" onclick="event.stopPropagation(); loadFullMemory('${esc(key)}', this)">Load full memory</button>
+          <button class="btn btn-sm" onclick="event.stopPropagation(); openViewModal('${esc(key)}')">View / Edit</button>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="expanded-view"><pre>Error loading chunk</pre></div>`;
+  }
+}
+
+async function loadFullMemory(key, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  try {
+    const res = await fetch(`/api/memory/${encodeURIComponent(key)}`);
+    const memory = await res.json();
+    const view = btn.closest('.expanded-view');
+    view.querySelector('pre').textContent = memory.content || memory.error || 'No content';
+    btn.textContent = 'Loaded';
+  } catch (err) {
+    btn.textContent = 'Error';
+  }
+}
+
+// ── Create / Edit Modal ─────────────────────────────────────────────────────
+function openCreateModal() {
+  editMode = false;
+  document.getElementById('modal-create-title').textContent = 'New Memory';
+  document.getElementById('form-key').value = '';
+  document.getElementById('form-key').disabled = false;
+  document.getElementById('form-title').value = '';
+  document.getElementById('form-tags').value = '';
+  document.getElementById('form-content').value = '';
+  document.getElementById('modal-create').classList.add('active');
+}
+
+function openEditModal(key, title, tags, content) {
+  editMode = true;
+  document.getElementById('modal-create-title').textContent = 'Edit Memory';
+  document.getElementById('form-key').value = key;
+  document.getElementById('form-key').disabled = true;
+  document.getElementById('form-title').value = title;
+  document.getElementById('form-tags').value = tags;
+  document.getElementById('form-content').value = content;
+  closeModal('modal-view');
+  document.getElementById('modal-create').classList.add('active');
+}
+
+async function saveMemory() {
+  const key = document.getElementById('form-key').value.trim();
+  const title = document.getElementById('form-title').value.trim();
+  const tags = document.getElementById('form-tags').value.trim();
+  const content = document.getElementById('form-content').value;
+
+  if (!key || !content) { alert('Key and content are required.'); return; }
+
+  const btn = document.getElementById('btn-save');
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  try {
+    const method = editMode ? 'PUT' : 'POST';
+    const url = editMode ? `/api/memory/${encodeURIComponent(key)}` : '/api/memory';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, title: title || key, tags, content }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Save failed');
+    }
+    closeModal('modal-create');
+    location.reload();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+// ── View Modal ──────────────────────────────────────────────────────────────
+async function openViewModal(key) {
+  currentViewKey = key;
+  document.getElementById('view-title').textContent = 'Loading...';
+  document.getElementById('view-meta').textContent = '';
+  document.getElementById('view-tags').innerHTML = '';
+  document.getElementById('view-content').textContent = 'Loading...';
+  document.getElementById('modal-view').classList.add('active');
+
+  try {
+    const res = await fetch(`/api/memory/${encodeURIComponent(key)}`);
+    const m = await res.json();
+    if (m.error) { document.getElementById('view-content').textContent = m.error; return; }
+    document.getElementById('view-title').textContent = m.title || m.key;
+    document.getElementById('view-meta').textContent =
+      `Key: ${m.key} · Created: ${(m.created_at || '').slice(0, 10)} · Updated: ${(m.updated_at || '').slice(0, 10)} · ${m.chars || 0} chars`;
+    document.getElementById('view-tags').innerHTML =
+      (m.tags || []).map(t => `<span class="tag-chip">${esc(t)}</span>`).join(' ');
+    document.getElementById('view-content').textContent = m.content || '';
+  } catch (err) {
+    document.getElementById('view-content').textContent = 'Error loading memory.';
+  }
+}
+
+function editCurrentMemory() {
+  const title = document.getElementById('view-title').textContent;
+  const content = document.getElementById('view-content').textContent;
+  const tagEls = document.getElementById('view-tags').querySelectorAll('.tag-chip');
+  const tags = Array.from(tagEls).map(el => el.textContent).join(', ');
+  openEditModal(currentViewKey, title, tags, content);
+}
+
+async function deleteCurrentMemory() {
+  if (!confirm(`Delete memory "${currentViewKey}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/api/memory/${encodeURIComponent(currentViewKey)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    closeModal('modal-view');
+    location.reload();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+// ── Templates ───────────────────────────────────────────────────────────────
+function applyTemplate(type) {
+  const templates = {
+    project: '## Overview\n\n## Current Status\n\n## Key Decisions\n\n## Open Questions\n\n',
+    decision: '## Context\n\n## Options Considered\n\n1. \n2. \n3. \n\n## Decision\n\n## Rationale\n\n## Consequences\n\n',
+    reference: '## Source\n\n## Summary\n\n## How to Access\n\n## Related\n\n',
+    snippet: '## Description\n\n## Code / Content\n\n```\n\n```\n\n## Usage Notes\n\n',
+  };
+  document.getElementById('form-content').value = templates[type] || '';
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function closeModal(id) {
+  document.getElementById(id).classList.remove('active');
+}
+
+function esc(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.classList.remove('active');
+  });
+});
+
+// Close modals on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+  }
+});
+</script>
+
+</body>
+</html>

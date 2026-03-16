@@ -1,0 +1,16 @@
+{
+  "key": "cole_profile",
+  "title": "Cole — User Profile",
+  "content": "# Cole — User Profile\n\n## Role & Background\n- Data analyst at Iron Tree Service (day job)\n- Independently building software products with AI-assisted development as primary workflow\n- Long-term goal: independent income through software\n- Limited TypeScript experience; stronger in Python and data analysis\n- Self-identified ADHD tendency to start new projects — actively manages this by maintaining priority discipline\n- Plays D&D/PF2e and uses Foundry VTT\n- Development hardware: RTX 3070 (8GB VRAM), Windows 11\n\n## Active Projects (Priority Order)\n1. **Sylvara** — CRM/ops platform for tree service companies (🔴 High)\n2. **Lumen GM Hub** — AI-powered GM companion for PF2e/Foundry VTT (🟡 Medium)\n3. **Failstate** — 2D roguelike in Unity (⚪ Paused)\n\n## Working Style\n- Uses Obsidian vault as project memory system with brain files, journals, and project docs\n- Two-AI review loop: Claude Code + GPT-4 for plan.md and AGENTS.md changes\n- Prefers milestone-based planning over individual tickets\n- Values privacy-first architecture (Lumen local tier)\n- Prefers manual-first approaches over auto-triggering (respects user's API budget)\n- Uses AGENTS.md pattern across all projects that use Codex\n\n## Key People\n- **John Maestranzi** — co-owner, Iron Tree Service\n- **Eric Roensch** — co-owner, Iron Tree Service\n- **Savannah Sadowski** — Iron Tree office staff\n- **Larry Seely** — Iron Tree CFO\n\n\n---\n**2026-03-16T00:05:59.860776-07:00 | Created via Engram**",
+  "tags": [
+    "user",
+    "profile",
+    "iron_tree",
+    "background"
+  ],
+  "created_at": "2026-03-16T00:05:59.860776-07:00",
+  "updated_at": "2026-03-16T00:05:59.860776-07:00",
+  "chars": 1456,
+  "lines": 33,
+  "chunk_count": 5
+}

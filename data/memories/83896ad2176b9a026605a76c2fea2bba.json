@@ -1,0 +1,15 @@
+{
+  "key": "lumen_session_2026_03_11",
+  "title": "Lumen Session — 2026-03-11 (PoC Complete, Go Verdict)",
+  "content": "# Lumen Session — 2026-03-11\n\n## Summary\n\nPoC complete. Go verdict reached. The Lumen audio pipeline is validated for production development.\n\n## Work Completed\n\n### Phase 2.2 — Per-Stream Transcription (Validated)\n- Wired WebRTC per-player audio streams through Silero VAD → shared Whisper instance → speaker-labeled transcript\n- Hub captures PCM via Web Audio API, sends over WebSocket to Python transcription server\n- Live transcript display in Electron Hub with deduplication\n- Upgraded from `medium` to `large-v3` — significantly better accuracy, confirmed to fit on RTX 3070 alongside Foundry (~5,857 MB / 8,192 MB)\n- Eliminated Whisper hallucinations (\"ghosts\") by tuning VAD: threshold 0.5→0.65, min speech 250→300ms, added RMS energy gate (discard segments with RMS < 0.01)\n\n### Phase 3 — 60-Minute Stability Test (Passed)\n- Built `poc/phase3/stability_test.py`: feeds Knights of Everflame audio through 3 simulated player streams (Tariel, Linn, Ikyulys)\n- Fixed asyncio hang: added `stop_event` checks around transcribe lock and periodic `asyncio.sleep(0)` yields in chunk processing loop\n- Results:\n  - **16,548 segments** transcribed, **0 errors**\n  - **Latency:** avg 1,681ms / p95 3,996ms / max 8,779ms\n  - **Latency drift:** +1.5% first-to-last quarter (stable)\n  - **VRAM:** avg 6,349 MB, spread 371 MB (6,022–6,393), no leak\n  - Foundry VTT running simultaneously throughout\n\n### Phase 4 — Go Verdict\n- All Go/No-Go criteria met\n- `large-v3` confirmed as recommended default for all tiers including 8 GB cards\n\n## Key Decisions\n- **ADR-006 revised:** `large-v3` upgraded from \"optimal for 12+ GB\" to \"recommended for all tiers\" based on Phase 2 real-world testing\n- **ADR-008 added:** 60-minute stability test results documenting pipeline validation\n\n## Files Updated\n- `projects/Lumen/benchmarks/phase3_stability.md` — stability report with Go/No-Go table\n- `projects/Lumen/benchmarks/phase3_transcript.jsonl` — 16,548-segment raw transcript\n- `projects/Lumen/benchmarks/phase3_transcript.txt` — readable transcript\n- `projects/Lumen/plan.md` — Phases 2, 3, 4 marked complete; Go verdict\n- `brain/Lumen/lumen-architecture.md` — ADR-008 added, pending decisions updated\n- `brain/Lumen/lumen.md` — status updated to \"PoC Complete\", open questions resolved\n\n## Next\n- Proceed to v0.1 product development when ready\n- Post-PoC roadmap: pipeline + Foundry connector + transcript viewer\n\n\n---\n**2026-03-16T00:37:27.717093-07:00 | Created via Engram**",
+  "tags": [
+    "lumen",
+    "journal",
+    "session"
+  ],
+  "created_at": "2026-03-16T00:37:27.717093-07:00",
+  "updated_at": "2026-03-16T00:37:27.717093-07:00",
+  "chars": 2462,
+  "lines": 48,
+  "chunk_count": 9
+}

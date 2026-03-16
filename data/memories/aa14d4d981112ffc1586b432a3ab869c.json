@@ -1,0 +1,16 @@
+{
+  "key": "sylvara_strategy",
+  "title": "Sylvara Product Strategy",
+  "content": "## Product Vision\nSylvara is a full-featured tree service CRM and operations platform, \nbuilt to compete directly with Arbostar. Modular architecture — companies \npick and pay for the modules they need (scheduling, dispatch, reporting, \nCRM, etc.) a la carte.\n\n## Competitive Context\nIron Tree Service is actively onboarding Arbostar. Sylvara is being built \nto be better across the board, not to avoid overlap. The goal is to outcompete, \nnot coexist.\n\n## Release Strategy\nLaunching to the broader tree service market independently. Iron Tree is no \nlonger the primary target — if they want to adopt Sylvara later, that's a \nconversation for then. Building this for commercial release now.\n\n## Current Status\n- Stack: Next.js 15 + Fastify + Prisma + PostgreSQL, pnpm/Turborepo monorepo\n- Auth: Clerk\n- First client target: open market (tree service companies)\n- Key stakeholders for Iron Tree reporting work only: John (owner), Eric (ops manager)\n\n## Module Roadmap (planned)\n- Scheduling and Daily Dispatch\n- Reporting engine (SUMM, Comparable)\n- Full CRM (customer records, estimates, job history)\n- Additional modules TBD\n\n---\n**2026-03-15T23:56:10.828654-07:00 | Created via Engram**",
+  "tags": [
+    "sylvara",
+    "strategy",
+    "product",
+    "crm"
+  ],
+  "created_at": "2026-03-15T23:56:10.828654-07:00",
+  "updated_at": "2026-03-15T23:56:10.828654-07:00",
+  "chars": 1188,
+  "lines": 30,
+  "chunk_count": 5
+}
