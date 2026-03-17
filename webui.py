@@ -26,7 +26,7 @@ def index():
 @app.route("/api/search")
 def api_search():
     query = request.args.get("q", "").strip()
-    limit = request.args.get("limit", 10, type=int)
+    limit = min(max(request.args.get("limit", 10, type=int), 1), 50)
     if not query:
         return jsonify([])
     results = memory_manager.search_memories(query, limit=limit)

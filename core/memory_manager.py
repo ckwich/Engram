@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import chromadb
 
@@ -303,7 +303,7 @@ class MemoryManager:
         Store or update a memory (async — non-blocking for MCP).
         Writes JSON first, then updates the vector index without blocking the event loop.
         """
-        data, chunks = await _run_chroma(self._prepare_store, key, content, tags, title)
+        data, chunks = await _run_blocking(self._prepare_store, key, content, tags, title)
         await self._index_chunks_async(key, chunks, data["title"], data["tags"])
         return data
 
@@ -361,6 +361,15 @@ class MemoryManager:
         if not results or not results.get("ids") or not results["ids"][0]:
             return []
 
+        return self._parse_search_results(results)
+
+    @staticmethod
+    def _parse_search_results(results) -> list[dict]:
+        """Parse ChromaDB query results into scored snippet dicts.
+        Handles missing/corrupt metadata gracefully."""
+        if not results or not results.get("ids") or not results["ids"][0]:
+            return []
+
         output = []
         for doc, meta, distance in zip(
             results["documents"][0],
@@ -370,12 +379,13 @@ class MemoryManager:
             # ChromaDB cosine distance: 0 = identical, 2 = opposite
             # Convert to a 0–1 similarity score
             score = round(1 - (distance / 2), 3)
-            snippet = doc[:150] + "..." if len(doc) > 150 else doc
+            snippet = (doc[:150].rsplit(" ", 1)[0] + "...") if len(doc) > 150 else doc
+            parent_key = meta.get("parent_key", "unknown")
             output.append({
-                "key": meta["parent_key"],
-                "chunk_id": meta["chunk_id"],
-                "title": meta.get("title", meta["parent_key"]),
-                "tags": [t for t in meta.get("tags", "").split(",") if t],
+                "key": parent_key,
+                "chunk_id": int(meta.get("chunk_id", 0)),
+                "title": meta.get("title", parent_key),
+                "tags": [t.strip() for t in meta.get("tags", "").split(",") if t.strip()],
                 "score": score,
                 "snippet": snippet,
             })
@@ -406,29 +416,7 @@ class MemoryManager:
                 return None
 
         results = await _run_chroma(_do_query)
-
-        if not results or not results.get("ids") or not results["ids"][0]:
-            return []
-
-        output = []
-        for doc, meta, distance in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        ):
-            score = round(1 - (distance / 2), 3)
-            snippet = doc[:150] + "..." if len(doc) > 150 else doc
-            output.append({
-                "key": meta["parent_key"],
-                "chunk_id": meta["chunk_id"],
-                "title": meta.get("title", meta["parent_key"]),
-                "tags": [t for t in meta.get("tags", "").split(",") if t],
-                "score": score,
-                "snippet": snippet,
-            })
-
-        output.sort(key=lambda x: x["score"], reverse=True)
-        return output
+        return self._parse_search_results(results)
 
     def list_memories(self) -> list[dict]:
         """
@@ -493,6 +481,7 @@ class MemoryManager:
         col.delete(where={"parent_key": {"$ne": "__never__"}})  # clear all
 
         rebuilt = 0
+        skipped = 0
         for path in JSON_DIR.glob("*.json"):
             try:
                 with open(path, "r", encoding="utf-8") as f:
@@ -506,8 +495,11 @@ class MemoryManager:
                 )
                 rebuilt += 1
             except Exception as e:
+                skipped += 1
                 print(f"[Engram] Skipped {path.name}: {e}", file=sys.stderr)
 
+        if skipped:
+            print(f"[Engram] WARNING: {skipped} memories skipped due to errors.", file=sys.stderr)
         print(f"[Engram] Rebuilt index for {rebuilt} memories.", file=sys.stderr)
         return rebuilt
 

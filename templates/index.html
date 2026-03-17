@@ -53,7 +53,7 @@
     <div id="memory-container" class="memory-grid">
       {% if memories %}
         {% for m in memories %}
-        <div class="memory-card" data-key="{{ m.key }}" data-tags="{{ m.tags | join(',') }}" onclick="openViewModal('{{ m.key }}')">
+        <div class="memory-card" data-key="{{ m.key }}" data-tags="{{ m.tags | join(',') }}">
           <div class="title">{{ m.title }}</div>
           <div class="key">{{ m.key }}</div>
           <div class="meta">
@@ -138,6 +138,12 @@ let currentViewKey = null;
 let searchTimeout = null;
 let editMode = false;
 
+// ── Memory Card Click (via data attribute, not inline onclick) ──────────────
+document.getElementById('memory-container').addEventListener('click', e => {
+  const card = e.target.closest('.memory-card');
+  if (card && card.dataset.key) openViewModal(card.dataset.key);
+});
+
 // ── View Toggle ─────────────────────────────────────────────────────────────
 document.querySelectorAll('.view-toggle .btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -210,7 +216,20 @@ async function doSearch(query) {
 
     // Click to expand chunk
     searchResults.querySelectorAll('.search-result').forEach(el => {
-      el.addEventListener('click', () => expandResult(el));
+      el.addEventListener('click', e => {
+        if (e.target.closest('[data-action]')) return;
+        expandResult(el);
+      });
+    });
+
+    // Delegated handlers for expanded-view buttons
+    searchResults.addEventListener('click', e => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      e.stopPropagation();
+      const key = btn.dataset.key;
+      if (btn.dataset.action === 'load-full') loadFullMemory(key, btn);
+      else if (btn.dataset.action === 'view-edit') openViewModal(key);
     });
   } catch (err) {
     searchResults.innerHTML = `<div class="text-muted" style="padding:1rem;">Search error: ${err.message}</div>`;
@@ -234,8 +253,8 @@ async function expandResult(el) {
       <div class="expanded-view">
         <pre>${esc(chunk.text || chunk.error || 'No content')}</pre>
         <div class="actions">
-          <button class="btn btn-sm btn-cyan" onclick="event.stopPropagation(); loadFullMemory('${esc(key)}', this)">Load full memory</button>
-          <button class="btn btn-sm" onclick="event.stopPropagation(); openViewModal('${esc(key)}')">View / Edit</button>
+          <button class="btn btn-sm btn-cyan" data-action="load-full" data-key="${esc(key)}">Load full memory</button>
+          <button class="btn btn-sm" data-action="view-edit" data-key="${esc(key)}">View / Edit</button>
         </div>
       </div>
     `;

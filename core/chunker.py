@@ -60,12 +60,4 @@ def chunk_content(content: str, max_size: int = MAX_CHUNK_SIZE) -> list[dict]:
             for i in range(0, len(chunk), max_size):
                 final_chunks.append(chunk[i:i + max_size])
 
-    # Deduplicate while preserving order
-    seen = set()
-    deduped = []
-    for chunk in final_chunks:
-        if chunk not in seen:
-            seen.add(chunk)
-            deduped.append(chunk)
-
-    return [{"chunk_id": i, "text": text} for i, text in enumerate(deduped)]
+    return [{"chunk_id": i, "text": text} for i, text in enumerate(final_chunks)]

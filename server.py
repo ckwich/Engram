@@ -38,8 +38,12 @@ async def search_memories(query: str, limit: int = 5) -> str:
     Returns:
         Scored list of matching chunks with snippets. Score is 0.0–1.0 (higher = more relevant).
     """
+    if not query or not query.strip():
+        return "❌ Query cannot be empty."
+    if len(query) > 2000:
+        return "❌ Query too long (max 2,000 chars). Shorten your search query."
     try:
-        results = await memory_manager.search_memories_async(query, limit=min(limit, 20))
+        results = await memory_manager.search_memories_async(query.strip(), limit=min(max(limit, 1), 20))
     except RuntimeError as e:
         return f"❌ Engram error: {e}"
     if not results:
