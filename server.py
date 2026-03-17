@@ -37,7 +37,10 @@ async def search_memories(query: str, limit: int = 5) -> str:
     Returns:
         Scored list of matching chunks with snippets. Score is 0.0–1.0 (higher = more relevant).
     """
-    results = await memory_manager.search_memories_async(query, limit=min(limit, 20))
+    try:
+        results = await memory_manager.search_memories_async(query, limit=min(limit, 20))
+    except RuntimeError as e:
+        return f"❌ Engram error: {e}"
     if not results:
         return f"🔍 No memories found for '{query}'"
 
@@ -168,6 +171,8 @@ async def store_memory(
         )
     except ValueError as e:
         return f"⚠️ Memory too large: {e}"
+    except RuntimeError as e:
+        return f"❌ Engram error: {e}"
     except Exception as e:
         return f"❌ Failed to store '{key}': {e}"
 

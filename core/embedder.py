@@ -47,12 +47,27 @@ class Embedder:
     async def embed_async(self, text: str) -> list[float]:
         """Async embed a single string. Runs in thread pool to avoid blocking the event loop."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(_executor, self.embed, text)
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(_executor, self.embed, text),
+                timeout=60.0
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError("Embedding timed out after 60s.")
 
     async def embed_batch_async(self, texts: list[str]) -> list[list[float]]:
         """Async embed a batch. Runs in thread pool to avoid blocking the event loop."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(_executor, self.embed_batch, texts)
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(_executor, self.embed_batch, texts),
+                timeout=60.0
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                "Embedding timed out after 60s. Memory may be too large or the model is hung. "
+                "Try splitting into smaller memories under 5,000 chars each."
+            )
 
 
 # Singleton
