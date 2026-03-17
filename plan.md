@@ -101,10 +101,10 @@ Agents should always start at tier 1 and escalate only when needed.
       and 15K char guidance baked in as defaults
 
 ### Reliability
-- [ ] Add integration test: store → search → retrieve_chunk → delete cycle
-      run against a live server instance
-- [ ] Add health check endpoint: GET /health returns server status, model
-      load state, memory count, chunk count
+- [x] Add integration test: store → search → retrieve_chunk → delete cycle
+      run against a live server instance (python server.py --self-test)
+- [x] Add health check endpoint: GET /health returns server status, model
+      load state, memory count, chunk count (webui.py + server.py --health)
 
 ## Key Decisions
 - **ChromaDB over SQLite FTS:** Real cosine similarity, not substring matching

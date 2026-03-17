@@ -109,6 +109,18 @@ def api_stats():
     return jsonify(memory_manager.get_stats())
 
 
+@app.route("/health")
+def health():
+    from core.embedder import embedder
+    stats = memory_manager.get_stats()
+    return jsonify({
+        "status": "ok",
+        "model_loaded": embedder._model is not None,
+        "total_memories": stats["total_memories"],
+        "total_chunks": stats["total_chunks"],
+    })
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

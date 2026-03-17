@@ -402,8 +402,8 @@ class MemoryManager:
         """
         Async semantic search (non-blocking for MCP).
         Embedding runs in the embedder's executor, ChromaDB query runs in the
-        default executor. Same return format as search_memories().
-        ALL blocking ops run in executor — nothing touches the event loop directly.
+        dedicated Chroma executor via _run_chroma(). Same return format as
+        search_memories(). Nothing touches the event loop directly.
         """
         query_embedding = await embedder.embed_async(query)
 
