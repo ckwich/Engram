@@ -86,6 +86,26 @@ Agents should always start at tier 1 and escalate only when needed.
 - [x] Export/import (JSON bundle)
 - [x] Stats endpoint (total memories, total chunks, index size)
 
+## v0.4 — Polish and Reliability
+
+### Webui Fixes
+- [ ] Fix JSON serialization bug in dashboard edit/create form — special
+      characters (backticks, dashes, angle brackets) in content field break
+      JSON.parse on submit. Properly escape content before POST.
+- [ ] Remove hardcoded character limit on content textarea in the dashboard
+      form — the 15K limit is enforced server-side, the UI shouldn't
+      silently truncate or error before submission.
+
+### Engram Protocol
+- [ ] Add v0.4 section to AGENTS.md template with forward-slash key warning
+      and 15K char guidance baked in as defaults
+
+### Reliability
+- [ ] Add integration test: store → search → retrieve_chunk → delete cycle
+      run against a live server instance
+- [ ] Add health check endpoint: GET /health returns server status, model
+      load state, memory count, chunk count
+
 ## Key Decisions
 - **ChromaDB over SQLite FTS:** Real cosine similarity, not substring matching
 - **JSON backing store:** Survives ChromaDB corruption, human-readable, portable

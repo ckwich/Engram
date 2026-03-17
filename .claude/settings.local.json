@@ -9,7 +9,21 @@
       "Bash(./venv/Scripts/python -c \"from core.memory_manager import memory_manager; print\\('ok'\\)\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(./venv/Scripts/python server.py --rebuild-index 2>&1)"
+      "Bash(./venv/Scripts/python server.py --rebuild-index 2>&1)",
+      "mcp__engram__store_memory",
+      "Bash(find C:devengramvenv -name fastmcp* -o -name __init__.py -path */fastmcp/*)",
+      "Bash(python3 -c \"from pydantic import TypeAdapter; import inspect; help\\(TypeAdapter.validate_python\\)\")",
+      "Bash(./venv/Scripts/pip show:*)",
+      "Bash(./venv/Scripts/python -c \"from sentence_transformers import SentenceTransformer; help\\(SentenceTransformer.__init__\\)\")",
+      "Bash(./venv/Scripts/python -c \"\nfrom huggingface_hub import try_to_load_from_cache\nresult = try_to_load_from_cache\\('sentence-transformers/all-MiniLM-L6-v2', 'config.json'\\)\nprint\\(f'Cached: {result}'\\)\n\" 2>&1)",
+      "Bash(./venv/Scripts/python server.py --health 2>&1)",
+      "Bash(./venv/Scripts/python server.py --self-test 2>&1)",
+      "Bash(find /c/dev/engram -name __pycache__ -o -name *.pyc)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -n \"key.*strip\\\\|key.*empty\" /c/dev/engram -r --include=*.py)",
+      "Bash(find C:/dev/engram -name *.py -type f)",
+      "Bash(grep:*)",
+      "Bash(python3:*)"
     ]
   }
 }
