@@ -19,7 +19,7 @@ from typing import Union
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 
-_executor = ThreadPoolExecutor(max_workers=1)
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 class Embedder:
@@ -50,7 +50,7 @@ class Embedder:
 
     async def embed_async(self, text: str) -> list[float]:
         """Async embed a single string. Runs in thread pool to avoid blocking the event loop."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(_executor, self.embed, text),
@@ -61,7 +61,7 @@ class Embedder:
 
     async def embed_batch_async(self, texts: list[str]) -> list[list[float]]:
         """Async embed a batch. Runs in thread pool to avoid blocking the event loop."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(_executor, self.embed_batch, texts),

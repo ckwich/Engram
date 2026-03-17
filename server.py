@@ -64,7 +64,7 @@ async def list_all_memories() -> str:
 
     For topic-based lookup, prefer search_memories() instead.
     """
-    memories = memory_manager.list_memories()
+    memories = await memory_manager.list_memories_async()
     if not memories:
         return "📭 No memories stored yet."
 
@@ -96,7 +96,7 @@ async def retrieve_chunk(key: str, chunk_id: int) -> str:
     Returns:
         Full text of the requested chunk, with its parent memory title.
     """
-    result = memory_manager.retrieve_chunk(key, chunk_id)
+    result = await memory_manager.retrieve_chunk_async(key, chunk_id)
     if not result:
         return f"❌ Chunk not found: key='{key}' chunk_id={chunk_id}"
     return (
@@ -120,7 +120,7 @@ async def retrieve_memory(key: str) -> str:
     Returns:
         Full memory content with metadata header.
     """
-    result = memory_manager.retrieve_memory(key)
+    result = await memory_manager.retrieve_memory_async(key)
     if not result:
         return f"❌ Memory not found: '{key}'"
 
@@ -189,7 +189,7 @@ async def delete_memory(key: str) -> str:
     Returns:
         Confirmation or not-found message.
     """
-    deleted = memory_manager.delete_memory(key)
+    deleted = await memory_manager.delete_memory_async(key)
     if deleted:
         return f"🗑  Deleted memory: '{key}'"
     return f"❌ Memory not found: '{key}'"

@@ -7,13 +7,20 @@ Maintains two parallel stores:
 
 JSON is always written first. ChromaDB is the index, not the database.
 If ChromaDB is lost or corrupted, it can be rebuilt from JSON via rebuild_index().
+
+Async methods (used by MCP server) run ALL blocking I/O — ChromaDB queries, JSON
+file reads/writes, directory globs — in a thread pool executor via _run_blocking().
+Sync methods (used by webui/CLI) call the same blocking code directly.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sys
+import threading
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional
 
@@ -31,6 +38,9 @@ JSON_DIR = PROJECT_ROOT / "data" / "memories"
 CHROMA_DIR = PROJECT_ROOT / "data" / "chroma"
 JSON_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Thread-safe collection init lock ─────────────────────────────────────────
+_init_lock = threading.Lock()
 
 
 def _key_hash(key: str) -> str:
@@ -50,20 +60,31 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+async def _run_blocking(func, *args, **kwargs):
+    """Run a blocking function in the default thread pool executor."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+
+
 class MemoryManager:
     def __init__(self):
         self._chroma: Optional[chromadb.ClientAPI] = None
         self._collection = None
 
-    # ── ChromaDB lazy init ──────────────────────────────────────────────────
+    # ── ChromaDB thread-safe lazy init ───────────────────────────────────
 
     def _get_collection(self):
         if self._collection is None:
-            self._chroma = chromadb.PersistentClient(path=str(CHROMA_DIR))
-            self._collection = self._chroma.get_or_create_collection(
-                name="engram_memories",
-                metadata={"hnsw:space": "cosine"},
-            )
+            with _init_lock:
+                if self._collection is None:
+                    self._chroma = chromadb.PersistentClient(
+                        path=str(CHROMA_DIR),
+                        settings=chromadb.Settings(anonymized_telemetry=False),
+                    )
+                    self._collection = self._chroma.get_or_create_collection(
+                        name="engram_memories",
+                        metadata={"hnsw:space": "cosine"},
+                    )
         return self._collection
 
     # ── Internal helpers ────────────────────────────────────────────────────
@@ -145,7 +166,8 @@ class MemoryManager:
             for c in chunks
         ]
 
-        col.upsert(
+        await _run_blocking(
+            col.upsert,
             ids=ids,
             embeddings=embeddings,
             documents=texts,
@@ -235,13 +257,17 @@ class MemoryManager:
         Store or update a memory (async — non-blocking for MCP).
         Writes JSON first, then updates the vector index without blocking the event loop.
         """
-        data, chunks = self._prepare_store(key, content, tags, title)
+        data, chunks = await _run_blocking(self._prepare_store, key, content, tags, title)
         await self._index_chunks_async(key, chunks, data["title"], data["tags"])
         return data
 
     def retrieve_memory(self, key: str) -> Optional[dict]:
         """Retrieve full memory content from JSON store."""
         return self._load_json(key)
+
+    async def retrieve_memory_async(self, key: str) -> Optional[dict]:
+        """Retrieve full memory content from JSON store (async — non-blocking for MCP)."""
+        return await _run_blocking(self._load_json, key)
 
     def retrieve_chunk(self, key: str, chunk_id: int) -> Optional[dict]:
         """
@@ -262,6 +288,10 @@ class MemoryManager:
         except Exception as e:
             print(f"[Engram] retrieve_chunk failed for {doc_id}: {e}", file=sys.stderr)
         return None
+
+    async def retrieve_chunk_async(self, key: str, chunk_id: int) -> Optional[dict]:
+        """Retrieve a specific chunk (async — non-blocking for MCP)."""
+        return await _run_blocking(self.retrieve_chunk, key, chunk_id)
 
     def search_memories(self, query: str, limit: int = 5) -> list[dict]:
         """
@@ -311,20 +341,25 @@ class MemoryManager:
     async def search_memories_async(self, query: str, limit: int = 5) -> list[dict]:
         """
         Async semantic search (non-blocking for MCP).
-        Same return format as search_memories().
+        Embedding runs in the embedder's executor, ChromaDB query runs in the
+        default executor. Same return format as search_memories().
         """
-        col = self._get_collection()
         query_embedding = await embedder.embed_async(query)
 
-        try:
-            results = col.query(
-                query_embeddings=[query_embedding],
-                n_results=min(limit, col.count() or 1),
-                include=["documents", "metadatas", "distances"],
-            )
-        except Exception as e:
-            print(f"[Engram] search failed: {e}", file=sys.stderr)
-            return []
+        col = self._get_collection()
+
+        def _query():
+            try:
+                return col.query(
+                    query_embeddings=[query_embedding],
+                    n_results=min(limit, col.count() or 1),
+                    include=["documents", "metadatas", "distances"],
+                )
+            except Exception as e:
+                print(f"[Engram] search failed: {e}", file=sys.stderr)
+                return None
+
+        results = await _run_blocking(_query)
 
         if not results or not results.get("ids") or not results["ids"][0]:
             return []
@@ -373,6 +408,10 @@ class MemoryManager:
 
         return sorted(memories, key=lambda x: x["updated_at"], reverse=True)
 
+    async def list_memories_async(self) -> list[dict]:
+        """List all memories (async — non-blocking for MCP)."""
+        return await _run_blocking(self.list_memories)
+
     def delete_memory(self, key: str) -> bool:
         """Delete memory from JSON store and ChromaDB index."""
         path = _json_path(key)
@@ -382,6 +421,10 @@ class MemoryManager:
             deleted = True
         self._delete_chunks_from_chroma(key)
         return deleted
+
+    async def delete_memory_async(self, key: str) -> bool:
+        """Delete memory (async — non-blocking for MCP)."""
+        return await _run_blocking(self.delete_memory, key)
 
     def rebuild_index(self):
         """
