@@ -1,6 +1,10 @@
 """
 core/embedder.py — Sentence-transformers wrapper for Engram.
-Lazy-loads the model on first use. Singleton instance used across the app.
+
+The model MUST be loaded eagerly at server startup via embedder._load() before any
+MCP calls arrive. The sync embed/embed_batch methods assert the model is loaded rather
+than lazy-loading — this prevents thread-blocking _load() calls inside the executor
+where asyncio.wait_for() cannot interrupt them.
 
 Provides both sync (embed, embed_batch) and async (embed_async, embed_batch_async)
 interfaces. The async versions run encoding in a thread pool executor so they don't
@@ -31,12 +35,12 @@ class Embedder:
 
     def embed(self, text: str) -> list[float]:
         """Embed a single string. Returns a list of floats."""
-        self._load()
+        assert self._model is not None, "Model not loaded — call _load() at startup before embedding"
         return self._model.encode(text, convert_to_numpy=True).tolist()
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of strings. Processes in chunks of 8 to avoid CPU hangs."""
-        self._load()
+        assert self._model is not None, "Model not loaded — call _load() at startup before embedding"
         BATCH_SIZE = 8
         results = []
         for i in range(0, len(texts), BATCH_SIZE):

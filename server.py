@@ -15,6 +15,7 @@ import os
 import sys
 
 from fastmcp import FastMCP
+from core.embedder import embedder
 from core.memory_manager import memory_manager
 
 mcp = FastMCP("engram")
@@ -234,6 +235,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.rebuild_index:
+        embedder._load()
         count = memory_manager.rebuild_index()
         print(f"Rebuilt index for {count} memories.", file=sys.stderr)
         sys.exit(0)
@@ -253,6 +255,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.import_file:
+        embedder._load()
         with open(args.import_file, "r", encoding="utf-8") as f:
             bundle = json.load(f)
         count = 0
@@ -296,8 +299,15 @@ if __name__ == "__main__":
         print(json.dumps(config, indent=2))
         sys.exit(0)
 
+    # Pre-load the embedding model before accepting connections.
+    # This prevents _load() from running inside the thread pool executor,
+    # where asyncio.wait_for() cannot interrupt it if it blocks.
+    print("[Engram] Pre-loading embedding model...", file=sys.stderr)
+    embedder._load()
+    print("[Engram] Model ready.", file=sys.stderr)
+
     if args.transport == "sse":
-        print(f"🧠 Engram starting — SSE on {args.host}:{args.port}", file=sys.stderr)
+        print(f"[Engram] Starting — SSE on {args.host}:{args.port}", file=sys.stderr)
         mcp.run(transport="sse", host=args.host, port=args.port)
     else:
         mcp.run(transport="stdio")
