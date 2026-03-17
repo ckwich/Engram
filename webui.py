@@ -57,12 +57,17 @@ def api_create():
     tags = data.get("tags", [])
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
-    result = memory_manager.store_memory(
-        key=data["key"],
-        content=data["content"],
-        tags=tags,
-        title=data.get("title"),
-    )
+    try:
+        result = memory_manager.store_memory(
+            key=data["key"],
+            content=data["content"],
+            tags=tags,
+            title=data.get("title"),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
     return jsonify(result), 201
 
 
@@ -74,18 +79,26 @@ def api_update(key):
     tags = data.get("tags", [])
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
-    result = memory_manager.store_memory(
-        key=key,
-        content=data["content"],
-        tags=tags,
-        title=data.get("title"),
-    )
+    try:
+        result = memory_manager.store_memory(
+            key=key,
+            content=data["content"],
+            tags=tags,
+            title=data.get("title"),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
     return jsonify(result)
 
 
 @app.route("/api/memory/<path:key>", methods=["DELETE"])
 def api_delete(key):
-    deleted = memory_manager.delete_memory(key)
+    try:
+        deleted = memory_manager.delete_memory(key)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
     if not deleted:
         return jsonify({"error": "Memory not found"}), 404
     return jsonify({"deleted": True})
@@ -99,4 +112,4 @@ def api_stats():
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=False)

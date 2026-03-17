@@ -189,7 +189,10 @@ async def delete_memory(key: str) -> str:
     Returns:
         Confirmation or not-found message.
     """
-    deleted = await memory_manager.delete_memory_async(key)
+    try:
+        deleted = await memory_manager.delete_memory_async(key)
+    except RuntimeError as e:
+        return f"❌ Engram error: {e}"
     if deleted:
         return f"🗑  Deleted memory: '{key}'"
     return f"❌ Memory not found: '{key}'"
@@ -230,6 +233,16 @@ if __name__ == "__main__":
         "--migrate",
         action="store_true",
         help="Re-chunk memories missing chunk_count and exit",
+    )
+    parser.add_argument(
+        "--health",
+        action="store_true",
+        help="Print server health status and exit",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run store->search->retrieve_chunk->delete integration test and exit",
     )
 
     args = parser.parse_args()
@@ -286,6 +299,67 @@ if __name__ == "__main__":
                 count += 1
         print(f"Migrated {count} memories (added chunk_count)", file=sys.stderr)
         sys.exit(0)
+
+    if args.health:
+        embedder._load()
+        memory_manager._ensure_initialized()
+        stats = memory_manager.get_stats()
+        print(f"Engram Health Check", file=sys.stderr)
+        print(f"  Model:      {embedder._model is not None and 'loaded' or 'NOT LOADED'}", file=sys.stderr)
+        print(f"  Memories:   {stats['total_memories']}", file=sys.stderr)
+        print(f"  Chunks:     {stats['total_chunks']}", file=sys.stderr)
+        print(f"  JSON path:  {stats['json_path']}", file=sys.stderr)
+        print(f"  Chroma path:{stats['chroma_path']}", file=sys.stderr)
+        print(f"Status: OK", file=sys.stderr)
+        sys.exit(0)
+
+    if args.self_test:
+        import asyncio
+        import time
+        embedder._load()
+        memory_manager._ensure_initialized()
+        test_key = "_engram_self_test"
+
+        async def _run_self_test():
+            # Store
+            t0 = time.time()
+            result = await memory_manager.store_memory_async(
+                test_key,
+                "## Self Test\n\nThis is an integration test memory for Engram.",
+                ["selftest"], "Self Test",
+            )
+            print(f"  store:          {result['chunk_count']} chunks in {time.time()-t0:.1f}s", file=sys.stderr)
+
+            # Search
+            t0 = time.time()
+            results = await memory_manager.search_memories_async("integration test memory", limit=3)
+            found = any(r["key"] == test_key for r in results)
+            print(f"  search:         {'found' if found else 'NOT FOUND'} in {time.time()-t0:.1f}s", file=sys.stderr)
+
+            # Retrieve chunk
+            t0 = time.time()
+            chunk = await memory_manager.retrieve_chunk_async(test_key, 0)
+            print(f"  retrieve_chunk: {'ok' if chunk else 'FAILED'} in {time.time()-t0:.1f}s", file=sys.stderr)
+
+            # Delete
+            t0 = time.time()
+            deleted = await memory_manager.delete_memory_async(test_key)
+            print(f"  delete:         {'ok' if deleted else 'FAILED'} in {time.time()-t0:.1f}s", file=sys.stderr)
+
+            # Verify gone
+            verify = await memory_manager.retrieve_memory_async(test_key)
+            print(f"  verify deleted: {'ok' if verify is None else 'STILL EXISTS'}", file=sys.stderr)
+
+            if found and chunk and deleted and verify is None:
+                print(f"Self-test PASSED", file=sys.stderr)
+                return True
+            else:
+                print(f"Self-test FAILED", file=sys.stderr)
+                return False
+
+        print(f"Engram Self-Test: store -> search -> retrieve_chunk -> delete", file=sys.stderr)
+        passed = asyncio.run(_run_self_test())
+        sys.exit(0 if passed else 1)
 
     if args.generate_config:
         config = {

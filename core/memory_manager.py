@@ -14,7 +14,9 @@ No blocking call ever touches the event loop. Sync methods (used by webui/CLI) c
 the same blocking code directly.
 
 ChromaDB operations have a 30-second timeout via asyncio.wait_for() to prevent
-indefinite hangs from SQLite locks or HNSW stalls.
+indefinite hangs from SQLite locks or HNSW stalls. ChromaDB work runs in a
+dedicated executor (_chroma_executor) so zombie threads from timed-out ops
+cannot exhaust the default executor and block other async work.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import hashlib
 import json
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -36,6 +39,10 @@ from core.embedder import embedder
 # ── Limits ────────────────────────────────────────────────────────────────────
 MAX_MEMORY_CHARS = 15_000
 CHROMA_TIMEOUT = 30.0  # seconds — timeout for ChromaDB operations in async paths
+
+# Dedicated executor for ChromaDB ops. If a Chroma call times out, the zombie
+# thread stays here and cannot fill the default executor used by other async work.
+_chroma_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="chroma")
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -71,14 +78,22 @@ async def _run_blocking(func, *args, **kwargs):
     return await loop.run_in_executor(None, partial(func, *args, **kwargs))
 
 
-async def _run_blocking_timed(func, *args, **kwargs):
-    """Run a blocking function with CHROMA_TIMEOUT. Raises RuntimeError on timeout."""
+async def _run_chroma(func, *args, **kwargs):
+    """Run a ChromaDB function in the dedicated Chroma executor with timeout.
+    If the call times out, the zombie thread remains in _chroma_executor (isolated
+    from the default executor) and a RuntimeError is raised."""
+    loop = asyncio.get_running_loop()
     try:
         return await asyncio.wait_for(
-            _run_blocking(func, *args, **kwargs),
+            loop.run_in_executor(_chroma_executor, partial(func, *args, **kwargs)),
             timeout=CHROMA_TIMEOUT,
         )
     except asyncio.TimeoutError:
+        print(
+            f"[Engram] WARNING: ChromaDB operation timed out after {CHROMA_TIMEOUT}s. "
+            f"A zombie thread may remain in _chroma_executor.",
+            file=sys.stderr,
+        )
         raise RuntimeError(
             f"ChromaDB operation timed out after {CHROMA_TIMEOUT}s. "
             f"The database may be locked by another process."
@@ -133,14 +148,12 @@ class MemoryManager:
             raise
 
     def _delete_chunks_from_chroma(self, key: str):
-        """Remove all existing chunks for a key from ChromaDB."""
+        """Remove all existing chunks for a key from ChromaDB.
+        Raises on failure so callers can handle sync drift."""
         col = self._get_collection()
-        try:
-            results = col.get(where={"parent_key": key})
-            if results and results.get("ids"):
-                col.delete(ids=results["ids"])
-        except Exception as e:
-            print(f"[Engram] Failed to delete chunks for key '{key}': {e}", file=sys.stderr)
+        results = col.get(where={"parent_key": key})
+        if results and results.get("ids"):
+            col.delete(ids=results["ids"])
 
     def _index_chunks(self, key: str, chunks: list[dict], title: str, tags: list[str]):
         """Embed and upsert chunks into ChromaDB (sync — used by webui/CLI)."""
@@ -198,7 +211,7 @@ class MemoryManager:
                 metadatas=metadatas,
             )
 
-        await _run_blocking_timed(_do_upsert)
+        await _run_chroma(_do_upsert)
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -252,8 +265,14 @@ class MemoryManager:
         # 2. Write JSON (source of truth) FIRST — before touching ChromaDB
         self._save_json(data)
 
-        # 3. Remove old chunks from ChromaDB (index cleanup, after JSON is safe)
-        self._delete_chunks_from_chroma(key)
+        # 3. Remove old chunks from ChromaDB (index cleanup, after JSON is safe).
+        #    If this fails, stale chunks may remain but JSON is already persisted.
+        #    The new chunks will still be indexed, and rebuild_index can fix drift.
+        try:
+            self._delete_chunks_from_chroma(key)
+        except Exception as e:
+            print(f"[Engram] WARNING: Failed to delete old chunks for '{key}': {e}. "
+                  f"Stale chunks may remain until next rebuild_index.", file=sys.stderr)
 
         return data, chunks
 
@@ -284,7 +303,7 @@ class MemoryManager:
         Store or update a memory (async — non-blocking for MCP).
         Writes JSON first, then updates the vector index without blocking the event loop.
         """
-        data, chunks = await _run_blocking_timed(self._prepare_store, key, content, tags, title)
+        data, chunks = await _run_chroma(self._prepare_store, key, content, tags, title)
         await self._index_chunks_async(key, chunks, data["title"], data["tags"])
         return data
 
@@ -318,7 +337,7 @@ class MemoryManager:
 
     async def retrieve_chunk_async(self, key: str, chunk_id: int) -> Optional[dict]:
         """Retrieve a specific chunk (async — non-blocking for MCP)."""
-        return await _run_blocking_timed(self.retrieve_chunk, key, chunk_id)
+        return await _run_chroma(self.retrieve_chunk, key, chunk_id)
 
     def search_memories(self, query: str, limit: int = 5) -> list[dict]:
         """
@@ -386,7 +405,7 @@ class MemoryManager:
                 print(f"[Engram] search failed: {e}", file=sys.stderr)
                 return None
 
-        results = await _run_blocking_timed(_do_query)
+        results = await _run_chroma(_do_query)
 
         if not results or not results.get("ids") or not results["ids"][0]:
             return []
@@ -440,18 +459,29 @@ class MemoryManager:
         return await _run_blocking(self.list_memories)
 
     def delete_memory(self, key: str) -> bool:
-        """Delete memory from JSON store and ChromaDB index."""
+        """Delete memory from ChromaDB index first, then JSON store.
+        Chroma-first ordering prevents ghost search results: if Chroma delete
+        fails, JSON is still intact (consistent state). If Chroma succeeds but
+        JSON delete fails (unlikely), rebuild_index can recover."""
         path = _json_path(key)
-        deleted = False
-        if path.exists():
-            path.unlink()
-            deleted = True
-        self._delete_chunks_from_chroma(key)
-        return deleted
+        if not path.exists():
+            return False
+
+        # 1. Delete from ChromaDB first — prevents ghost search results
+        try:
+            self._delete_chunks_from_chroma(key)
+        except Exception as e:
+            print(f"[Engram] WARNING: Failed to delete chunks for '{key}': {e}. "
+                  f"JSON not deleted to keep consistent state.", file=sys.stderr)
+            raise RuntimeError(f"Failed to delete '{key}' from index: {e}")
+
+        # 2. Delete JSON (source of truth) — Chroma is already clean
+        path.unlink()
+        return True
 
     async def delete_memory_async(self, key: str) -> bool:
         """Delete memory (async — non-blocking for MCP)."""
-        return await _run_blocking_timed(self.delete_memory, key)
+        return await _run_chroma(self.delete_memory, key)
 
     def rebuild_index(self):
         """

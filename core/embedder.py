@@ -32,10 +32,12 @@ class Embedder:
             from sentence_transformers import SentenceTransformer
 
             # Try cached/local first to avoid network dependency on startup.
-            # Falls back to download only if cache miss (first run).
+            # Falls back to download only on OSError (cache miss / first run).
+            # Other errors (corrupt cache, permission denied) propagate immediately
+            # so they're diagnosed rather than masked by a slow network fallback.
             try:
                 self._model = SentenceTransformer(MODEL_NAME, local_files_only=True)
-            except Exception:
+            except OSError:
                 print(f"[Engram] Model not cached, downloading from HuggingFace...", file=sys.stderr)
                 self._model = SentenceTransformer(MODEL_NAME)
 
