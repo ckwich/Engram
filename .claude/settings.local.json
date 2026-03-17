@@ -8,7 +8,8 @@
       "Bash(./venv/Scripts/python server.py --help)",
       "Bash(./venv/Scripts/python -c \"from core.memory_manager import memory_manager; print\\('ok'\\)\")",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(./venv/Scripts/python server.py --rebuild-index 2>&1)"
     ]
   }
 }
