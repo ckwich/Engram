@@ -10,7 +10,11 @@ If ChromaDB is lost or corrupted, it can be rebuilt from JSON via rebuild_index(
 
 Async methods (used by MCP server) run ALL blocking I/O — ChromaDB queries, JSON
 file reads/writes, directory globs — in a thread pool executor via _run_blocking().
-Sync methods (used by webui/CLI) call the same blocking code directly.
+No blocking call ever touches the event loop. Sync methods (used by webui/CLI) call
+the same blocking code directly.
+
+ChromaDB operations have a 30-second timeout via asyncio.wait_for() to prevent
+indefinite hangs from SQLite locks or HNSW stalls.
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ from core.embedder import embedder
 
 # ── Limits ────────────────────────────────────────────────────────────────────
 MAX_MEMORY_CHARS = 15_000
+CHROMA_TIMEOUT = 30.0  # seconds — timeout for ChromaDB operations in async paths
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -66,6 +71,20 @@ async def _run_blocking(func, *args, **kwargs):
     return await loop.run_in_executor(None, partial(func, *args, **kwargs))
 
 
+async def _run_blocking_timed(func, *args, **kwargs):
+    """Run a blocking function with CHROMA_TIMEOUT. Raises RuntimeError on timeout."""
+    try:
+        return await asyncio.wait_for(
+            _run_blocking(func, *args, **kwargs),
+            timeout=CHROMA_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        raise RuntimeError(
+            f"ChromaDB operation timed out after {CHROMA_TIMEOUT}s. "
+            f"The database may be locked by another process."
+        )
+
+
 class MemoryManager:
     def __init__(self):
         self._chroma: Optional[chromadb.ClientAPI] = None
@@ -86,6 +105,10 @@ class MemoryManager:
                         metadata={"hnsw:space": "cosine"},
                     )
         return self._collection
+
+    def _ensure_initialized(self):
+        """Eagerly initialize ChromaDB. Call at server startup before mcp.run()."""
+        self._get_collection()
 
     # ── Internal helpers ────────────────────────────────────────────────────
 
@@ -147,8 +170,8 @@ class MemoryManager:
         )
 
     async def _index_chunks_async(self, key: str, chunks: list[dict], title: str, tags: list[str]):
-        """Embed and upsert chunks into ChromaDB (async — non-blocking for MCP)."""
-        col = self._get_collection()
+        """Embed and upsert chunks into ChromaDB (async — non-blocking for MCP).
+        ALL blocking ops run in executor — nothing touches the event loop directly."""
         if not chunks:
             return
 
@@ -166,13 +189,16 @@ class MemoryManager:
             for c in chunks
         ]
 
-        await _run_blocking(
-            col.upsert,
-            ids=ids,
-            embeddings=embeddings,
-            documents=texts,
-            metadatas=metadatas,
-        )
+        def _do_upsert():
+            col = self._get_collection()
+            col.upsert(
+                ids=ids,
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=metadatas,
+            )
+
+        await _run_blocking_timed(_do_upsert)
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -185,7 +211,8 @@ class MemoryManager:
     ) -> tuple[dict, list[dict]]:
         """
         Shared preparation for store_memory / store_memory_async.
-        Validates size, builds the data dict, writes JSON, returns (data, chunks).
+        Validates size, builds the data dict, writes JSON first (source of truth),
+        then cleans up old ChromaDB chunks. Returns (data, chunks).
         Raises ValueError if content exceeds MAX_MEMORY_CHARS.
         """
         if len(content) > MAX_MEMORY_CHARS:
@@ -218,15 +245,15 @@ class MemoryManager:
             "lines": len(content_with_log.splitlines()),
         }
 
-        # 1. Remove old chunks from ChromaDB
-        self._delete_chunks_from_chroma(key)
-
-        # 2. Chunk content and set count before saving
+        # 1. Chunk content and set count
         chunks = chunk_content(content_with_log)
         data["chunk_count"] = len(chunks)
 
-        # 3. Write JSON (source of truth) — with chunk_count included
+        # 2. Write JSON (source of truth) FIRST — before touching ChromaDB
         self._save_json(data)
+
+        # 3. Remove old chunks from ChromaDB (index cleanup, after JSON is safe)
+        self._delete_chunks_from_chroma(key)
 
         return data, chunks
 
@@ -257,7 +284,7 @@ class MemoryManager:
         Store or update a memory (async — non-blocking for MCP).
         Writes JSON first, then updates the vector index without blocking the event loop.
         """
-        data, chunks = await _run_blocking(self._prepare_store, key, content, tags, title)
+        data, chunks = await _run_blocking_timed(self._prepare_store, key, content, tags, title)
         await self._index_chunks_async(key, chunks, data["title"], data["tags"])
         return data
 
@@ -291,7 +318,7 @@ class MemoryManager:
 
     async def retrieve_chunk_async(self, key: str, chunk_id: int) -> Optional[dict]:
         """Retrieve a specific chunk (async — non-blocking for MCP)."""
-        return await _run_blocking(self.retrieve_chunk, key, chunk_id)
+        return await _run_blocking_timed(self.retrieve_chunk, key, chunk_id)
 
     def search_memories(self, query: str, limit: int = 5) -> list[dict]:
         """
@@ -343,12 +370,12 @@ class MemoryManager:
         Async semantic search (non-blocking for MCP).
         Embedding runs in the embedder's executor, ChromaDB query runs in the
         default executor. Same return format as search_memories().
+        ALL blocking ops run in executor — nothing touches the event loop directly.
         """
         query_embedding = await embedder.embed_async(query)
 
-        col = self._get_collection()
-
-        def _query():
+        def _do_query():
+            col = self._get_collection()
             try:
                 return col.query(
                     query_embeddings=[query_embedding],
@@ -359,7 +386,7 @@ class MemoryManager:
                 print(f"[Engram] search failed: {e}", file=sys.stderr)
                 return None
 
-        results = await _run_blocking(_query)
+        results = await _run_blocking_timed(_do_query)
 
         if not results or not results.get("ids") or not results["ids"][0]:
             return []
@@ -424,7 +451,7 @@ class MemoryManager:
 
     async def delete_memory_async(self, key: str) -> bool:
         """Delete memory (async — non-blocking for MCP)."""
-        return await _run_blocking(self.delete_memory, key)
+        return await _run_blocking_timed(self.delete_memory, key)
 
     def rebuild_index(self):
         """

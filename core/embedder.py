@@ -28,9 +28,17 @@ class Embedder:
 
     def _load(self):
         if self._model is None:
-            print(f"[Engram] Loading embedding model '{MODEL_NAME}'... (first run only)", file=sys.stderr)
+            print(f"[Engram] Loading embedding model '{MODEL_NAME}'...", file=sys.stderr)
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(MODEL_NAME)
+
+            # Try cached/local first to avoid network dependency on startup.
+            # Falls back to download only if cache miss (first run).
+            try:
+                self._model = SentenceTransformer(MODEL_NAME, local_files_only=True)
+            except Exception:
+                print(f"[Engram] Model not cached, downloading from HuggingFace...", file=sys.stderr)
+                self._model = SentenceTransformer(MODEL_NAME)
+
             print(f"[Engram] Model loaded.", file=sys.stderr)
 
     def embed(self, text: str) -> list[float]:

@@ -299,12 +299,15 @@ if __name__ == "__main__":
         print(json.dumps(config, indent=2))
         sys.exit(0)
 
-    # Pre-load the embedding model before accepting connections.
-    # This prevents _load() from running inside the thread pool executor,
-    # where asyncio.wait_for() cannot interrupt it if it blocks.
+    # Pre-load everything before accepting connections so no blocking init
+    # happens on the event loop during MCP tool calls.
     print("[Engram] Pre-loading embedding model...", file=sys.stderr)
     embedder._load()
     print("[Engram] Model ready.", file=sys.stderr)
+
+    print("[Engram] Initializing ChromaDB...", file=sys.stderr)
+    memory_manager._ensure_initialized()
+    print("[Engram] ChromaDB ready.", file=sys.stderr)
 
     if args.transport == "sse":
         print(f"[Engram] Starting — SSE on {args.host}:{args.port}", file=sys.stderr)
