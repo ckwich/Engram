@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from typing import Union
 
 
 MODEL_NAME = "all-MiniLM-L6-v2"

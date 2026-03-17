@@ -232,7 +232,12 @@ async function doSearch(query) {
       else if (btn.dataset.action === 'view-edit') openViewModal(key);
     });
   } catch (err) {
-    searchResults.innerHTML = `<div class="text-muted" style="padding:1rem;">Search error: ${err.message}</div>`;
+    searchResults.textContent = '';
+    const errDiv = document.createElement('div');
+    errDiv.className = 'text-muted';
+    errDiv.style.padding = '1rem';
+    errDiv.textContent = 'Search error: ' + err.message;
+    searchResults.appendChild(errDiv);
   }
 }
 

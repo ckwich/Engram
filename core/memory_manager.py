@@ -379,7 +379,11 @@ class MemoryManager:
             # ChromaDB cosine distance: 0 = identical, 2 = opposite
             # Convert to a 0–1 similarity score
             score = round(1 - (distance / 2), 3)
-            snippet = (doc[:150].rsplit(" ", 1)[0] + "...") if len(doc) > 150 else doc
+            if len(doc) > 150:
+                truncated = doc[:150].rsplit(" ", 1)
+                snippet = (truncated[0] if len(truncated) > 1 else doc[:147]) + "..."
+            else:
+                snippet = doc
             parent_key = meta.get("parent_key", "unknown")
             output.append({
                 "key": parent_key,
