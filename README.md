@@ -219,6 +219,19 @@ engram/
 
 **Batched embedding.** `embed_batch()` processes in groups of 8 to prevent CPU timeouts on large memories.
 
+**Non-blocking encoding.** The MCP server uses async embedding (`embed_batch_async`) that runs in a thread pool executor, so encoding never blocks the event loop. This prevents MCP client timeouts when storing large memories with many chunks.
+
+**15,000 character limit per memory.** `store_memory` rejects content over 15,000 characters with a helpful error. For large documents, split into multiple memories with specific keys that follow a naming pattern:
+
+```
+lumen_adr_018          # ADR section 1
+lumen_adr_019          # ADR section 2
+sylvara_arch_overview  # Architecture overview
+sylvara_arch_api       # Architecture — API layer
+```
+
+This produces better chunking, more precise search results, and avoids embedding timeouts.
+
 **Agents must explicitly store.** Engram never writes memories automatically. Every `store_memory` call is an intentional act by the agent or user. No surprise writes.
 
 ---

@@ -37,7 +37,7 @@ async def search_memories(query: str, limit: int = 5) -> str:
     Returns:
         Scored list of matching chunks with snippets. Score is 0.0–1.0 (higher = more relevant).
     """
-    results = memory_manager.search_memories(query, limit=min(limit, 20))
+    results = await memory_manager.search_memories_async(query, limit=min(limit, 20))
     if not results:
         return f"🔍 No memories found for '{query}'"
 
@@ -147,8 +147,10 @@ async def store_memory(
     Args:
         key: Unique identifier (e.g. 'sylvara_arbostar_decision', 'lumen_architecture').
              Use snake_case. Be specific — keys are used for deterministic retrieval.
-        content: The memory content. Markdown is supported and improves chunking quality.
-                 Use headers (##, ###) to create natural chunk boundaries.
+        content: The memory content (max 15,000 chars). Markdown is supported and improves
+                 chunking quality. Use headers (##, ###) to create natural chunk boundaries.
+                 For larger documents, split into multiple memories with specific keys
+                 (e.g. 'lumen_adr_018', 'lumen_adr_019').
         title: Human-readable title (optional, defaults to key).
         tags: Comma-separated tags for browsing (e.g. 'sylvara,decision,architecture').
 
@@ -157,13 +159,15 @@ async def store_memory(
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     try:
-        result = memory_manager.store_memory(key, content, tag_list, title or None)
+        result = await memory_manager.store_memory_async(key, content, tag_list, title or None)
         return (
             f"✅ Stored: '{result['title']}'\n"
             f"   Key: {key}\n"
             f"   Chunks: {result.get('chunk_count', '?')}\n"
             f"   Chars: {result['chars']}"
         )
+    except ValueError as e:
+        return f"⚠️ Memory too large: {e}"
     except Exception as e:
         return f"❌ Failed to store '{key}': {e}"
 

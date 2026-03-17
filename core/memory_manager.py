@@ -22,6 +22,9 @@ import chromadb
 from core.chunker import chunk_content
 from core.embedder import embedder
 
+# ── Limits ────────────────────────────────────────────────────────────────────
+MAX_MEMORY_CHARS = 15_000
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent.parent
 JSON_DIR = PROJECT_ROOT / "data" / "memories"
@@ -96,7 +99,7 @@ class MemoryManager:
             print(f"[Engram] Failed to delete chunks for key '{key}': {e}", file=sys.stderr)
 
     def _index_chunks(self, key: str, chunks: list[dict], title: str, tags: list[str]):
-        """Embed and upsert chunks into ChromaDB."""
+        """Embed and upsert chunks into ChromaDB (sync — used by webui/CLI)."""
         col = self._get_collection()
         if not chunks:
             return
@@ -122,19 +125,54 @@ class MemoryManager:
             metadatas=metadatas,
         )
 
+    async def _index_chunks_async(self, key: str, chunks: list[dict], title: str, tags: list[str]):
+        """Embed and upsert chunks into ChromaDB (async — non-blocking for MCP)."""
+        col = self._get_collection()
+        if not chunks:
+            return
+
+        texts = [c["text"] for c in chunks]
+        embeddings = await embedder.embed_batch_async(texts)
+
+        ids = [_chunk_doc_id(key, c["chunk_id"]) for c in chunks]
+        metadatas = [
+            {
+                "parent_key": key,
+                "chunk_id": c["chunk_id"],
+                "title": title,
+                "tags": ",".join(tags),
+            }
+            for c in chunks
+        ]
+
+        col.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=texts,
+            metadatas=metadatas,
+        )
+
     # ── Public API ──────────────────────────────────────────────────────────
 
-    def store_memory(
+    def _prepare_store(
         self,
         key: str,
         content: str,
         tags: list[str] = None,
         title: str = None,
-    ) -> dict:
+    ) -> tuple[dict, list[dict]]:
         """
-        Store or update a memory. Writes JSON first, then updates the vector index.
-        Returns the stored memory metadata dict.
+        Shared preparation for store_memory / store_memory_async.
+        Validates size, builds the data dict, writes JSON, returns (data, chunks).
+        Raises ValueError if content exceeds MAX_MEMORY_CHARS.
         """
+        if len(content) > MAX_MEMORY_CHARS:
+            raise ValueError(
+                f"Content is {len(content):,} chars — exceeds the {MAX_MEMORY_CHARS:,} char limit. "
+                f"Split this into smaller memories with more specific keys "
+                f"(e.g. '{key}_part1', '{key}_part2') for better chunking and retrieval."
+            )
+
         tags = tags or []
         now = _now()
 
@@ -168,9 +206,37 @@ class MemoryManager:
         # 3. Write JSON (source of truth) — with chunk_count included
         self._save_json(data)
 
-        # 4. Index new chunks in ChromaDB
-        self._index_chunks(key, chunks, resolved_title, tags)
+        return data, chunks
 
+    def store_memory(
+        self,
+        key: str,
+        content: str,
+        tags: list[str] = None,
+        title: str = None,
+    ) -> dict:
+        """
+        Store or update a memory (sync — used by webui/CLI).
+        Writes JSON first, then updates the vector index.
+        Returns the stored memory metadata dict.
+        """
+        data, chunks = self._prepare_store(key, content, tags, title)
+        self._index_chunks(key, chunks, data["title"], data["tags"])
+        return data
+
+    async def store_memory_async(
+        self,
+        key: str,
+        content: str,
+        tags: list[str] = None,
+        title: str = None,
+    ) -> dict:
+        """
+        Store or update a memory (async — non-blocking for MCP).
+        Writes JSON first, then updates the vector index without blocking the event loop.
+        """
+        data, chunks = self._prepare_store(key, content, tags, title)
+        await self._index_chunks_async(key, chunks, data["title"], data["tags"])
         return data
 
     def retrieve_memory(self, key: str) -> Optional[dict]:
@@ -239,6 +305,47 @@ class MemoryManager:
             })
 
         # Sort by score descending
+        output.sort(key=lambda x: x["score"], reverse=True)
+        return output
+
+    async def search_memories_async(self, query: str, limit: int = 5) -> list[dict]:
+        """
+        Async semantic search (non-blocking for MCP).
+        Same return format as search_memories().
+        """
+        col = self._get_collection()
+        query_embedding = await embedder.embed_async(query)
+
+        try:
+            results = col.query(
+                query_embeddings=[query_embedding],
+                n_results=min(limit, col.count() or 1),
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as e:
+            print(f"[Engram] search failed: {e}", file=sys.stderr)
+            return []
+
+        if not results or not results.get("ids") or not results["ids"][0]:
+            return []
+
+        output = []
+        for doc, meta, distance in zip(
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        ):
+            score = round(1 - (distance / 2), 3)
+            snippet = doc[:150] + "..." if len(doc) > 150 else doc
+            output.append({
+                "key": meta["parent_key"],
+                "chunk_id": meta["chunk_id"],
+                "title": meta.get("title", meta["parent_key"]),
+                "tags": [t for t in meta.get("tags", "").split(",") if t],
+                "score": score,
+                "snippet": snippet,
+            })
+
         output.sort(key=lambda x: x["score"], reverse=True)
         return output
 

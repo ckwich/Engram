@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(python:*)",
+      "Bash(venv/Scripts/python.exe -c \"from core.memory_manager import memory_manager; print\\('ok'\\)\")",
+      "Bash(venv/Scripts/python.exe -c \"\nimport asyncio\nfrom core.memory_manager import memory_manager\n\nasync def test\\(\\):\n    try:\n        await memory_manager.store_memory_async\\('too_big', 'x' * 16000, ['test'], 'Too Big'\\)\n        print\\('FAIL: should have raised ValueError'\\)\n    except ValueError as e:\n        print\\(f'Guard works: {e}'\\)\n        print\\('PASS'\\)\n\nasyncio.run\\(test\\(\\)\\)\n\")"
     ]
   }
 }
