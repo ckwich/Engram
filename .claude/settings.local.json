@@ -23,7 +23,13 @@
       "Bash(grep -n \"key.*strip\\\\|key.*empty\" /c/dev/engram -r --include=*.py)",
       "Bash(find C:/dev/engram -name *.py -type f)",
       "Bash(grep:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(/c/dev/engram/venv/Scripts/python.exe -m py_compile server.py core/memory_manager.py core/embedder.py core/chunker.py webui.py 2>&1)",
+      "Bash(/c/dev/engram/venv/Scripts/python.exe << 'EOF'\n# Test the rsplit edge case\ndoc_no_spaces = \"a\" * 160  # longer than 150, but no spaces\nresult = doc_no_spaces[:150].rsplit\\(\" \", 1\\)\nprint\\(f\"rsplit on 150 chars with no spaces: {result}\"\\)\nprint\\(f\"Takes first element: {result[0]}\"\\)\nEOF)",
+      "Bash(/c/dev/engram/venv/Scripts/python.exe << 'EOF'\n# Simulate the XSS risk\nerr_message = '<img src=x onerror=alert\\(\"XSS\"\\)>'\nhtml_unsafe = f'<div>Search error: {err_message}</div>'\nprint\\(\"Unsafe HTML:\"\\)\nprint\\(html_unsafe\\)\nprint\\(\"\\\\nThis would execute JavaScript when set via innerHTML!\"\\)\nEOF)",
+      "Bash(/c/dev/engram/venv/Scripts/python.exe << 'EOF'\nfrom pathlib import Path\nimport sys\nsys.path.insert\\(0, str\\(Path.cwd\\(\\)\\)\\)\nfrom core.chunker import chunk_content\n\n# Test empty and whitespace\nresult1 = chunk_content\\(\"\"\\)\nresult2 = chunk_content\\(\"   \\\\n\\\\n   \"\\)\nresult3 = chunk_content\\(\"\\\\t\\\\n\"\\)\n\nprint\\(\"Empty string:\", result1\\)\nprint\\(\"Whitespace:\", result2\\)\nprint\\(\"Tab/newline:\", result3\\)\n\n# All should return what?\nprint\\(\"\\\\nAre they equal?\", result1 == result2 == result3\\)\nEOF)",
+      "Bash(./venv/Scripts/python -c \"from core.memory_manager import memory_manager; print\\(''ok''\\)\")",
+      "Bash(./venv/Scripts/python -c \"\nfrom core.embedder import embedder\nembedder._load\\(\\)\n\" 2>/dev/null)"
     ]
   }
 }
