@@ -65,7 +65,7 @@ search_memories("audio transcription pipeline")
 
 ### Markdown-Aware Chunking
 
-Content is split on markdown headers first, then paragraph boundaries, then hard size limits. This means a 5,000-character architectural decision doc doesn't get dumped into a single chunk — it becomes 6-8 semantically coherent pieces, each independently retrievable.
+Content is split on markdown headers first, then paragraph boundaries, then hard size limits (800 chars per chunk). This means a 5,000-character architectural decision doc doesn't get dumped into a single chunk — it becomes 6-8 semantically coherent pieces, each independently retrievable.
 
 ---
 
@@ -171,11 +171,32 @@ Features:
 - **Tag filtering** — sidebar tag browser across all memories
 - **Stats header** — live memory count and total chunk count
 
+### Web API Endpoints
+
+The dashboard also exposes a REST API:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/search?q=...&limit=10` | Semantic search (up to 50 results) |
+| `GET` | `/api/chunk/<key>/<chunk_id>` | Retrieve a single chunk |
+| `GET` | `/api/memory/<key>` | Retrieve full memory |
+| `POST` | `/api/memory` | Create a memory (JSON body: `key`, `content`, `tags`, `title`) |
+| `PUT` | `/api/memory/<key>` | Update a memory (JSON body: `content`, `tags`, `title`) |
+| `DELETE` | `/api/memory/<key>` | Delete a memory |
+| `GET` | `/api/stats` | Memory count, chunk count, paths |
+| `GET` | `/health` | Health check (model status, counts) |
+
 ---
 
 ## CLI Utilities
 
 ```bash
+# Start the MCP server (stdio transport, default)
+python server.py
+
+# Start with SSE transport for remote access
+python server.py --transport sse --port 5100
+
 # Rebuild the ChromaDB index from JSON files (recovery tool)
 python server.py --rebuild-index
 
@@ -189,7 +210,13 @@ python server.py --import-file engram_export_2026-03-16.json
 # Fix chunk_count on legacy memories
 python server.py --migrate
 
-# Generate MCP client config
+# Health check — print model status, memory count, paths
+python server.py --health
+
+# Integration self-test (store → search → retrieve_chunk → delete)
+python server.py --self-test
+
+# Generate MCP client config JSON
 python server.py --generate-config
 ```
 
@@ -200,16 +227,28 @@ python server.py --generate-config
 ```
 engram/
 ├── core/
-│   ├── embedder.py        # sentence-transformers wrapper (lazy load, batched)
-│   ├── chunker.py         # markdown-aware content chunker
-│   └── memory_manager.py  # storage engine (JSON + ChromaDB, JSON-first)
+│   ├── embedder.py        # sentence-transformers wrapper (lazy load, batched, async)
+│   ├── chunker.py         # markdown-aware content chunker (800 char max per chunk)
+│   └── memory_manager.py  # storage engine (JSON + ChromaDB, sync + async APIs)
 ├── data/
 │   ├── memories/          # JSON flat files — source of truth
 │   └── chroma/            # ChromaDB vector index — rebuilt from JSON if lost
+├── templates/
+│   └── index.html         # web dashboard template
 ├── server.py              # FastMCP server (stdio + SSE transport)
-├── webui.py               # Flask web dashboard
-└── install.py             # setup wizard
+├── webui.py               # Flask web dashboard + REST API
+├── install.py             # setup wizard
+└── requirements.txt       # pinned dependencies
 ```
+
+### Dependencies
+
+| Package | Version | Purpose |
+|---|---|---|
+| `fastmcp` | ~3.1.1 | MCP server layer (stdio + SSE) |
+| `sentence-transformers` | ~5.3.0 | Local semantic embeddings |
+| `chromadb` | ~1.5.5 | Persistent vector store |
+| `flask` | ~3.1.3 | Web dashboard |
 
 ### Design Decisions
 
@@ -220,6 +259,12 @@ engram/
 **Batched embedding.** `embed_batch()` processes in groups of 8 to prevent CPU timeouts on large memories.
 
 **Non-blocking encoding.** The MCP server uses async embedding (`embed_batch_async`) that runs in a thread pool executor, so encoding never blocks the event loop. This prevents MCP client timeouts when storing large memories with many chunks.
+
+**Dedicated ChromaDB executor.** ChromaDB operations run in an isolated 4-thread pool with 30-second timeouts. If a ChromaDB call times out, the zombie thread stays isolated and cannot exhaust the default executor used by other async work.
+
+**Eager startup initialization.** Both the embedding model and ChromaDB are loaded before the MCP server accepts connections. No blocking initialization during tool calls.
+
+**Thread-safe collection init.** Double-checked locking ensures ChromaDB collection initialization is safe across concurrent threads.
 
 **15,000 character limit per memory.** `store_memory` rejects content over 15,000 characters with a helpful error. For large documents, split into multiple memories with specific keys that follow a naming pattern:
 
@@ -233,6 +278,8 @@ sylvara_arch_api       # Architecture — API layer
 This produces better chunking, more precise search results, and avoids embedding timeouts.
 
 **Agents must explicitly store.** Engram never writes memories automatically. Every `store_memory` call is an intentional act by the agent or user. No surprise writes.
+
+**Audit trail.** Every store appends a timestamped log line (`Created via Engram` / `Updated via Engram`) to the content, providing a built-in audit trail.
 
 ---
 
@@ -249,7 +296,8 @@ Memories are stored as plain JSON files:
   "created_at": "2026-03-16T14:23:00-07:00",
   "updated_at": "2026-03-16T14:23:00-07:00",
   "chunk_count": 19,
-  "chars": 7099
+  "chars": 7099,
+  "lines": 142
 }
 ```
 
