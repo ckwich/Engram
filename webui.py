@@ -124,4 +124,6 @@ def health():
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    from core.embedder import embedder
+    embedder._load()
     app.run(host="0.0.0.0", port=5000, debug=False)
