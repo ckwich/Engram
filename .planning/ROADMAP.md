@@ -29,7 +29,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Skill enforces tagging standards (project name, domain, type tag from decision/pattern/constraint/gotcha/architecture)
   3. Skill rejects or truncates content over 3000 characters before storing
   4. Skill file exists at ~/.claude/skills/engramize/skill.md and is available in all sessions regardless of working directory
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 01-PLAN.md — Create ~/.claude/skills/engramize/SKILL.md with infer-then-confirm workflow and all convention enforcement
 
 ### Phase 2: Core Memory Enhancements
 **Goal**: Every memory retrieval is tracked, duplicate stores are intercepted with a warning, and memories can be explicitly linked to related memories — all as a coherent quality layer before the indexer writes bulk content
@@ -96,7 +98,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Engramize Skill | 0/TBD | Not started | - |
+| 1. Engramize Skill | 0/1 | Not started | - |
 | 2. Core Memory Enhancements | 0/TBD | Not started | - |
 | 3. Codebase Indexer | 0/TBD | Not started | - |
 | 4. Staleness Detection | 0/TBD | Not started | - |
