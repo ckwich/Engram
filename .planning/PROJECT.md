@@ -23,10 +23,9 @@ AI agents working on any indexed project should automatically receive relevant a
 - ✓ Async MCP server with dedicated executors — existing
 - ✓ CLI modes (rebuild-index, export, import, migrate, health, self-test) — existing
 - ✓ SSE remote transport support — existing
+- ✓ Engramize skill for natural mid-session memory creation — Phase 1
 
 ### Active
-
-- [ ] Engramize skill for natural mid-session memory creation
 - [ ] last_accessed tracking on every retrieval
 - [ ] Deduplication gate on store_memory (0.92 cosine threshold, configurable)
 - [ ] related_to relationship field with get_related_memories MCP tool
@@ -102,4 +101,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-29 after initialization*
+*Last updated: 2026-03-31 after Phase 1 completion*
