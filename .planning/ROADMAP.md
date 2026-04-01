@@ -43,7 +43,11 @@ Plans:
   3. Caller can pass force=True to override the deduplication warning and write anyway; dedup threshold is configurable in config
   4. Calling get_related_memories(key) returns all memories explicitly linked to or from that key (bidirectional)
   5. WebUI memory detail view shows related memories as clickable links
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 02-01-PLAN.md — Extend memory_manager.py: config loader, DuplicateMemoryError, audit strip, dedup gate, last_accessed fire-and-forget, related_to field, get_related_memories; extend --self-test
+- [ ] 02-02-PLAN.md — Update server.py: add force/related_to to store_memory MCP tool, add get_related_memories MCP tool
+- [ ] 02-03-PLAN.md — Update webui.py and index.html: /api/related endpoint, dedup 409 handling, last_accessed and related memories in view modal
 **Research flags**:
   - Audit log suffix must be stripped before embedding comparison (DEDU-04) — read CONCERNS.md before planning
   - ChromaDB rejects empty arrays — related_to must be stored as comma-string in ChromaDB metadata, list in JSON only (RELM-02)
@@ -99,7 +103,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Engramize Skill | 0/1 | Not started | - |
-| 2. Core Memory Enhancements | 0/TBD | Not started | - |
+| 2. Core Memory Enhancements | 0/3 | Not started | - |
 | 3. Codebase Indexer | 0/TBD | Not started | - |
 | 4. Staleness Detection | 0/TBD | Not started | - |
 | 5. Session Evaluator | 0/TBD | Not started | - |
