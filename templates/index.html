@@ -122,6 +122,10 @@
     <div class="meta text-muted" id="view-meta" style="font-size:0.8rem; margin-bottom:0.75rem;"></div>
     <div class="tags" id="view-tags" style="margin-bottom:0.75rem;"></div>
     <pre id="view-content" style="max-height:400px; overflow-y:auto;">Loading...</pre>
+    <div id="view-related" style="display:none; margin-top:1rem; border-top: 1px solid var(--border, #2a2a2a); padding-top:0.75rem;">
+      <h4 style="font-size:0.85rem; color:var(--muted, #888); margin-bottom:0.5rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Related Memories</h4>
+      <div id="view-related-content"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-danger" id="btn-delete" onclick="deleteCurrentMemory()">Delete</button>
       <button class="btn" onclick="editCurrentMemory()">Edit</button>
@@ -326,6 +330,27 @@ async function saveMemory() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, title: title || key, tags, content }),
     });
+    if (res.status === 409) {
+      const dup = await res.json();
+      const proceed = confirm(
+        `Similar memory already exists:\n"${dup.existing_title}" (${(dup.score * 100).toFixed(0)}% similar)\n\nStore anyway?`
+      );
+      if (proceed) {
+        const res2 = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, title: title || key, tags, content, force: true }),
+        });
+        if (!res2.ok) {
+          const e = await res2.json();
+          throw new Error(e.error || 'Save failed');
+        }
+      }
+      btn.disabled = false;
+      btn.textContent = 'Save';
+      if (proceed) { closeModal('modal-create'); location.reload(); }
+      return;
+    }
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.error || 'Save failed');
@@ -348,19 +373,44 @@ async function openViewModal(key) {
   document.getElementById('view-tags').innerHTML = '';
   document.getElementById('view-content').textContent = 'Loading...';
   document.getElementById('modal-view').classList.add('active');
+  document.getElementById('view-related').style.display = 'none';
+  document.getElementById('view-related-content').innerHTML = '';
 
   try {
     const res = await fetch(`/api/memory/${encodeURIComponent(key)}`);
     const m = await res.json();
     if (m.error) { document.getElementById('view-content').textContent = m.error; return; }
     document.getElementById('view-title').textContent = m.title || m.key;
+    const lastAccessed = m.last_accessed ? (m.last_accessed || '').slice(0, 10) : 'never';
     document.getElementById('view-meta').textContent =
-      `Key: ${m.key} · Created: ${(m.created_at || '').slice(0, 10)} · Updated: ${(m.updated_at || '').slice(0, 10)} · ${m.chars || 0} chars`;
+      `Key: ${m.key} · Created: ${(m.created_at || '').slice(0, 10)} · Updated: ${(m.updated_at || '').slice(0, 10)} · Accessed: ${lastAccessed} · ${m.chars || 0} chars`;
     document.getElementById('view-tags').innerHTML =
       (m.tags || []).map(t => `<span class="tag-chip">${esc(t)}</span>`).join(' ');
     document.getElementById('view-content').textContent = m.content || '';
+    loadRelatedMemories(key);
   } catch (err) {
     document.getElementById('view-content').textContent = 'Error loading memory.';
+  }
+}
+
+async function loadRelatedMemories(key) {
+  try {
+    const res = await fetch(`/api/related/${encodeURIComponent(key)}`);
+    const data = await res.json();
+    const all = [...(data.forward || []), ...(data.reverse || [])];
+    const container = document.getElementById('view-related-content');
+    const section = document.getElementById('view-related');
+    if (!all.length) { section.style.display = 'none'; return; }
+    section.style.display = 'block';
+    container.innerHTML = all.map(m =>
+      `<div style="margin-bottom:0.35rem;">
+        <a href="#" onclick="openViewModal(${JSON.stringify(m.key)}); return false;"
+           style="color:var(--cyan, #00bcd4); text-decoration:none; font-size:0.875rem;">${esc(m.title)}</a>
+        <span style="color:var(--muted, #888); font-size:0.75rem;"> — ${esc(m.key)}</span>
+       </div>`
+    ).join('');
+  } catch (e) {
+    document.getElementById('view-related').style.display = 'none';
   }
 }
 
