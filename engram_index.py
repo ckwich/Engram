@@ -352,6 +352,80 @@ def generate_skill_file(
     return skill_path
 
 
+# ── Dry-run statistics ──────────────────────────────────────────────────────
+
+
+def collect_dry_run_stats(project_root: Path, config: dict, domains: dict) -> list[dict]:
+    """
+    Collect dry-run statistics for a set of domains.
+    Returns list of dicts: {domain, files, size_kb, memory_key, existing, skip_reason}
+    Gracefully handles missing chromadb — reports 'unknown' status if memory_manager unavailable.
+    """
+    try:
+        from core.memory_manager import memory_manager
+        has_mm = True
+    except Exception:
+        has_mm = False
+
+    max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
+    project_name = config.get("project_name", project_root.name)
+
+    stats = []
+    for domain_name, domain_config in domains.items():
+        domain_files = collect_domain_files(project_root, domain_config, max_kb)
+        total_kb = sum(f.stat().st_size / 1024 for f in domain_files)
+        key = memory_key(project_name, domain_name)
+
+        existing = None
+        if has_mm:
+            existing = memory_manager.retrieve_memory(key)
+
+        if existing:
+            skip_reason = f"exists (updated {existing.get('updated_at', '?')[:10]})"
+        elif has_mm:
+            skip_reason = "new"
+        else:
+            skip_reason = "new (memory check unavailable)"
+
+        stats.append({
+            "domain": domain_name,
+            "files": len(domain_files),
+            "size_kb": total_kb,
+            "memory_key": key,
+            "existing": existing is not None,
+            "skip_reason": skip_reason,
+        })
+    return stats
+
+
+def print_dry_run_summary(stats: list[dict], mode: str) -> None:
+    """
+    Print a dry-run summary table showing what would be synthesized.
+    Implements INDX-16: invocation count + context size visibility.
+    """
+    if not stats:
+        print("\n[dry-run] No domains to process.")
+        return
+
+    total_files = sum(s["files"] for s in stats)
+    total_kb = sum(s["size_kb"] for s in stats)
+    total_invocations = len(stats)
+
+    print(f"\n{'='*60}")
+    print(f"DRY-RUN SUMMARY — mode: {mode}")
+    print(f"{'='*60}")
+    print(f"{'Domain':<20} {'Files':>6} {'Context':>10} {'Status':<30}")
+    print(f"{'-'*20} {'-'*6} {'-'*10} {'-'*30}")
+    for s in stats:
+        status = s["skip_reason"]
+        print(f"{s['domain']:<20} {s['files']:>6} {s['size_kb']:>8.1f}KB {status:<30}")
+    print(f"{'-'*20} {'-'*6} {'-'*10} {'-'*30}")
+    print(f"{'TOTAL':<20} {total_files:>6} {total_kb:>8.1f}KB {total_invocations} claude.cmd invocation(s)")
+    print(f"{'='*60}")
+    print(f"\nTo proceed: remove --dry-run from the command.")
+    print(f"To synthesize only one domain: add --domain <name>")
+
+
 # ── Domain synthesis + storage ───────────────────────────────────────────────
 
 def index_domain(
@@ -476,17 +550,22 @@ def run_bootstrap(project_root: Path, config: dict, domain_filter: Optional[str]
             print(f"Domain '{domain_filter}' not found in config.")
             sys.exit(1)
 
+    if dry_run:
+        print(f"Bootstrap: {len(domains)} domain(s) in {project_root.name}")
+        stats = collect_dry_run_stats(project_root, config, domains)
+        print_dry_run_summary(stats, mode="bootstrap")
+        return
+
     print(f"Bootstrap: indexing {len(domains)} domain(s) in {project_root.name}")
     success = 0
     for domain_name, domain_config in domains.items():
-        if index_domain(project_root, config, domain_name, domain_config, manifest, force, dry_run):
+        if index_domain(project_root, config, domain_name, domain_config, manifest, force, dry_run=False):
             success += 1
 
-    if not dry_run:
-        # Update file hashes in manifest after bootstrap
-        _ = find_changed_domains(project_root, config, manifest)
-        save_manifest(engram_dir, manifest)
-        print(f"\nDone. {success}/{len(domains)} domains synthesized.")
+    # Update file hashes in manifest after bootstrap
+    _ = find_changed_domains(project_root, config, manifest)
+    save_manifest(engram_dir, manifest)
+    print(f"\nDone. {success}/{len(domains)} domains synthesized.")
 
 
 def run_evolve(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
@@ -506,16 +585,21 @@ def run_evolve(project_root: Path, config: dict, domain_filter: Optional[str], f
             save_manifest(engram_dir, manifest)
         return
 
+    if dry_run:
+        changed_domains_config = {d: config["domains"][d] for d in changed if d in config["domains"]}
+        stats = collect_dry_run_stats(project_root, config, changed_domains_config)
+        print_dry_run_summary(stats, mode="evolve")
+        return
+
     print(f"Evolve: {len(changed)} changed domain(s): {', '.join(changed)}")
     success = 0
     for domain_name in changed:
         domain_config = config["domains"][domain_name]
-        if index_domain(project_root, config, domain_name, domain_config, manifest, force, dry_run):
+        if index_domain(project_root, config, domain_name, domain_config, manifest, force, dry_run=False):
             success += 1
 
-    if not dry_run:
-        save_manifest(engram_dir, manifest)
-        print(f"\nDone. {success}/{len(changed)} domains re-synthesized.")
+    save_manifest(engram_dir, manifest)
+    print(f"\nDone. {success}/{len(changed)} domains re-synthesized.")
 
 
 def run_full(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
@@ -528,17 +612,21 @@ def run_full(project_root: Path, config: dict, domain_filter: Optional[str], for
     if domain_filter:
         domains = {k: v for k, v in domains.items() if k == domain_filter}
 
+    if dry_run:
+        stats = collect_dry_run_stats(project_root, config, domains)
+        print_dry_run_summary(stats, mode="full")
+        return
+
     print(f"Full re-index: {len(domains)} domain(s) in {project_root.name}")
     success = 0
     for domain_name, domain_config in domains.items():
         # full mode always overwrites — pass force=True regardless of --force flag
-        if index_domain(project_root, config, domain_name, domain_config, manifest, force=True, dry_run=dry_run):
+        if index_domain(project_root, config, domain_name, domain_config, manifest, force=True, dry_run=False):
             success += 1
 
-    if not dry_run:
-        _ = find_changed_domains(project_root, config, manifest)
-        save_manifest(engram_dir, manifest)
-        print(f"\nDone. {success}/{len(domains)} domains synthesized.")
+    _ = find_changed_domains(project_root, config, manifest)
+    save_manifest(engram_dir, manifest)
+    print(f"\nDone. {success}/{len(domains)} domains synthesized.")
 
 
 # ── Git hook installation ───────────────────────────────────────────────────
