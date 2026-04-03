@@ -64,7 +64,7 @@ Plans:
   5. Each indexed domain produces both an Engram memory and a thin skill file at ~/.claude/skills/ that triggers retrieval on relevant file globs (skill never contains content directly)
 **Plans**: 3 plans
 Plans:
-- [ ] 03-01-PLAN.md — Core indexer engine: CLI entry point, config system, manifest utilities, synthesis subprocess, bootstrap/evolve/full modes, memory storage with edit protection
+- [x] 03-01-PLAN.md — Core indexer engine: CLI entry point, config system, manifest utilities, synthesis subprocess, bootstrap/evolve/full modes, memory storage with edit protection
 - [ ] 03-02-PLAN.md — Skill file generation + git hook installer: generate_skill_file() called after synthesis, --install-hook writes detached post-commit hook
 - [ ] 03-03-PLAN.md — Dry-run + cost controls: print_dry_run_summary() table showing domain count, file count, KB context estimate per mode
 **Research flags**:

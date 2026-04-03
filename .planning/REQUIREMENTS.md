@@ -40,21 +40,21 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Codebase Indexer
 
-- [ ] **INDX-01**: engram_index.py CLI tool synthesizes architectural understanding from codebases into Engram memories
-- [ ] **INDX-02**: Model B architecture — captures why, what was learned, what to watch out for (not file-by-file descriptions)
-- [ ] **INDX-03**: Per-project config at {project_root}/.engram/config.json with configurable domain questions
-- [ ] **INDX-04**: Memory namespace: codebase/{project}/{domain}/architecture
+- [x] **INDX-01**: engram_index.py CLI tool synthesizes architectural understanding from codebases into Engram memories
+- [x] **INDX-02**: Model B architecture — captures why, what was learned, what to watch out for (not file-by-file descriptions)
+- [x] **INDX-03**: Per-project config at {project_root}/.engram/config.json with configurable domain questions
+- [x] **INDX-04**: Memory namespace: codebase/{project}/{domain}/architecture
 - [ ] **INDX-05**: Two outputs per domain: Engram memory AND thin skill file at ~/.claude/skills/ triggering retrieval on relevant file globs
 - [ ] **INDX-06**: Skill files never contain content directly — Engram is always source of truth
-- [ ] **INDX-07**: Index manifest at {project}/.engram/index.json tracks file hashes for incremental re-indexing
-- [ ] **INDX-08**: bootstrap mode — reads planning artifacts + source files, full synthesis pass
-- [ ] **INDX-09**: evolve mode — hash-compares files since last run, re-synthesizes only changed domains
-- [ ] **INDX-10**: full mode — complete re-index of everything
+- [x] **INDX-07**: Index manifest at {project}/.engram/index.json tracks file hashes for incremental re-indexing
+- [x] **INDX-08**: bootstrap mode — reads planning artifacts + source files, full synthesis pass
+- [x] **INDX-09**: evolve mode — hash-compares files since last run, re-synthesizes only changed domains
+- [x] **INDX-10**: full mode — complete re-index of everything
 - [ ] **INDX-11**: Git post-commit hook for automatic evolve mode on changed files only
 - [ ] **INDX-12**: Hook uses absolute venv Python path (no PATH dependency on Windows)
-- [ ] **INDX-13**: Manual edits to Engram memories win over re-index unless --force is passed
-- [ ] **INDX-14**: CLI supports --project, --mode, --domain, --dry-run, --watch flags
-- [ ] **INDX-15**: Synthesis uses Sonnet via anthropic SDK
+- [x] **INDX-13**: Manual edits to Engram memories win over re-index unless --force is passed
+- [x] **INDX-14**: CLI supports --project, --mode, --domain, --dry-run, --watch flags
+- [x] **INDX-15**: Synthesis uses Sonnet via anthropic SDK
 - [ ] **INDX-16**: Cost controls: token budget per run, dry-run cost estimation, cost logging
 
 ### Staleness Detection
@@ -136,21 +136,21 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RELM-03 | Phase 2 | Complete |
 | RELM-04 | Phase 2 | Complete |
 | RELM-05 | Phase 2 | Complete |
-| INDX-01 | Phase 3 | Pending |
-| INDX-02 | Phase 3 | Pending |
-| INDX-03 | Phase 3 | Pending |
-| INDX-04 | Phase 3 | Pending |
+| INDX-01 | Phase 3 | Complete |
+| INDX-02 | Phase 3 | Complete |
+| INDX-03 | Phase 3 | Complete |
+| INDX-04 | Phase 3 | Complete |
 | INDX-05 | Phase 3 | Pending |
 | INDX-06 | Phase 3 | Pending |
-| INDX-07 | Phase 3 | Pending |
-| INDX-08 | Phase 3 | Pending |
-| INDX-09 | Phase 3 | Pending |
-| INDX-10 | Phase 3 | Pending |
+| INDX-07 | Phase 3 | Complete |
+| INDX-08 | Phase 3 | Complete |
+| INDX-09 | Phase 3 | Complete |
+| INDX-10 | Phase 3 | Complete |
 | INDX-11 | Phase 3 | Pending |
 | INDX-12 | Phase 3 | Pending |
-| INDX-13 | Phase 3 | Pending |
-| INDX-14 | Phase 3 | Pending |
-| INDX-15 | Phase 3 | Pending |
+| INDX-13 | Phase 3 | Complete |
+| INDX-14 | Phase 3 | Complete |
+| INDX-15 | Phase 3 | Complete |
 | INDX-16 | Phase 3 | Pending |
 | STAL-01 | Phase 4 | Pending |
 | STAL-02 | Phase 4 | Pending |
