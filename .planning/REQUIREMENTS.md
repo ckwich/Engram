@@ -18,24 +18,24 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Core Memory — Tracking
 
-- [ ] **TRAK-01**: Every memory has a last_accessed timestamp that updates on retrieve_memory and retrieve_chunk calls
-- [ ] **TRAK-02**: search_memories hits update last_accessed for returned memories
-- [ ] **TRAK-03**: Existing memories get last_accessed: null until first retrieval (backward compatible)
-- [ ] **TRAK-04**: last_accessed stored in JSON metadata alongside created_at and updated_at
+- [x] **TRAK-01**: Every memory has a last_accessed timestamp that updates on retrieve_memory and retrieve_chunk calls
+- [x] **TRAK-02**: search_memories hits update last_accessed for returned memories
+- [x] **TRAK-03**: Existing memories get last_accessed: null until first retrieval (backward compatible)
+- [x] **TRAK-04**: last_accessed stored in JSON metadata alongside created_at and updated_at
 
 ### Core Memory — Deduplication
 
-- [ ] **DEDU-01**: store_memory runs similarity search before writing; scores above 0.92 cosine return a warning with similar memory key, title, and score
-- [ ] **DEDU-02**: Caller can pass force=True to override deduplication warning and write anyway
-- [ ] **DEDU-03**: Dedup threshold is configurable (default 0.92)
-- [ ] **DEDU-04**: Dedup comparison strips audit log suffix before embedding to prevent false negatives
+- [x] **DEDU-01**: store_memory runs similarity search before writing; scores above 0.92 cosine return a warning with similar memory key, title, and score
+- [x] **DEDU-02**: Caller can pass force=True to override deduplication warning and write anyway
+- [x] **DEDU-03**: Dedup threshold is configurable (default 0.92)
+- [x] **DEDU-04**: Dedup comparison strips audit log suffix before embedding to prevent false negatives
 
 ### Core Memory — Relationships
 
-- [ ] **RELM-01**: store_memory accepts optional related_to list of existing memory keys
-- [ ] **RELM-02**: related_to stored in JSON metadata and as comma-string in ChromaDB metadata (not empty array)
+- [x] **RELM-01**: store_memory accepts optional related_to list of existing memory keys
+- [x] **RELM-02**: related_to stored in JSON metadata and as comma-string in ChromaDB metadata (not empty array)
 - [ ] **RELM-03**: New MCP tool get_related_memories(key) returns all memories explicitly linked to the given key
-- [ ] **RELM-04**: get_related_memories returns bidirectional results (A links to B means B appears when querying A, and vice versa)
+- [x] **RELM-04**: get_related_memories returns bidirectional results (A links to B means B appears when querying A, and vice versa)
 - [ ] **RELM-05**: WebUI displays related memories as clickable links on memory detail view
 
 ### Codebase Indexer
@@ -123,18 +123,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SKIL-04 | Phase 1 | Pending |
 | SKIL-05 | Phase 1 | Pending |
 | SKIL-06 | Phase 1 | Pending |
-| TRAK-01 | Phase 2 | Pending |
-| TRAK-02 | Phase 2 | Pending |
-| TRAK-03 | Phase 2 | Pending |
-| TRAK-04 | Phase 2 | Pending |
-| DEDU-01 | Phase 2 | Pending |
-| DEDU-02 | Phase 2 | Pending |
-| DEDU-03 | Phase 2 | Pending |
-| DEDU-04 | Phase 2 | Pending |
-| RELM-01 | Phase 2 | Pending |
-| RELM-02 | Phase 2 | Pending |
+| TRAK-01 | Phase 2 | Complete |
+| TRAK-02 | Phase 2 | Complete |
+| TRAK-03 | Phase 2 | Complete |
+| TRAK-04 | Phase 2 | Complete |
+| DEDU-01 | Phase 2 | Complete |
+| DEDU-02 | Phase 2 | Complete |
+| DEDU-03 | Phase 2 | Complete |
+| DEDU-04 | Phase 2 | Complete |
+| RELM-01 | Phase 2 | Complete |
+| RELM-02 | Phase 2 | Complete |
 | RELM-03 | Phase 2 | Pending |
-| RELM-04 | Phase 2 | Pending |
+| RELM-04 | Phase 2 | Complete |
 | RELM-05 | Phase 2 | Pending |
 | INDX-01 | Phase 3 | Pending |
 | INDX-02 | Phase 3 | Pending |

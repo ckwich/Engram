@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-04-01T20:30:07.738Z"
-last_activity: 2026-03-31
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-04-03T18:01:13.756Z"
+last_activity: 2026-04-03
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
+  total_plans: 4
+  completed_plans: 2
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-29)
 
 **Core value:** AI agents working on any indexed project automatically receive relevant architectural context, create memories naturally, and never lose important decisions or patterns.
-**Current focus:** Phase 01 — engramize-skill
+**Current focus:** Phase 02 — core-memory-enhancements
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
-Status: Executing Phase 01
-Last activity: 2026-03-31
+Phase: 02 (core-memory-enhancements) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-03
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 02 P01 | 9min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,8 @@ Recent decisions affecting current work:
 - Phase 3: Git hook uses absolute venv Python path — no PATH dependency on Windows
 - Phase 3: Cost controls (token budget, dry-run, cost log) are non-optional from first implementation
 - Phase 5: stop_hook_active check is the absolute first action in engram_stop.py
+- [Phase 02]: Dedup checks top-5 ChromaDB results for self-update detection to handle force-stored duplicates ranking above original chunks
+- [Phase 02]: Windows file locking: 3-attempt retry with 50ms delay on delete_memory unlink for fire-and-forget concurrency
 
 ### Pending Todos
 
@@ -80,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-01T20:30:07.734Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-core-memory-enhancements/02-CONTEXT.md
+Last session: 2026-04-03T18:01:13.753Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None
