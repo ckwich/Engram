@@ -53,9 +53,9 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [x] **INDX-11**: Git post-commit hook for automatic evolve mode on changed files only
 - [x] **INDX-12**: Hook uses absolute venv Python path (no PATH dependency on Windows)
 - [x] **INDX-13**: Manual edits to Engram memories win over re-index unless --force is passed
-- [x] **INDX-14**: CLI supports --project, --mode, --domain, --dry-run, --watch flags
-- [x] **INDX-15**: Synthesis uses Sonnet via anthropic SDK
-- [x] **INDX-16**: Cost controls: token budget per run, dry-run cost estimation, cost logging
+- [x] **INDX-14**: CLI supports --project, --mode, --domain, --dry-run, --force, --init, --install-hook flags (--watch deferred to v2 per INDX-19)
+- [x] **INDX-15**: Synthesis uses Sonnet via Claude Code CLI (changed from anthropic SDK per D-01 decision)
+- [x] **INDX-16**: Cost controls: dry-run estimation, invocation count display (token budget N/A — uses CLI subscription)
 
 ### Staleness Detection
 
