@@ -237,6 +237,214 @@ def run_init(project_root: Path) -> dict:
     return config
 
 
+# ── Memory key helper ────────────────────────────────────────────────────────
+
+def memory_key(project_name: str, domain_name: str) -> str:
+    """Per D-20: use underscores. codebase_{project}_{domain}_architecture"""
+    safe_project = project_name.lower().replace("-", "_").replace(" ", "_")
+    safe_domain = domain_name.lower().replace("-", "_").replace(" ", "_")
+    return f"codebase_{safe_project}_{safe_domain}_architecture"
+
+
+# ── Edit protection ──────────────────────────────────────────────────────────
+
+def is_manually_edited(key: str, last_run: Optional[str]) -> bool:
+    """
+    Returns True if the memory was manually edited after the last index run.
+    Per D-19: compare memory's updated_at against manifest last_run.
+    If last_run is None (first run), treat all memories as not manually edited.
+    """
+    if last_run is None:
+        return False
+    from core.memory_manager import memory_manager
+    existing = memory_manager.retrieve_memory(key)
+    if existing is None:
+        return False
+    return existing.get("updated_at", "") > last_run
+
+
+# ── Domain synthesis + storage ───────────────────────────────────────────────
+
+def index_domain(
+    project_root: Path,
+    config: dict,
+    domain_name: str,
+    domain_config: dict,
+    manifest: dict,
+    force: bool = False,
+    dry_run: bool = False,
+) -> bool:
+    """
+    Synthesize one domain and store the result in Engram.
+    Returns True if synthesis was performed, False if skipped.
+    """
+    project_name = config.get("project_name", project_root.name)
+    key = memory_key(project_name, domain_name)
+    model = config.get("model", DEFAULT_MODEL)
+
+    if dry_run:
+        # Dry-run: report what WOULD be synthesized
+        max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
+        domain_files = collect_domain_files(project_root, domain_config, max_kb)
+        total_kb = sum(f.stat().st_size / 1024 for f in domain_files)
+        print(f"  [dry-run] {domain_name}: {len(domain_files)} files, ~{total_kb:.1f}KB context")
+        return False
+
+    # Lazy import — only when actually synthesizing (avoids chromadb dependency for dry-run)
+    from core.memory_manager import memory_manager, DuplicateMemoryError
+
+    # Manual edit protection (INDX-13 / D-19): skip if memory was manually edited
+    last_run = manifest.get("last_run")
+    if not force and is_manually_edited(key, last_run):
+        print(f"  [skip] {domain_name}: memory manually edited after last run (use --force to override)")
+        return False
+
+    print(f"  Synthesizing {domain_name}...")
+    prompt = assemble_context(project_root, config, domain_name, domain_config)
+
+    try:
+        synthesized = synthesize_domain(prompt, model=model)
+    except RuntimeError as e:
+        print(f"  [error] {domain_name}: synthesis failed — {e}")
+        return False
+
+    if not synthesized.strip():
+        print(f"  [error] {domain_name}: empty synthesis result")
+        return False
+
+    title = f"{project_name.title()} — {domain_name.title()} Architecture"
+    tags = [project_name.lower(), domain_name.lower(), "architecture", "codebase"]
+
+    # Collect related domains (other domains already in manifest memories)
+    related = [v for k, v in manifest.get("memories", {}).items() if k != domain_name]
+
+    try:
+        memory_manager.store_memory(
+            key=key,
+            content=synthesized,
+            tags=tags,
+            title=title,
+            related_to=related[:10],
+            force=force,
+        )
+        manifest.setdefault("memories", {})[domain_name] = key
+        print(f"  [ok] {domain_name} -> {key}")
+        return True
+    except DuplicateMemoryError as e:
+        print(f"  [dup] {domain_name}: {e}. Pass --force to overwrite.")
+        return False
+    except ValueError as e:
+        print(f"  [error] {domain_name}: {e}")
+        return False
+
+
+# ── Changed-domain detection ─────────────────────────────────────────────────
+
+def find_changed_domains(project_root: Path, config: dict, manifest: dict) -> list[str]:
+    """
+    Compare current file hashes to manifest. Return domain names with any changed files.
+    Also updates manifest['files'] with current hashes for all domain files.
+    """
+    max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
+    changed_domains = []
+    stored_hashes = manifest.get("files", {})
+    new_hashes = {}
+
+    for domain_name, domain_config in config.get("domains", {}).items():
+        domain_changed = False
+        for f in collect_domain_files(project_root, domain_config, max_kb):
+            rel = str(f.relative_to(project_root)).replace("\\", "/")
+            current_hash = sha256_file(f)
+            new_hashes[rel] = current_hash
+            if stored_hashes.get(rel) != current_hash:
+                domain_changed = True
+        if domain_changed:
+            changed_domains.append(domain_name)
+
+    manifest["files"] = new_hashes
+    return changed_domains
+
+
+# ── Mode runners ─────────────────────────────────────────────────────────────
+
+def run_bootstrap(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
+    """Bootstrap: synthesize all configured domains."""
+    engram_dir = project_root / ".engram"
+    engram_dir.mkdir(parents=True, exist_ok=True)
+    manifest = load_manifest(engram_dir)
+
+    domains = config.get("domains", {})
+    if domain_filter:
+        domains = {k: v for k, v in domains.items() if k == domain_filter}
+        if not domains:
+            print(f"Domain '{domain_filter}' not found in config.")
+            sys.exit(1)
+
+    print(f"Bootstrap: indexing {len(domains)} domain(s) in {project_root.name}")
+    success = 0
+    for domain_name, domain_config in domains.items():
+        if index_domain(project_root, config, domain_name, domain_config, manifest, force, dry_run):
+            success += 1
+
+    if not dry_run:
+        # Update file hashes in manifest after bootstrap
+        _ = find_changed_domains(project_root, config, manifest)
+        save_manifest(engram_dir, manifest)
+        print(f"\nDone. {success}/{len(domains)} domains synthesized.")
+
+
+def run_evolve(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
+    """Evolve: re-synthesize only domains with changed files."""
+    engram_dir = project_root / ".engram"
+    engram_dir.mkdir(parents=True, exist_ok=True)
+    manifest = load_manifest(engram_dir)
+
+    changed = find_changed_domains(project_root, config, manifest)
+
+    if domain_filter:
+        changed = [d for d in changed if d == domain_filter]
+
+    if not changed:
+        print("Evolve: no changed domains detected.")
+        if not dry_run:
+            save_manifest(engram_dir, manifest)
+        return
+
+    print(f"Evolve: {len(changed)} changed domain(s): {', '.join(changed)}")
+    success = 0
+    for domain_name in changed:
+        domain_config = config["domains"][domain_name]
+        if index_domain(project_root, config, domain_name, domain_config, manifest, force, dry_run):
+            success += 1
+
+    if not dry_run:
+        save_manifest(engram_dir, manifest)
+        print(f"\nDone. {success}/{len(changed)} domains re-synthesized.")
+
+
+def run_full(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
+    """Full re-index: synthesizes everything. Treats as force=True for edit protection (INDX-10)."""
+    engram_dir = project_root / ".engram"
+    engram_dir.mkdir(parents=True, exist_ok=True)
+    manifest = load_manifest(engram_dir)
+
+    domains = config.get("domains", {})
+    if domain_filter:
+        domains = {k: v for k, v in domains.items() if k == domain_filter}
+
+    print(f"Full re-index: {len(domains)} domain(s) in {project_root.name}")
+    success = 0
+    for domain_name, domain_config in domains.items():
+        # full mode always overwrites — pass force=True regardless of --force flag
+        if index_domain(project_root, config, domain_name, domain_config, manifest, force=True, dry_run=dry_run):
+            success += 1
+
+    if not dry_run:
+        _ = find_changed_domains(project_root, config, manifest)
+        save_manifest(engram_dir, manifest)
+        print(f"\nDone. {success}/{len(domains)} domains synthesized.")
+
+
 # ── CLI argument parser ──────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -261,7 +469,43 @@ def build_parser() -> argparse.ArgumentParser:
 def main():
     parser = build_parser()
     args = parser.parse_args()
-    print("Not yet implemented")
+
+    project_root = Path(args.project).resolve()
+    if not project_root.exists():
+        print(f"Error: project path does not exist: {project_root}")
+        sys.exit(1)
+
+    # --init: run interactive setup only, then exit
+    if args.init:
+        run_init(project_root)
+        return
+
+    # --install-hook: install git post-commit hook, then exit
+    if args.install_hook:
+        # Implemented in Plan 02 — stub for now
+        print("--install-hook: not yet implemented (Plan 02)")
+        return
+
+    # Load config (bootstrap auto-inits if missing per D-07)
+    config = load_project_config(project_root)
+    if config is None:
+        if args.mode == "bootstrap":
+            print("No .engram/config.json found. Running interactive setup first.\n")
+            config = run_init(project_root)
+        else:
+            print(f"Error: no .engram/config.json found in {project_root}. Run --init first.")
+            sys.exit(1)
+
+    if not args.mode:
+        print("Error: --mode is required (bootstrap, evolve, full). Or use --init or --install-hook.")
+        sys.exit(1)
+
+    if args.mode == "bootstrap":
+        run_bootstrap(project_root, config, args.domain, args.force, args.dry_run)
+    elif args.mode == "evolve":
+        run_evolve(project_root, config, args.domain, args.force, args.dry_run)
+    elif args.mode == "full":
+        run_full(project_root, config, args.domain, args.force, args.dry_run)
 
 
 if __name__ == "__main__":
