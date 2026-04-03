@@ -263,6 +263,62 @@ def is_manually_edited(key: str, last_run: Optional[str]) -> bool:
     return existing.get("updated_at", "") > last_run
 
 
+# ── Skill file generation ───────────────────────────────────────────────────
+
+
+def generate_skill_file(
+    project_name: str,
+    domain_name: str,
+    domain_config: dict,
+    memory_key_value: str,
+) -> Path:
+    """
+    Write a thin skill file to ~/.claude/skills/{project}-{domain}-context/SKILL.md.
+    Skill instructs Claude to call search_memories and retrieve_memory for this domain.
+    Per D-11: do NOT set disable-model-invocation (skill should auto-load into context).
+    Per D-12: always overwrite — these are auto-generated pointers, not content.
+    Per D-14: skill body calls Engram tools, never embeds content directly.
+    Returns the path to the written SKILL.md.
+    """
+    skill_name = f"{project_name.lower()}-{domain_name.lower()}-context"
+    skills_root = Path.home() / ".claude" / "skills" / skill_name
+    skills_root.mkdir(parents=True, exist_ok=True)
+
+    # Build paths glob — forward slashes only, even on Windows (PITFALLS.md Pitfall 14)
+    raw_globs = domain_config.get("file_globs", ["**/*.py"])
+    paths_value = ", ".join(g.replace("\\", "/") for g in raw_globs)
+
+    # Description under 200 chars to avoid truncation
+    description = (
+        f"{project_name} {domain_name} architectural context. "
+        f"Use when editing {domain_name} files to get current architecture, decisions, and patterns."
+    )[:200]
+
+    frontmatter = (
+        f"---\n"
+        f"name: {skill_name}\n"
+        f"description: \"{description}\"\n"
+        f"paths: {paths_value}\n"
+        f"allowed-tools: mcp__engram__search_memories, mcp__engram__retrieve_memory\n"
+        f"---\n"
+    )
+
+    body = (
+        f"When working with {domain_name} files in the {project_name} project, "
+        f"search Engram for architectural context:\n\n"
+        f"1. Call mcp__engram__search_memories with query "
+        f"\"{domain_name} architecture patterns decisions\" to find relevant memories\n"
+        f"2. If results include key `{memory_key_value}`, call "
+        f"mcp__engram__retrieve_memory(key=\"{memory_key_value}\") for full context\n"
+        f"3. Use this architectural context to inform your work — patterns, decisions, and known pitfalls\n\n"
+        f"The authoritative architecture memory for this domain is: `{memory_key_value}`\n"
+    )
+
+    skill_path = skills_root / "SKILL.md"
+    skill_path.write_text(frontmatter + "\n" + body, encoding="utf-8")
+    return skill_path
+
+
 # ── Domain synthesis + storage ───────────────────────────────────────────────
 
 def index_domain(
@@ -327,6 +383,13 @@ def index_domain(
             related_to=related[:10],
             force=force,
         )
+        skill_path = generate_skill_file(
+            project_name=project_name,
+            domain_name=domain_name,
+            domain_config=domain_config,
+            memory_key_value=key,
+        )
+        print(f"  [skill] {skill_path}")
         manifest.setdefault("memories", {})[domain_name] = key
         print(f"  [ok] {domain_name} -> {key}")
         return True
