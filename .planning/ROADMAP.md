@@ -60,13 +60,16 @@ Plans:
   1. Running `python engram_index.py --project [path] --mode bootstrap` synthesizes architectural memories in the codebase/{project}/{domain}/architecture namespace without overwriting human-edited memories (unless --force is passed)
   2. Running evolve mode re-synthesizes only domains with changed files since last run, using the hash manifest at {project}/.engram/index.json
   3. A git post-commit hook fires automatically after every commit and runs evolve mode using the absolute venv Python path — no PATH dependency
-  4. Running with --dry-run prints a token/cost estimate before making any API calls; a mandatory max_tokens_per_run config prevents cost spiral
+  4. Running with --dry-run prints an invocation count and context size estimate before making any claude.cmd calls
   5. Each indexed domain produces both an Engram memory and a thin skill file at ~/.claude/skills/ that triggers retrieval on relevant file globs (skill never contains content directly)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 03-01-PLAN.md — Core indexer engine: CLI entry point, config system, manifest utilities, synthesis subprocess, bootstrap/evolve/full modes, memory storage with edit protection
+- [ ] 03-02-PLAN.md — Skill file generation + git hook installer: generate_skill_file() called after synthesis, --install-hook writes detached post-commit hook
+- [ ] 03-03-PLAN.md — Dry-run + cost controls: print_dry_run_summary() table showing domain count, file count, KB context estimate per mode
 **Research flags**:
   - Windows git hook requires absolute venv Python path (C:/Dev/Engram/venv/Scripts/python.exe) — no PATH inheritance (INDX-12)
-  - Cost controls (token budget, dry-run, cost logging) are safety requirements, not optional (INDX-16)
-**UI hint**: yes
+  - Cost controls shift to invocation visibility: dry-run shows claude.cmd call count + context size (D-05, INDX-16)
 
 ### Phase 4: Staleness Detection
 **Goal**: Users can immediately see which memories are either time-stale (not accessed in 90+ days) or code-stale (source files changed since last index), with a dedicated WebUI tab and MCP tool for surfacing them
@@ -104,6 +107,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Engramize Skill | 0/1 | Not started | - |
 | 2. Core Memory Enhancements | 2/3 | In Progress|  |
-| 3. Codebase Indexer | 0/TBD | Not started | - |
+| 3. Codebase Indexer | 0/3 | Not started | - |
 | 4. Staleness Detection | 0/TBD | Not started | - |
 | 5. Session Evaluator | 0/TBD | Not started | - |
