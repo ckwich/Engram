@@ -47,7 +47,7 @@ Plans:
 Plans:
 - [x] 02-01-PLAN.md — Extend memory_manager.py: config loader, DuplicateMemoryError, audit strip, dedup gate, last_accessed fire-and-forget, related_to field, get_related_memories; extend --self-test
 - [x] 02-02-PLAN.md — Update server.py: add force/related_to to store_memory MCP tool, add get_related_memories MCP tool
-- [ ] 02-03-PLAN.md — Update webui.py and index.html: /api/related endpoint, dedup 409 handling, last_accessed and related memories in view modal
+- [x] 02-03-PLAN.md — Update webui.py and index.html: /api/related endpoint, dedup 409 handling, last_accessed and related memories in view modal
 **Research flags**:
   - Audit log suffix must be stripped before embedding comparison (DEDU-04) — read CONCERNS.md before planning
   - ChromaDB rejects empty arrays — related_to must be stored as comma-string in ChromaDB metadata, list in JSON only (RELM-02)

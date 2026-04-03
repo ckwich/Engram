@@ -36,7 +36,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [x] **RELM-02**: related_to stored in JSON metadata and as comma-string in ChromaDB metadata (not empty array)
 - [x] **RELM-03**: New MCP tool get_related_memories(key) returns all memories explicitly linked to the given key
 - [x] **RELM-04**: get_related_memories returns bidirectional results (A links to B means B appears when querying A, and vice versa)
-- [ ] **RELM-05**: WebUI displays related memories as clickable links on memory detail view
+- [x] **RELM-05**: WebUI displays related memories as clickable links on memory detail view
 
 ### Codebase Indexer
 
@@ -135,7 +135,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RELM-02 | Phase 2 | Complete |
 | RELM-03 | Phase 2 | Complete |
 | RELM-04 | Phase 2 | Complete |
-| RELM-05 | Phase 2 | Pending |
+| RELM-05 | Phase 2 | Complete |
 | INDX-01 | Phase 3 | Pending |
 | INDX-02 | Phase 3 | Pending |
 | INDX-03 | Phase 3 | Pending |
