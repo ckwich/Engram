@@ -16,7 +16,7 @@ import sys
 
 from fastmcp import FastMCP
 from core.embedder import embedder
-from core.memory_manager import memory_manager
+from core.memory_manager import memory_manager, DuplicateMemoryError, _config
 
 mcp = FastMCP("engram")
 
@@ -145,6 +145,8 @@ async def store_memory(
     content: str,
     title: str = "",
     tags: str = "",
+    related_to: str = "",
+    force: bool = False,
 ) -> str:
     """
     Store a new memory or update an existing one.
@@ -161,25 +163,81 @@ async def store_memory(
                  (e.g. 'lumen_adr_018', 'lumen_adr_019').
         title: Human-readable title (optional, defaults to key).
         tags: Comma-separated tags for browsing (e.g. 'sylvara,decision,architecture').
+        related_to: Comma-separated keys of related memories to link to (optional).
+                    Maximum 10 keys. Links are bidirectional at query time.
+        force: Pass True to store even if a near-duplicate already exists (default False).
+               When False, a duplicate warning is returned instead of storing.
 
     Returns:
-        Confirmation with chunk count.
+        Confirmation with chunk count, or duplicate warning if near-duplicate detected.
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    related_list = [k.strip() for k in related_to.split(",") if k.strip()] if related_to else []
     try:
-        result = await memory_manager.store_memory_async(key, content, tag_list, title or None)
+        result = await memory_manager.store_memory_async(
+            key, content, tag_list, title or None, related_list, force
+        )
         return (
             f"✅ Stored: '{result['title']}'\n"
             f"   Key: {key}\n"
             f"   Chunks: {result.get('chunk_count', '?')}\n"
             f"   Chars: {result['chars']}"
         )
+    except DuplicateMemoryError as e:
+        dup = e.duplicate
+        threshold = _config.get("dedup_threshold", 0.92)
+        return (
+            f"⚠️  DUPLICATE DETECTED — similar memory already exists.\n"
+            f"   Existing key:   {dup['existing_key']}\n"
+            f"   Existing title: {dup['existing_title']}\n"
+            f"   Similarity:     {dup['score']:.3f} (threshold: {threshold})\n\n"
+            f"To store anyway, call store_memory again with force=True."
+        )
     except ValueError as e:
-        return f"⚠️ Memory too large: {e}"
+        return f"⚠️ Memory too large or invalid: {e}"
     except RuntimeError as e:
         return f"❌ Engram error: {e}"
     except Exception as e:
         return f"❌ Failed to store '{key}': {e}"
+
+
+@mcp.tool()
+async def get_related_memories(key: str) -> str:
+    """
+    Retrieve all memories related to the given key, bidirectionally.
+
+    Returns memories that this key explicitly links to (forward links) AND
+    memories that link to this key (reverse links). Dangling references to
+    deleted memories are silently ignored.
+
+    Args:
+        key: The memory key to find relationships for.
+
+    Returns:
+        List of related memories with keys and titles, grouped by direction.
+    """
+    result = await memory_manager.get_related_memories_async(key)
+    if not result["found"]:
+        return f"❌ Memory not found: '{key}'"
+
+    forward = result["forward"]
+    reverse = result["reverse"]
+
+    if not forward and not reverse:
+        return f"🔗 No related memories found for '{key}'."
+
+    lines = [f"🔗 Related memories for '{key}':\n"]
+    if forward:
+        lines.append(f"Links to ({len(forward)}):")
+        for m in forward:
+            tags = ", ".join(m["tags"]) if m["tags"] else "none"
+            lines.append(f"  → {m['key']}: {m['title']}  [tags: {tags}]")
+    if reverse:
+        lines.append(f"\nLinked by ({len(reverse)}):")
+        for m in reverse:
+            tags = ", ".join(m["tags"]) if m["tags"] else "none"
+            lines.append(f"  ← {m['key']}: {m['title']}  [tags: {tags}]")
+    return "\n".join(lines)
 
 
 @mcp.tool()
