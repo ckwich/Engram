@@ -36,6 +36,39 @@ DEFAULT_QUESTIONS = [
     "What should a developer watch out for?",
 ]
 
+# Git hook template. Filled at install time with absolute paths.
+# Shebang: forward slashes, /c/ prefix (not C:/) — required for Git Bash on Windows.
+HOOK_TEMPLATE = """\
+#!/c/Dev/Engram/venv/Scripts/python.exe
+\"\"\"Engram post-commit hook: run evolve mode in background after each commit.\"\"\"
+import subprocess, sys
+from pathlib import Path
+
+VENV_PYTHON = r"{venv_python}"
+ENGRAM_INDEX = r"{engram_index}"
+PROJECT_ROOT = r"{project_root}"
+ENGRAM_DIR = Path(PROJECT_ROOT) / ".engram"
+ENGRAM_DIR.mkdir(exist_ok=True)
+LOG_FILE = str(ENGRAM_DIR / "last_evolve.log")
+
+CREATE_NO_WINDOW = 0x08000000
+
+try:
+    with open(LOG_FILE, "a", encoding="utf-8") as log:
+        proc = subprocess.Popen(
+            [VENV_PYTHON, ENGRAM_INDEX, "--mode", "evolve", "--project", PROJECT_ROOT],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=CREATE_NO_WINDOW,
+            close_fds=True,
+        )
+    sys.exit(0)
+except Exception as e:
+    with open(LOG_FILE, "a", encoding="utf-8") as log:
+        log.write(f"Hook spawn error: {{e}}\\n")
+    sys.exit(0)
+"""
+
 
 # ── Config functions ─────────────────────────────────────────────────────────
 
@@ -508,6 +541,59 @@ def run_full(project_root: Path, config: dict, domain_filter: Optional[str], for
         print(f"\nDone. {success}/{len(domains)} domains synthesized.")
 
 
+# ── Git hook installation ───────────────────────────────────────────────────
+
+
+def run_install_hook(project_root: Path) -> None:
+    """
+    Install git post-commit hook at {project_root}/.git/hooks/post-commit.
+    Hook spawns evolve mode as a detached background process after every commit.
+    Hook always exits 0 — commits are NEVER blocked (D-16).
+    Uses absolute venv Python path — no PATH dependency on Windows (D-17).
+    """
+    git_hooks_dir = project_root / ".git" / "hooks"
+    if not git_hooks_dir.exists():
+        print(f"Error: {project_root} does not appear to be a git repository (.git/hooks not found)")
+        sys.exit(1)
+
+    hook_path = git_hooks_dir / "post-commit"
+
+    # Detect venv Python — use absolute path
+    venv_python = Path(sys.executable).resolve()
+    engram_index = Path(__file__).resolve()
+
+    # Shebang requires /c/ path (forward slashes, Git Bash format)
+    # Windows path: C:/Dev/Engram/venv/Scripts/python.exe -> /c/Dev/Engram/venv/Scripts/python.exe
+    venv_python_str = str(venv_python).replace("\\", "/")
+    if len(venv_python_str) >= 2 and venv_python_str[1] == ":":
+        # Convert C:/... to /c/...
+        drive_letter = venv_python_str[0].lower()
+        venv_python_bash = f"/{drive_letter}/{venv_python_str[3:]}"
+    else:
+        venv_python_bash = venv_python_str
+
+    hook_content = HOOK_TEMPLATE.format(
+        venv_python=str(venv_python),      # raw Windows path for subprocess call inside hook
+        engram_index=str(engram_index),
+        project_root=str(project_root),
+    )
+
+    # Replace the shebang line with the bash-format path
+    lines = hook_content.split("\n")
+    lines[0] = f"#!{venv_python_bash}"
+    hook_content = "\n".join(lines)
+
+    hook_path.write_text(hook_content, encoding="utf-8")
+    os.chmod(hook_path, 0o755)
+
+    print(f"Hook installed: {hook_path}")
+    print(f"  Python: {venv_python_bash}")
+    print(f"  Engram: {engram_index}")
+    print(f"  Log: {project_root / '.engram' / 'last_evolve.log'}")
+    print(f"\nThe hook will run evolve mode in the background after each commit.")
+    print(f"Check {project_root / '.engram' / 'last_evolve.log'} to monitor.")
+
+
 # ── CLI argument parser ──────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -545,8 +631,7 @@ def main():
 
     # --install-hook: install git post-commit hook, then exit
     if args.install_hook:
-        # Implemented in Plan 02 — stub for now
-        print("--install-hook: not yet implemented (Plan 02)")
+        run_install_hook(project_root)
         return
 
     # Load config (bootstrap auto-inits if missing per D-07)
