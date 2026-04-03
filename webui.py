@@ -6,7 +6,7 @@ No direct file or ChromaDB access here.
 """
 from flask import Flask, render_template, request, jsonify
 
-from core.memory_manager import memory_manager
+from core.memory_manager import memory_manager, DuplicateMemoryError
 
 app = Flask(__name__)
 
@@ -57,13 +57,21 @@ def api_create():
     tags = data.get("tags", [])
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
+    related_to = data.get("related_to", [])
+    if isinstance(related_to, str):
+        related_to = [k.strip() for k in related_to.split(",") if k.strip()]
+    force = bool(data.get("force", False))
     try:
         result = memory_manager.store_memory(
             key=data["key"],
             content=data["content"],
             tags=tags,
             title=data.get("title"),
+            related_to=related_to,
+            force=force,
         )
+    except DuplicateMemoryError as e:
+        return jsonify({"status": "duplicate", **e.duplicate}), 409
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
@@ -79,13 +87,21 @@ def api_update(key):
     tags = data.get("tags", [])
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
+    related_to = data.get("related_to", [])
+    if isinstance(related_to, str):
+        related_to = [k.strip() for k in related_to.split(",") if k.strip()]
+    force = bool(data.get("force", False))
     try:
         result = memory_manager.store_memory(
             key=key,
             content=data["content"],
             tags=tags,
             title=data.get("title"),
+            related_to=related_to,
+            force=force,
         )
+    except DuplicateMemoryError as e:
+        return jsonify({"status": "duplicate", **e.duplicate}), 409
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
@@ -107,6 +123,13 @@ def api_delete(key):
 @app.route("/api/stats")
 def api_stats():
     return jsonify(memory_manager.get_stats())
+
+
+@app.route("/api/related/<path:key>")
+def api_related(key):
+    """Return all memories related to the given key (bidirectional)."""
+    result = memory_manager.get_related_memories(key)
+    return jsonify(result)
 
 
 @app.route("/health")
