@@ -276,9 +276,10 @@ class MemoryManager:
 
         embedding = embedder.embed(stripped)
         try:
+            n = min(5, col.count())
             results = col.query(
                 query_embeddings=[embedding],
-                n_results=1,
+                n_results=n,
                 include=["metadatas", "distances"],
             )
         except Exception as e:
@@ -288,15 +289,19 @@ class MemoryManager:
         if not results or not results.get("ids") or not results["ids"][0]:
             return None
 
+        # Check top results: if any chunk belongs to the same key, this is a self-update — allow it.
+        # This handles the case where other near-duplicates exist but the key's own chunks rank differently.
+        for meta in results["metadatas"][0]:
+            if meta.get("parent_key") == key:
+                return None
+
+        # Now check for duplicates among the top results
         distance = results["distances"][0][0]
         score = round(1 - (distance / 2), 3)
 
         if score >= threshold:
             meta = results["metadatas"][0][0]
             existing_key = meta.get("parent_key", "unknown")
-            # Never block self-updates (same key being re-stored)
-            if existing_key == key:
-                return None
             return {
                 "status": "duplicate",
                 "existing_key": existing_key,
@@ -612,7 +617,17 @@ class MemoryManager:
             raise RuntimeError(f"Failed to delete '{key}' from index: {e}")
 
         # 2. Delete JSON (source of truth) — Chroma is already clean
-        path.unlink()
+        #    Retry on Windows PermissionError (fire-and-forget tasks may hold the file briefly)
+        import time as _time
+        for attempt in range(3):
+            try:
+                path.unlink()
+                break
+            except PermissionError:
+                if attempt < 2:
+                    _time.sleep(0.05)
+                else:
+                    raise
         return True
 
     async def delete_memory_async(self, key: str) -> bool:
