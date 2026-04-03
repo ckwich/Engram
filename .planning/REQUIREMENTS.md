@@ -55,7 +55,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [x] **INDX-13**: Manual edits to Engram memories win over re-index unless --force is passed
 - [x] **INDX-14**: CLI supports --project, --mode, --domain, --dry-run, --watch flags
 - [x] **INDX-15**: Synthesis uses Sonnet via anthropic SDK
-- [ ] **INDX-16**: Cost controls: token budget per run, dry-run cost estimation, cost logging
+- [x] **INDX-16**: Cost controls: token budget per run, dry-run cost estimation, cost logging
 
 ### Staleness Detection
 
@@ -151,7 +151,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INDX-13 | Phase 3 | Complete |
 | INDX-14 | Phase 3 | Complete |
 | INDX-15 | Phase 3 | Complete |
-| INDX-16 | Phase 3 | Pending |
+| INDX-16 | Phase 3 | Complete |
 | STAL-01 | Phase 4 | Pending |
 | STAL-02 | Phase 4 | Pending |
 | STAL-03 | Phase 4 | Pending |
