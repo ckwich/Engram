@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -50,6 +51,44 @@ JSON_DIR = PROJECT_ROOT / "data" / "memories"
 CHROMA_DIR = PROJECT_ROOT / "data" / "chroma"
 JSON_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Config ─────────────────────────────────────────────────────────────────
+_CONFIG_PATH = PROJECT_ROOT / "config.json"
+
+def _load_config() -> dict:
+    """Load Engram config.json with safe defaults. Missing file = all defaults."""
+    defaults = {
+        "dedup_threshold": 0.92,
+    }
+    try:
+        if _CONFIG_PATH.exists():
+            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+                user_config = json.load(f)
+            defaults.update(user_config)
+    except Exception as e:
+        print(f"[Engram] WARNING: Failed to load config.json: {e}. Using defaults.", file=sys.stderr)
+    return defaults
+
+_config = _load_config()
+
+
+class DuplicateMemoryError(Exception):
+    """Raised when store_memory detects a near-duplicate and force=False."""
+    def __init__(self, duplicate: dict):
+        self.duplicate = duplicate
+        super().__init__(
+            f"Duplicate detected: {duplicate['existing_key']} (score={duplicate['score']})"
+        )
+
+
+_AUDIT_SUFFIX_RE = re.compile(
+    r'(\n\n---\n\*\*[^\n]+\| (?:Created|Updated) via Engram\*\*)+\s*$'
+)
+
+def _strip_audit_log(content: str) -> str:
+    """Strip all accumulated audit log suffixes from content for dedup comparison."""
+    return _AUDIT_SUFFIX_RE.sub('', content)
+
 
 # ── Thread-safe collection init lock ─────────────────────────────────────────
 _init_lock = threading.Lock()
@@ -155,7 +194,7 @@ class MemoryManager:
         if results and results.get("ids"):
             col.delete(ids=results["ids"])
 
-    def _index_chunks(self, key: str, chunks: list[dict], title: str, tags: list[str]):
+    def _index_chunks(self, key: str, chunks: list[dict], title: str, tags: list[str], related_to: list[str] = None):
         """Embed and upsert chunks into ChromaDB (sync — used by webui/CLI)."""
         col = self._get_collection()
         if not chunks:
@@ -171,6 +210,7 @@ class MemoryManager:
                 "chunk_id": c["chunk_id"],
                 "title": title,
                 "tags": ",".join(tags),
+                **({"related_to": ",".join(related_to)} if related_to else {}),
             }
             for c in chunks
         ]
@@ -182,7 +222,7 @@ class MemoryManager:
             metadatas=metadatas,
         )
 
-    async def _index_chunks_async(self, key: str, chunks: list[dict], title: str, tags: list[str]):
+    async def _index_chunks_async(self, key: str, chunks: list[dict], title: str, tags: list[str], related_to: list[str] = None):
         """Embed and upsert chunks into ChromaDB (async — non-blocking for MCP).
         ALL blocking ops run in executor — nothing touches the event loop directly."""
         if not chunks:
@@ -198,6 +238,7 @@ class MemoryManager:
                 "chunk_id": c["chunk_id"],
                 "title": title,
                 "tags": ",".join(tags),
+                **({"related_to": ",".join(related_to)} if related_to else {}),
             }
             for c in chunks
         ]
@@ -213,6 +254,76 @@ class MemoryManager:
 
         await _run_chroma(_do_upsert)
 
+    # ── Dedup & tracking helpers ──────────────────────────────────────────
+
+    def _check_dedup(self, content: str, key: str) -> Optional[dict]:
+        """
+        Returns duplicate warning dict if content is too similar to an existing memory,
+        None if safe to store.
+        Uses stripped content for embedding to avoid audit log corruption (DEDU-04).
+        Skips self-updates (same key updating — always allowed).
+        """
+        threshold = _config.get("dedup_threshold", 0.92)
+        stripped = _strip_audit_log(content)
+
+        # Skip dedup for very short content (unreliable embeddings)
+        if len(stripped) < 150:
+            return None
+
+        col = self._get_collection()
+        if col.count() == 0:
+            return None
+
+        embedding = embedder.embed(stripped)
+        try:
+            results = col.query(
+                query_embeddings=[embedding],
+                n_results=1,
+                include=["metadatas", "distances"],
+            )
+        except Exception as e:
+            print(f"[Engram] WARNING: Dedup check failed: {e}. Proceeding without dedup.", file=sys.stderr)
+            return None
+
+        if not results or not results.get("ids") or not results["ids"][0]:
+            return None
+
+        distance = results["distances"][0][0]
+        score = round(1 - (distance / 2), 3)
+
+        if score >= threshold:
+            meta = results["metadatas"][0][0]
+            existing_key = meta.get("parent_key", "unknown")
+            # Never block self-updates (same key being re-stored)
+            if existing_key == key:
+                return None
+            return {
+                "status": "duplicate",
+                "existing_key": existing_key,
+                "existing_title": meta.get("title", existing_key),
+                "score": score,
+            }
+        return None
+
+    async def _update_last_accessed_async(self, keys: list[str]) -> None:
+        """Background task: update last_accessed timestamp in JSON for the given keys.
+        Fire-and-forget — caller must NOT await this. Exceptions are caught and logged."""
+        now = _now()
+        def _do_updates():
+            for key in keys:
+                data = self._load_json(key)
+                if data is None:
+                    continue
+                data["last_accessed"] = now
+                try:
+                    self._save_json(data)
+                except Exception as e:
+                    print(f"[Engram] WARNING: last_accessed update failed for '{key}': {e}", file=sys.stderr)
+        try:
+            await _run_blocking(_do_updates)
+        except Exception as e:
+            print(f"[Engram] WARNING: last_accessed batch update failed: {e}", file=sys.stderr)
+
     # ── Public API ──────────────────────────────────────────────────────────
 
     def _prepare_store(
@@ -221,13 +332,22 @@ class MemoryManager:
         content: str,
         tags: list[str] = None,
         title: str = None,
+        related_to: list[str] = None,
+        force: bool = False,
     ) -> tuple[dict, list[dict]]:
         """
         Shared preparation for store_memory / store_memory_async.
         Validates size, builds the data dict, writes JSON first (source of truth),
         then cleans up old ChromaDB chunks. Returns (data, chunks).
         Raises ValueError if content exceeds MAX_MEMORY_CHARS.
+        Raises DuplicateMemoryError if near-duplicate detected and force=False.
         """
+        # Dedup gate: check for near-duplicate content before writing (per D-01, DEDU-01)
+        if not force:
+            dup = self._check_dedup(content, key)
+            if dup:
+                raise DuplicateMemoryError(dup)
+
         if len(content) > MAX_MEMORY_CHARS:
             raise ValueError(
                 f"Content is {len(content):,} chars — exceeds the {MAX_MEMORY_CHARS:,} char limit. "
@@ -236,6 +356,12 @@ class MemoryManager:
             )
 
         tags = tags or []
+        validated_related_to = list(related_to) if related_to else []
+        if len(validated_related_to) > 10:
+            raise ValueError(
+                f"related_to has {len(validated_related_to)} entries — maximum is 10. "
+                f"Limit the number of explicit relationships per memory."
+            )
         now = _now()
 
         # Preserve created_at and title if updating
@@ -254,6 +380,8 @@ class MemoryManager:
             "tags": tags,
             "created_at": created_at,
             "updated_at": now,
+            "last_accessed": existing.get("last_accessed", None) if existing else None,
+            "related_to": validated_related_to,
             "chars": len(content_with_log),
             "lines": len(content_with_log.splitlines()),
         }
@@ -282,14 +410,17 @@ class MemoryManager:
         content: str,
         tags: list[str] = None,
         title: str = None,
+        related_to: list[str] = None,
+        force: bool = False,
     ) -> dict:
         """
         Store or update a memory (sync — used by webui/CLI).
         Writes JSON first, then updates the vector index.
         Returns the stored memory metadata dict.
+        Raises DuplicateMemoryError if near-duplicate detected and force=False.
         """
-        data, chunks = self._prepare_store(key, content, tags, title)
-        self._index_chunks(key, chunks, data["title"], data["tags"])
+        data, chunks = self._prepare_store(key, content, tags, title, related_to, force)
+        self._index_chunks(key, chunks, data["title"], data["tags"], data.get("related_to", []))
         return data
 
     async def store_memory_async(
@@ -298,13 +429,16 @@ class MemoryManager:
         content: str,
         tags: list[str] = None,
         title: str = None,
+        related_to: list[str] = None,
+        force: bool = False,
     ) -> dict:
         """
         Store or update a memory (async — non-blocking for MCP).
         Writes JSON first, then updates the vector index without blocking the event loop.
+        Raises DuplicateMemoryError if near-duplicate detected and force=False.
         """
-        data, chunks = await _run_blocking(self._prepare_store, key, content, tags, title)
-        await self._index_chunks_async(key, chunks, data["title"], data["tags"])
+        data, chunks = await _run_blocking(self._prepare_store, key, content, tags, title, related_to, force)
+        await self._index_chunks_async(key, chunks, data["title"], data["tags"], data.get("related_to", []))
         return data
 
     def retrieve_memory(self, key: str) -> Optional[dict]:
@@ -313,7 +447,10 @@ class MemoryManager:
 
     async def retrieve_memory_async(self, key: str) -> Optional[dict]:
         """Retrieve full memory content from JSON store (async — non-blocking for MCP)."""
-        return await _run_blocking(self._load_json, key)
+        result = await _run_blocking(self._load_json, key)
+        if result:
+            asyncio.create_task(self._update_last_accessed_async([key]))
+        return result
 
     def retrieve_chunk(self, key: str, chunk_id: int) -> Optional[dict]:
         """
@@ -337,7 +474,10 @@ class MemoryManager:
 
     async def retrieve_chunk_async(self, key: str, chunk_id: int) -> Optional[dict]:
         """Retrieve a specific chunk (async — non-blocking for MCP)."""
-        return await _run_chroma(self.retrieve_chunk, key, chunk_id)
+        result = await _run_chroma(self.retrieve_chunk, key, chunk_id)
+        if result:
+            asyncio.create_task(self._update_last_accessed_async([key]))
+        return result
 
     def search_memories(self, query: str, limit: int = 5) -> list[dict]:
         """
@@ -419,8 +559,12 @@ class MemoryManager:
                 print(f"[Engram] search failed: {e}", file=sys.stderr)
                 return None
 
-        results = await _run_chroma(_do_query)
-        return self._parse_search_results(results)
+        raw = await _run_chroma(_do_query)
+        results = self._parse_search_results(raw)
+        if results:
+            keys = list({r["key"] for r in results})
+            asyncio.create_task(self._update_last_accessed_async(keys))
+        return results
 
     def list_memories(self) -> list[dict]:
         """
@@ -474,6 +618,57 @@ class MemoryManager:
     async def delete_memory_async(self, key: str) -> bool:
         """Delete memory (async — non-blocking for MCP)."""
         return await _run_chroma(self.delete_memory, key)
+
+    def get_related_memories(self, key: str) -> dict:
+        """
+        Return all memories related to the given key, bidirectionally.
+        Forward: memories that key explicitly links to (key's related_to list).
+        Reverse: memories that have key in their related_to list.
+        Silently skips dangling references (D-07).
+        Returns: {key, found, forward: [{key, title, tags, updated_at}], reverse: [...]}
+        """
+        source = self._load_json(key)
+        if source is None:
+            return {"key": key, "found": False, "forward": [], "reverse": []}
+
+        forward_keys = source.get("related_to", [])
+        reverse_keys = []
+
+        for path in JSON_DIR.glob("*.json"):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if data.get("key") == key:
+                    continue  # skip self
+                if key in data.get("related_to", []):
+                    reverse_keys.append(data["key"])
+            except Exception:
+                continue
+
+        def _resolve(keys: list[str]) -> list[dict]:
+            result = []
+            for k in keys:
+                mem = self._load_json(k)
+                if mem is None:
+                    continue  # silently skip dangling refs (D-07)
+                result.append({
+                    "key": k,
+                    "title": mem.get("title", k),
+                    "tags": mem.get("tags", []),
+                    "updated_at": mem.get("updated_at", ""),
+                })
+            return result
+
+        return {
+            "key": key,
+            "found": True,
+            "forward": _resolve(forward_keys),
+            "reverse": _resolve(reverse_keys),
+        }
+
+    async def get_related_memories_async(self, key: str) -> dict:
+        """Async wrapper for get_related_memories (non-blocking for MCP)."""
+        return await _run_blocking(self.get_related_memories, key)
 
     def rebuild_index(self):
         """
