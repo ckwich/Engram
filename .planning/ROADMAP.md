@@ -65,7 +65,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 03-01-PLAN.md — Core indexer engine: CLI entry point, config system, manifest utilities, synthesis subprocess, bootstrap/evolve/full modes, memory storage with edit protection
-- [ ] 03-02-PLAN.md — Skill file generation + git hook installer: generate_skill_file() called after synthesis, --install-hook writes detached post-commit hook
+- [x] 03-02-PLAN.md — Skill file generation + git hook installer: generate_skill_file() called after synthesis, --install-hook writes detached post-commit hook
 - [ ] 03-03-PLAN.md — Dry-run + cost controls: print_dry_run_summary() table showing domain count, file count, KB context estimate per mode
 **Research flags**:
   - Windows git hook requires absolute venv Python path (C:/Dev/Engram/venv/Scripts/python.exe) — no PATH inheritance (INDX-12)
