@@ -568,6 +568,25 @@ def run_bootstrap(project_root: Path, config: dict, domain_filter: Optional[str]
     print(f"\nDone. {success}/{len(domains)} domains synthesized.")
 
 
+def flag_memory_stale(key: str, changed_file_count: int, domain_name: str) -> None:
+    """
+    Set potentially_stale=True on a memory's JSON before re-synthesizing.
+    Per D-06: flag first — if synthesis fails later, memory is still correctly flagged.
+    Silently skips if memory does not exist yet (bootstrap case).
+    """
+    try:
+        from core.memory_manager import memory_manager, _now
+        data = memory_manager._load_json(key)
+        if data is None:
+            return  # memory doesn't exist yet; nothing to flag
+        data["potentially_stale"] = True
+        data["stale_reason"] = f"{changed_file_count} file{'s' if changed_file_count != 1 else ''} changed in {domain_name} domain"
+        data["stale_flagged_at"] = _now()
+        memory_manager._save_json(data)
+    except Exception as e:
+        print(f"  [warn] Could not flag {key} as potentially_stale: {e}", file=sys.stderr)
+
+
 def run_evolve(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
     """Evolve: re-synthesize only domains with changed files."""
     engram_dir = project_root / ".engram"
@@ -593,9 +612,31 @@ def run_evolve(project_root: Path, config: dict, domain_filter: Optional[str], f
 
     print(f"Evolve: {len(changed)} changed domain(s): {', '.join(changed)}")
     success = 0
+    project_name = config.get("project_name", project_root.name)
+    max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
     for domain_name in changed:
         domain_config = config["domains"][domain_name]
+        key = memory_key(project_name, domain_name)
+
+        # Count changed files for stale_reason message
+        domain_files = collect_domain_files(project_root, domain_config, max_kb)
+        changed_count = len(domain_files)  # conservative upper bound
+
+        # D-06: Flag BEFORE synthesis — memory is stale regardless of synthesis outcome
+        flag_memory_stale(key, changed_count, domain_name)
+
         if index_domain(project_root, config, domain_name, domain_config, manifest, force, dry_run=False):
+            # Synthesis succeeded — clear potentially_stale flag (D-05)
+            try:
+                from core.memory_manager import memory_manager
+                data = memory_manager._load_json(key)
+                if data:
+                    data["potentially_stale"] = False
+                    data["stale_reason"] = ""
+                    data["stale_flagged_at"] = None
+                    memory_manager._save_json(data)
+            except Exception as e:
+                print(f"  [warn] Could not clear stale flag for {key}: {e}", file=sys.stderr)
             success += 1
 
     save_manifest(engram_dir, manifest)

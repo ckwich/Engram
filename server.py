@@ -241,6 +241,43 @@ async def get_related_memories(key: str) -> str:
 
 
 @mcp.tool()
+async def get_stale_memories(days: int = 90, type: str = "all") -> str:
+    """
+    Return memories that are time-stale (not accessed in N days) or code-stale
+    (source files changed since last index run). No memories are deleted — surfacing only.
+
+    Args:
+        days: Threshold in days for time-staleness (default 90, configurable in config.json).
+        type: Filter results — 'time' (access-based only), 'code' (indexer-flagged only),
+              or 'all' (both types, default).
+
+    Returns:
+        List of stale memories with staleness type, detail, and last access info.
+    """
+    if type not in ("time", "code", "all"):
+        return "❌ type must be 'time', 'code', or 'all'."
+    try:
+        results = await memory_manager.get_stale_memories_async(days=days, type=type)
+    except Exception as e:
+        return f"❌ Engram error: {e}"
+
+    if not results:
+        label = {"time": "time-stale", "code": "code-stale", "all": "stale"}.get(type, "stale")
+        return f"✅ No {label} memories found (threshold: {days} days)."
+
+    lines = [f"⚠️  {len(results)} stale memory/memories (threshold: {days}d, filter: {type}):\n"]
+    for r in results:
+        tags = ", ".join(r["tags"]) if r["tags"] else "none"
+        badge = {"time": "[Time stale]", "code": "[Code changed]", "both": "[Time + Code]"}.get(r["stale_type"], "")
+        lines.append(
+            f"{badge} {r['title']}\n"
+            f"  key={r['key']}  tags={tags}\n"
+            f"  detail: {r['stale_detail']}\n"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
 async def delete_memory(key: str) -> str:
     """
     Permanently delete a memory and all its indexed chunks.
