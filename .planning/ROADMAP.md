@@ -82,7 +82,7 @@ Plans:
   4. No memory is ever automatically deleted — all staleness operations surface only, human decides
 **Plans**: 2 plans
 Plans:
-- [ ] 04-01-PLAN.md — Backend: get_stale_memories() in memory_manager.py, MCP tool in server.py, potentially_stale flagging in engram_index.py evolve mode, stale_days in config.json
+- [x] 04-01-PLAN.md — Backend: get_stale_memories() in memory_manager.py, MCP tool in server.py, potentially_stale flagging in engram_index.py evolve mode, stale_days in config.json
 - [ ] 04-02-PLAN.md — WebUI: /api/stale and /api/memory/key/reviewed routes in webui.py, Stale tab with badge rows and Mark Reviewed in index.html
 
 ### Phase 5: Session Evaluator

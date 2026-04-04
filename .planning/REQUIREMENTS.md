@@ -60,9 +60,9 @@ Requirements for this milestone. Each maps to roadmap phases.
 ### Staleness Detection
 
 - [ ] **STAL-01**: WebUI gets a "Stale Memories" tab showing memories not accessed in 90 days (configurable threshold)
-- [ ] **STAL-02**: When indexer detects file changes in a domain, it flags corresponding memory as potentially_stale in JSON metadata
-- [ ] **STAL-03**: New MCP tool get_stale_memories(days=90) returns memories past the threshold
-- [ ] **STAL-04**: No automatic deletion — surfacing only, human decides
+- [x] **STAL-02**: When indexer detects file changes in a domain, it flags corresponding memory as potentially_stale in JSON metadata
+- [x] **STAL-03**: New MCP tool get_stale_memories(days=90) returns memories past the threshold
+- [x] **STAL-04**: No automatic deletion — surfacing only, human decides
 
 ### Session Evaluator
 
@@ -153,9 +153,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INDX-15 | Phase 3 | Complete |
 | INDX-16 | Phase 3 | Complete |
 | STAL-01 | Phase 4 | Pending |
-| STAL-02 | Phase 4 | Pending |
-| STAL-03 | Phase 4 | Pending |
-| STAL-04 | Phase 4 | Pending |
+| STAL-02 | Phase 4 | Complete |
+| STAL-03 | Phase 4 | Complete |
+| STAL-04 | Phase 4 | Complete |
 | EVAL-01 | Phase 5 | Pending |
 | EVAL-02 | Phase 5 | Pending |
 | EVAL-03 | Phase 5 | Pending |
