@@ -5,6 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Engram — Memory Dashboard</title>
   <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* Stale tab styles */
+    .stale-row {
+      background: var(--surface, #1a1a1a);
+      border: 1px solid var(--border, #2a2a2a);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+    }
+    .stale-row-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
+    }
+    .stale-title { flex: 1; font-weight: 600; }
+    .stale-row-meta {
+      display: flex;
+      gap: 1rem;
+      font-size: 0.8rem;
+      margin-bottom: 0.25rem;
+    }
+    .stale-detail { color: var(--muted, #888); }
+    .stale-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.15rem 0.4rem;
+      border-radius: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    .stale-time  { background: #3d2a00; color: #ffb347; }
+    .stale-code  { background: #1a2d3d; color: #4fc3f7; }
+    .stale-both  { background: #2d1a2d; color: #ce93d8; }
+    .stale-reviewed-btn { margin-left: auto; }
+  </style>
 </head>
 <body>
 
@@ -43,6 +80,7 @@
         <button class="btn active" data-view="grid" title="Grid view">Grid</button>
         <button class="btn" data-view="list" title="List view">List</button>
       </div>
+      <button class="btn" id="btn-stale-tab" onclick="toggleStaleTab()">Stale</button>
       <button class="btn btn-cyan" onclick="openCreateModal()">+ New</button>
     </div>
 
@@ -74,6 +112,19 @@
           <p>No memories stored yet. Click <strong>+ New</strong> to create one.</p>
         </div>
       {% endif %}
+    </div>
+
+    <!-- Stale Memories Panel (hidden by default) -->
+    <div id="stale-panel" class="hidden">
+      <div class="toolbar" style="margin-bottom:1rem;">
+        <span class="text-muted" style="font-size:0.9rem;">Memories not accessed in 90+ days or flagged by indexer. Mark Reviewed to clear — no deletions.</span>
+        <select id="stale-type-filter" onchange="loadStaleTab()" style="margin-left:auto; background:var(--surface,#1a1a1a); color:var(--text,#e0e0e0); border:1px solid var(--border,#2a2a2a); border-radius:4px; padding:0.25rem 0.5rem;">
+          <option value="all">All stale</option>
+          <option value="time">Time stale only</option>
+          <option value="code">Code changed only</option>
+        </select>
+      </div>
+      <div id="stale-list"></div>
     </div>
 
   </div>
@@ -141,6 +192,7 @@ let activeTag = '';
 let currentViewKey = null;
 let searchTimeout = null;
 let editMode = false;
+let staleTabActive = false;
 
 // ── Memory Card Click (via data attribute, not inline onclick) ──────────────
 document.getElementById('memory-container').addEventListener('click', e => {
@@ -175,6 +227,89 @@ function filterByTag() {
     const tags = (card.dataset.tags || '').split(',');
     card.classList.toggle('hidden', !tags.includes(activeTag));
   });
+}
+
+// ── Stale Tab ────────────────────────────────────────────────────────────────
+function toggleStaleTab() {
+  staleTabActive = !staleTabActive;
+  const btn = document.getElementById('btn-stale-tab');
+  const stalePanel = document.getElementById('stale-panel');
+  const memoryContainer = document.getElementById('memory-container');
+  const searchResults = document.getElementById('search-results');
+
+  if (staleTabActive) {
+    btn.classList.add('active');
+    stalePanel.classList.remove('hidden');
+    memoryContainer.classList.add('hidden');
+    searchResults.classList.add('hidden');
+    loadStaleTab();
+  } else {
+    btn.classList.remove('active');
+    stalePanel.classList.add('hidden');
+    memoryContainer.classList.remove('hidden');
+  }
+}
+
+async function loadStaleTab() {
+  const listEl = document.getElementById('stale-list');
+  const filterType = document.getElementById('stale-type-filter').value;
+  listEl.innerHTML = '<div class="text-muted" style="padding:1rem;">Loading stale memories...</div>';
+
+  try {
+    const res = await fetch(`/api/stale?type=${filterType}`);
+    const items = await res.json();
+
+    if (!items.length) {
+      listEl.innerHTML = '<div class="empty-state"><div class="icon">&#x2705;</div><p>No stale memories found.</p></div>';
+      return;
+    }
+
+    listEl.innerHTML = items.map(m => {
+      const badge = {
+        time: '<span class="stale-badge stale-time">Time stale</span>',
+        code: '<span class="stale-badge stale-code">Code changed</span>',
+        both: '<span class="stale-badge stale-both">Time + Code</span>',
+      }[m.stale_type] || '';
+      const tags = (m.tags || []).map(t => `<span class="tag-chip">${esc(t)}</span>`).join('');
+      return `
+        <div class="stale-row" data-key="${esc(m.key)}" data-stale-type="${esc(m.stale_type)}">
+          <div class="stale-row-header">
+            ${badge}
+            <span class="stale-title">${esc(m.title)}</span>
+            <button class="btn btn-sm stale-reviewed-btn" onclick="markReviewed('${esc(m.key)}', '${esc(m.stale_type)}', this)">Mark Reviewed</button>
+          </div>
+          <div class="stale-row-meta">
+            <span class="text-muted" style="font-size:0.8rem;">${esc(m.key)}</span>
+            <span class="stale-detail">${esc(m.stale_detail)}</span>
+          </div>
+          <div class="tags">${tags}</div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    listEl.innerHTML = `<div class="text-muted" style="padding:1rem;">Error loading stale memories: ${esc(err.message)}</div>`;
+  }
+}
+
+async function markReviewed(key, staleType, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const res = await fetch(`/api/memory/${encodeURIComponent(key)}/reviewed`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({stale_type: staleType}),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Remove row from list with fade
+    const row = btn.closest('.stale-row');
+    row.style.opacity = '0';
+    row.style.transition = 'opacity 0.3s';
+    setTimeout(() => row.remove(), 300);
+  } catch (err) {
+    btn.textContent = 'Error';
+    btn.disabled = false;
+  }
 }
 
 // ── Search ──────────────────────────────────────────────────────────────────
