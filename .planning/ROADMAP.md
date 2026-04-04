@@ -83,7 +83,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 04-01-PLAN.md — Backend: get_stale_memories() in memory_manager.py, MCP tool in server.py, potentially_stale flagging in engram_index.py evolve mode, stale_days in config.json
-- [ ] 04-02-PLAN.md — WebUI: /api/stale and /api/memory/key/reviewed routes in webui.py, Stale tab with badge rows and Mark Reviewed in index.html
+- [x] 04-02-PLAN.md — WebUI: /api/stale and /api/memory/key/reviewed routes in webui.py, Stale tab with badge rows and Mark Reviewed in index.html
 
 ### Phase 5: Session Evaluator
 **Goal**: Every Claude Code session is evaluated against configurable criteria after it ends; sessions meeting the bar produce a memory draft that is presented for human approval before being stored — completely non-blocking, with no risk of infinite loops or orphaned processes
