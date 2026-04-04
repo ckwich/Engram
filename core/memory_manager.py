@@ -59,6 +59,7 @@ def _load_config() -> dict:
     """Load Engram config.json with safe defaults. Missing file = all defaults."""
     defaults = {
         "dedup_threshold": 0.92,
+        "stale_days": 90,
     }
     try:
         if _CONFIG_PATH.exists():
@@ -684,6 +685,105 @@ class MemoryManager:
     async def get_related_memories_async(self, key: str) -> dict:
         """Async wrapper for get_related_memories (non-blocking for MCP)."""
         return await _run_blocking(self.get_related_memories, key)
+
+    def get_stale_memories(self, days: int = None, type: str = "all") -> list[dict]:
+        """
+        Return memories that are time-stale (not accessed in N days) or code-stale
+        (potentially_stale flag set by indexer evolve mode).
+
+        No memory is ever deleted — surfacing only (STAL-04).
+
+        Args:
+            days: Threshold in days for time-staleness. None = use config stale_days (default 90).
+            type: Filter — 'time' (access-based), 'code' (indexer-flagged), 'all' (both).
+
+        Returns:
+            List of dicts with key, title, tags, stale_type, stale_detail, last_accessed, stale_flagged_at.
+        """
+        threshold_days = days if days is not None else _config.get("stale_days", 90)
+        now_dt = datetime.now().astimezone()
+        results = []
+
+        for path in JSON_DIR.glob("*.json"):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+
+            # Time-staleness: last_accessed is set and older than threshold
+            is_time_stale = False
+            days_since = 0
+            la = data.get("last_accessed")
+            if la is not None:
+                try:
+                    la_dt = datetime.fromisoformat(la)
+                    if la_dt.tzinfo is None:
+                        la_dt = la_dt.astimezone()
+                    delta = now_dt - la_dt
+                    days_since = delta.days
+                    if days_since >= threshold_days:
+                        is_time_stale = True
+                except Exception:
+                    pass
+
+            # Code-staleness: potentially_stale flag set by indexer
+            is_code_stale = bool(data.get("potentially_stale", False))
+
+            if not is_time_stale and not is_code_stale:
+                continue
+
+            # Determine stale type
+            if is_time_stale and is_code_stale:
+                stale_type = "both"
+            elif is_time_stale:
+                stale_type = "time"
+            else:
+                stale_type = "code"
+
+            # Build detail string
+            stale_reason = data.get("stale_reason", "")
+            if stale_type == "time":
+                stale_detail = f"{days_since} days"
+            elif stale_type == "code":
+                stale_detail = stale_reason
+            else:
+                stale_detail = f"{days_since} days; {stale_reason}"
+
+            # Apply type filter
+            if type == "time" and not is_time_stale:
+                continue
+            if type == "code" and not is_code_stale:
+                continue
+
+            results.append({
+                "key": data.get("key", ""),
+                "title": data.get("title", data.get("key", "")),
+                "tags": data.get("tags", []),
+                "stale_type": stale_type,
+                "stale_detail": stale_detail,
+                "last_accessed": la,
+                "stale_flagged_at": data.get("stale_flagged_at"),
+                "_days_since": days_since,
+            })
+
+        # Sort: code-stale entries first by stale_flagged_at desc, then time entries by days_since desc
+        def _sort_key(r):
+            # Code entries first (stale_type "code" or "both"), then time
+            is_code = 0 if r["stale_type"] in ("code", "both") else 1
+            return (is_code, -r["_days_since"])
+
+        results.sort(key=_sort_key)
+
+        # Strip internal sort key
+        for r in results:
+            del r["_days_since"]
+
+        return results
+
+    async def get_stale_memories_async(self, days: int = None, type: str = "all") -> list[dict]:
+        """Async wrapper for get_stale_memories (non-blocking for MCP)."""
+        return await _run_blocking(self.get_stale_memories, days, type)
 
     def rebuild_index(self):
         """

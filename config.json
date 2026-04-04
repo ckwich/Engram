@@ -1,3 +1,4 @@
 {
-  "dedup_threshold": 0.92
+  "dedup_threshold": 0.92,
+  "stale_days": 90
 }
