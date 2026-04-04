@@ -6,7 +6,7 @@ No direct file or ChromaDB access here.
 """
 from flask import Flask, render_template, request, jsonify
 
-from core.memory_manager import memory_manager, DuplicateMemoryError
+from core.memory_manager import memory_manager, DuplicateMemoryError, _now, _json_path
 
 app = Flask(__name__)
 
@@ -130,6 +130,49 @@ def api_related(key):
     """Return all memories related to the given key (bidirectional)."""
     result = memory_manager.get_related_memories(key)
     return jsonify(result)
+
+
+@app.route("/api/stale")
+def api_stale():
+    """Return stale memories list. Optional query params: days (int), type (time|code|all)."""
+    days = request.args.get("days", None, type=int)
+    filter_type = request.args.get("type", "all")
+    if filter_type not in ("time", "code", "all"):
+        filter_type = "all"
+    results = memory_manager.get_stale_memories(days=days, type=filter_type)
+    return jsonify(results)
+
+
+@app.route("/api/memory/<path:key>/reviewed", methods=["POST"])
+def api_reviewed(key):
+    """
+    Mark a memory as reviewed without deleting it (STAL-04).
+    - time-stale: resets last_accessed to now
+    - code-stale: clears potentially_stale flag
+    - both: applies both resets
+    Reads stale_type from request JSON body: {"stale_type": "time"|"code"|"both"}
+    """
+    body = request.get_json(silent=True) or {}
+    stale_type = body.get("stale_type", "both")
+
+    data = memory_manager._load_json(key)
+    if data is None:
+        return jsonify({"error": "Memory not found"}), 404
+
+    now = _now()
+    if stale_type in ("time", "both"):
+        data["last_accessed"] = now
+    if stale_type in ("code", "both"):
+        data["potentially_stale"] = False
+        data["stale_reason"] = ""
+        data["stale_flagged_at"] = None
+
+    try:
+        memory_manager._save_json(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 503
+
+    return jsonify({"reviewed": True, "key": key})
 
 
 @app.route("/health")
