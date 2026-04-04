@@ -33,9 +33,10 @@ AI agents working on any indexed project should automatically receive relevant a
 - ✓ Auto-generated skill files triggering Engram retrieval on file globs — Phase 3
 - ✓ Git post-commit hook for automatic evolve mode — Phase 3
 
+- ✓ Staleness detection and surfacing (WebUI tab + MCP tool) — Phase 4
+- ✓ Indexer-driven potentially_stale flagging on code changes — Phase 4
+
 ### Active
-- [ ] Staleness detection and surfacing (WebUI tab + MCP tool)
-- [ ] Indexer-driven potentially_stale flagging on code changes
 - [ ] Session evaluator via Claude Code Stop hook
 - [ ] Approval gate for automated memory capture
 - [ ] Configurable session evaluation criteria per project
@@ -102,4 +103,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-03 after Phase 3 completion*
+*Last updated: 2026-04-04 after Phase 4 completion*
