@@ -80,8 +80,10 @@ Plans:
   2. When indexer evolve mode detects file changes in a domain, the corresponding memory is flagged as potentially_stale with a stale_reason and stale_flagged_at timestamp in its JSON
   3. Calling get_stale_memories(days=90) MCP tool returns memories past the access threshold — time-stale and code-stale surfaced with distinct labels
   4. No memory is ever automatically deleted — all staleness operations surface only, human decides
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 2 plans
+Plans:
+- [ ] 04-01-PLAN.md — Backend: get_stale_memories() in memory_manager.py, MCP tool in server.py, potentially_stale flagging in engram_index.py evolve mode, stale_days in config.json
+- [ ] 04-02-PLAN.md — WebUI: /api/stale and /api/memory/key/reviewed routes in webui.py, Stale tab with badge rows and Mark Reviewed in index.html
 
 ### Phase 5: Session Evaluator
 **Goal**: Every Claude Code session is evaluated against configurable criteria after it ends; sessions meeting the bar produce a memory draft that is presented for human approval before being stored — completely non-blocking, with no risk of infinite loops or orphaned processes
@@ -108,5 +110,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Engramize Skill | 0/1 | Not started | - |
 | 2. Core Memory Enhancements | 2/3 | In Progress|  |
 | 3. Codebase Indexer | 0/3 | Not started | - |
-| 4. Staleness Detection | 0/TBD | Not started | - |
+| 4. Staleness Detection | 0/2 | Not started | - |
 | 5. Session Evaluator | 0/TBD | Not started | - |
