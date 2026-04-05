@@ -69,7 +69,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [x] **EVAL-01**: Claude Code Stop hook evaluates completed sessions against configurable criteria
 - [x] **EVAL-02**: "Logic Win" triggers: bug resolved, new capability added, architectural decision made (configurable)
 - [x] **EVAL-03**: "Milestone" triggers: phase completed, feature shipped, significant refactor done (configurable)
-- [ ] **EVAL-04**: If criteria met, drafts a memory and presents for approval before storing
+- [x] **EVAL-04**: If criteria met, drafts a memory and presents for approval before storing
 - [x] **EVAL-05**: Deduplication gate (DEDU-01) runs automatically before approval prompt
 - [x] **EVAL-06**: Criteria configurable per project in .engram/config.json session_evaluator section
 - [x] **EVAL-07**: auto_approve_threshold of 0.0 means always ask; higher values auto-approve high-confidence captures
@@ -159,7 +159,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EVAL-01 | Phase 5 | Complete |
 | EVAL-02 | Phase 5 | Complete |
 | EVAL-03 | Phase 5 | Complete |
-| EVAL-04 | Phase 5 | Pending |
+| EVAL-04 | Phase 5 | Complete |
 | EVAL-05 | Phase 5 | Complete |
 | EVAL-06 | Phase 5 | Complete |
 | EVAL-07 | Phase 5 | Complete |
