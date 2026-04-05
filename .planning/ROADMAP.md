@@ -99,7 +99,7 @@ Plans:
 Plans:
 - [x] 05-01-PLAN.md — Stop hook entry point (hooks/engram_stop.py) + detached evaluator subprocess (hooks/engram_evaluator.py) with claude.cmd evaluation, dedup gate, pending file writer
 - [x] 05-02-PLAN.md — Pending memories approval skill (~/.claude/skills/engram-pending/SKILL.md) that auto-loads and surfaces drafts at session start
-- [ ] 05-03-PLAN.md — Config defaults (config.json session_evaluator section) + settings.json hook registration
+- [x] 05-03-PLAN.md — Config defaults (config.json session_evaluator section) + settings.json hook registration
 **Research flags**:
   - stop_hook_active check is mandatory as the absolute first action in hooks/engram_stop.py (EVAL-08)
   - Evaluator must be a detached subprocess — hook must not block (EVAL-09); Windows DETACHED_PROCESS flag requires explicit testing
