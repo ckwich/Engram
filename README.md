@@ -1,31 +1,42 @@
-# Engram 🧠
-### Semantic Long-Term Memory for AI Agents
+# Engram
+### Intelligent Semantic Memory for AI Agents
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP Compliant](https://img.shields.io/badge/MCP-compliant-green.svg)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
 
-Engram is a local-first MCP memory server that gives AI agents genuinely useful long-term memory. Unlike naive memory servers that rely on substring matching, Engram uses real semantic embeddings — so searching *"dispatch calendar"* surfaces content about *"scheduling and daily operations"* even with zero keyword overlap.
-
-Built as a direct response to the limitations of existing MCP memory tools.
+Engram is a local-first MCP memory server that gives AI agents genuinely useful long-term memory. It uses real semantic embeddings for search, provides three-tier retrieval to keep token costs proportional to need, and includes an intelligent layer that prevents duplicates, tracks access patterns, surfaces stale memories, indexes codebases automatically, and captures session outcomes for human approval.
 
 ---
 
-## Why Engram?
+## Features
 
-Most MCP memory servers are glorified key-value stores with a `query in content.lower()` search. That's not memory — that's `grep`.
+### Core Memory Server
+- **Semantic search** via sentence-transformers (all-MiniLM-L6-v2) — local, offline, zero cost
+- **Three-tier retrieval** — snippets, chunks, or full content based on what's actually needed
+- **Markdown-aware chunking** — splits on headers first, then paragraphs, max 800 chars per chunk
+- **Dual storage** — JSON flat files (source of truth) + ChromaDB vector index (search)
+- **Web dashboard** at localhost:5000 — full CRUD, search, tag filtering, memory templates
 
-Engram is different:
+### Memory Quality Layer
+- **Deduplication gate** — blocks near-duplicate stores (cosine similarity >= 0.92, configurable) with `force=True` override
+- **Access tracking** — `last_accessed` timestamp on every retrieval (fire-and-forget, non-blocking)
+- **Relationship links** — `related_to` field with bidirectional `get_related_memories` queries
+- **Staleness detection** — surfaces time-stale (not accessed in N days) and code-stale memories via WebUI tab and MCP tool
 
-| Feature | Typical MCP Memory Server | Engram |
-|---|---|---|
-| Search | Substring match | Cosine similarity (real semantic search) |
-| Retrieval | All-or-nothing | Three-tier: snippet → chunk → full content |
-| Token cost | High (dumps full memories) | Proportional to what's actually needed |
-| Storage | SQLite or flat JSON | JSON (source of truth) + ChromaDB (search index) |
-| Chunking | None | Markdown-aware, header-respecting |
-| Dashboard | Minimal or none | Full web UI with CRUD, tag filtering, search |
+### Codebase Indexer
+- **Architectural synthesis** — `engram_index.py` uses Claude Code CLI to synthesize "Model B" understanding (why, decisions, patterns, watch-outs) from any codebase
+- **Three modes** — bootstrap (full synthesis), evolve (incremental hash-diff), full (re-index everything)
+- **Per-project config** — `.engram/config.json` with custom domains, file globs, and synthesis questions
+- **Auto-generated skills** — thin skill files that trigger Engram retrieval when editing domain files
+- **Git hook** — post-commit hook runs evolve mode automatically in the background
+
+### Session Evaluator
+- **Stop hook** — evaluates every Claude Code session after it ends against configurable criteria
+- **Approval gate** — worthy sessions produce a memory draft saved to `.engram/pending_memories/`
+- **Next-session surfacing** — `engram-pending` skill auto-loads and presents drafts for approval
+- **Dedup-protected** — deduplication gate runs automatically before any draft is stored
 
 ---
 
@@ -33,45 +44,54 @@ Engram is different:
 
 ### Three-Tier Retrieval
 
-The core insight: agents should pay token costs proportional to what they actually need.
+Agents should pay token costs proportional to what they actually need.
 
 ```
 Tier 1 — search_memories("dispatch calendar")
-         → 5 scored snippets, ~50 tokens each
-         → identify the right key + chunk_id
+         -> 5 scored snippets, ~50 tokens each
+         -> identify the right key + chunk_id
 
 Tier 2 — retrieve_chunk("sylvara_scheduler", chunk_id=3)
-         → one relevant section, ~200 tokens
-         → usually sufficient
+         -> one relevant section, ~200 tokens
+         -> usually sufficient
 
 Tier 3 — retrieve_memory("sylvara_scheduler")
-         → full content, intentional and explicit
+         -> full content, intentional and explicit
 ```
 
-A typical agent session uses Tier 1 and Tier 2 only. Tier 3 is there when you need it.
+### Semantic Search
 
-### Semantic Search That Actually Works
-
-Engram uses `sentence-transformers/all-MiniLM-L6-v2` for local embeddings and ChromaDB for vector storage. No API calls, no privacy exposure, no ongoing cost. The model runs fully on CPU and downloads once (~80MB) on first use.
+Engram uses `all-MiniLM-L6-v2` for local embeddings and ChromaDB for vector storage. No API calls, no privacy exposure, no ongoing cost. The model runs on CPU and downloads once (~80MB).
 
 ```python
-# These will match even with zero keyword overlap:
+# These match with zero keyword overlap:
 search_memories("CRM overlap with competitor")
-# → surfaces memory about "Arbostar integration decision"
+# -> "Arbostar integration decision"
 
 search_memories("audio transcription pipeline")
-# → surfaces memory about "VoIP-first WebRTC architecture"
+# -> "VoIP-first WebRTC architecture"
 ```
 
-### Markdown-Aware Chunking
+### Deduplication Gate
 
-Content is split on markdown headers first, then paragraph boundaries, then hard size limits (800 chars per chunk). This means a 5,000-character architectural decision doc doesn't get dumped into a single chunk — it becomes 6-8 semantically coherent pieces, each independently retrievable.
+When storing a memory, Engram automatically checks for near-duplicates:
+
+```python
+store_memory("billing_fix", content="...")
+# -> "WARNING: Similar memory exists: billing_webhook_pattern (score: 0.94)"
+# -> Memory NOT stored. Use force=True to override.
+
+store_memory("billing_fix", content="...", force=True)
+# -> Stored (dedup overridden)
+```
+
+The threshold (default 0.92) is configurable in `config.json`.
 
 ---
 
 ## MCP Tools
 
-Engram exposes 6 tools to any MCP-compatible agent (Claude Code, Claude Desktop, Cursor, etc.):
+Engram exposes 8 tools to any MCP-compatible agent:
 
 | Tool | Signature | Purpose | Token Cost |
 |---|---|---|---|
@@ -79,22 +99,10 @@ Engram exposes 6 tools to any MCP-compatible agent (Claude Code, Claude Desktop,
 | `list_all_memories` | `()` | Full directory: keys, titles, tags, timestamps | Very low |
 | `retrieve_chunk` | `(key, chunk_id)` | Single chunk by key + chunk_id | Medium |
 | `retrieve_memory` | `(key)` | Full memory content | High (intentional) |
-| `store_memory` | `(key, content, tags, title)` | Create or update a memory | — |
-| `delete_memory` | `(key)` | Permanently delete a memory | — |
-
-### Recommended Agent Directive
-
-Add this to your `AGENTS.md` or `CLAUDE.md`:
-
-```markdown
-## Memory Protocol
-Before starting any task, search Engram for relevant context:
-1. search_memories(query) — identify relevant keys and chunk_ids
-2. retrieve_chunk(key, chunk_id) — fetch the relevant section
-3. retrieve_memory(key) — only if the full content is needed
-
-Never call retrieve_memory() without checking if a chunk is sufficient first.
-```
+| `store_memory` | `(key, content, tags, title, related_to, force)` | Create or update a memory | -- |
+| `get_related_memories` | `(key)` | Bidirectional relationship traversal | Low |
+| `get_stale_memories` | `(days=90, type='all')` | Surface stale memories (time/code/all) | Low |
+| `delete_memory` | `(key)` | Permanently delete a memory | -- |
 
 ---
 
@@ -103,6 +111,7 @@ Never call retrieve_memory() without checking if a chunk is sufficient first.
 ### Prerequisites
 - Python 3.10+
 - Git
+- Claude Code CLI (for codebase indexer and session evaluator)
 
 ### Quick Start
 
@@ -150,73 +159,206 @@ Add to your `claude_desktop_config.json`:
 python server.py --transport sse --port 5100
 ```
 
-Then configure your client to connect via `http://your-server:5100/sse`.
+---
+
+## Skills
+
+Engram installs two Claude Code skills at `~/.claude/skills/`:
+
+### /engramize
+
+Create memories naturally mid-session:
+
+```
+/engramize the billing webhook race condition fix we just figured out
+```
+
+Claude looks back at the session context, drafts a properly formatted memory (key, title, tags, content), shows it for approval, then stores. Enforces naming conventions (snake_case keys, em-dash titles, three-tag standard).
+
+### engram-pending
+
+Auto-loads at session start. Checks for pending memory drafts from the session evaluator and presents them for approval, editing, or deletion.
+
+---
+
+## Codebase Indexer
+
+Synthesize architectural understanding from any codebase into Engram memories.
+
+```bash
+# Interactive setup — auto-detects domains, you confirm
+python engram_index.py --project /path/to/project --init
+
+# Full synthesis from planning docs + source code
+python engram_index.py --project /path/to/project --mode bootstrap
+
+# Incremental — only changed domains since last run
+python engram_index.py --project /path/to/project --mode evolve
+
+# Complete re-index
+python engram_index.py --project /path/to/project --mode full
+
+# Preview without synthesizing
+python engram_index.py --project /path/to/project --dry-run
+
+# Re-index a specific domain
+python engram_index.py --project /path/to/project --domain billing
+
+# Install git post-commit hook for automatic evolve
+python engram_index.py --project /path/to/project --install-hook
+```
+
+### Per-Project Config
+
+Create `.engram/config.json` in your project root (or use `--init`):
+
+```json
+{
+  "project_name": "sylvara",
+  "domains": {
+    "billing": {
+      "file_globs": ["src/billing/**", "src/stripe/**"],
+      "questions": [
+        "How does the billing pipeline work?",
+        "What are the key integration points?"
+      ]
+    },
+    "auth": {
+      "file_globs": ["src/auth/**", "src/middleware/auth*"],
+      "questions": [
+        "How does authentication flow work?",
+        "What session management decisions were made?"
+      ]
+    }
+  },
+  "planning_paths": [".planning/", "docs/"],
+  "model": "sonnet",
+  "max_file_size_kb": 100
+}
+```
+
+### How It Works
+
+1. **Bootstrap** reads planning artifacts + source files per domain
+2. **Sends context** to Claude Code CLI (`claude -p`) for synthesis — uses your Max plan, zero extra cost
+3. **Stores memories** in the `codebase_{project}_{domain}_architecture` namespace
+4. **Generates thin skill files** at `~/.claude/skills/{project}-{domain}-context/` that trigger Engram retrieval when editing matching files
+5. **Tracks file hashes** in `.engram/index.json` for incremental re-indexing
+
+Manual edits to Engram memories always win over re-indexing (unless `--force` is passed).
+
+---
+
+## Session Evaluator
+
+Automatically captures significant session outcomes as memories.
+
+### Setup
+
+Register the Stop hook in Claude Code settings (one-time):
+
+```json
+// In ~/.claude/settings.json, add to hooks.Stop array:
+{
+  "type": "command",
+  "command": "C:/Dev/Engram/venv/Scripts/python.exe C:/Dev/Engram/hooks/engram_stop.py"
+}
+```
+
+### How It Works
+
+1. **After every session**, the Stop hook fires and spawns a detached evaluator subprocess (never blocks)
+2. **Evaluator reads** `last_assistant_message` from the session and calls Claude CLI with configured criteria
+3. **If criteria are met** (bug resolved, new capability, architectural decision, milestone), a memory draft is written to `.engram/pending_memories/`
+4. **Dedup gate runs** before writing — if a near-duplicate exists, it's noted in the draft
+5. **Next session**, the `engram-pending` skill surfaces drafts for approval
+
+### Safety
+
+- `stop_hook_active` check is the absolute first action — prevents infinite evaluation loops
+- Evaluator runs as a detached subprocess — hook exits in under 10 seconds
+- `auto_approve_threshold: 0.0` means always ask (configurable per project)
+- No memory is ever stored without explicit human approval (unless threshold is raised)
+
+### Configuration
+
+Add to your project's `.engram/config.json`:
+
+```json
+{
+  "session_evaluator": {
+    "logic_win_triggers": [
+      "bug resolved",
+      "new system capability added",
+      "architectural decision made"
+    ],
+    "milestone_triggers": [
+      "phase completed",
+      "feature shipped",
+      "significant refactor done"
+    ],
+    "auto_approve_threshold": 0.0
+  }
+}
+```
 
 ---
 
 ## Web Dashboard
 
-Engram ships with a full-featured web UI at `http://localhost:5000`.
+Full-featured web UI at `http://localhost:5000`:
 
 ```bash
 python webui.py
 ```
 
-Features:
-- **Grid and List views** — metadata-only cards with chunk count, char count, tags, date
-- **Semantic search** — real-time results with relevance scores, snippets, and chunk IDs
-- **Three-tier expansion** — click a result to load the chunk; escalate to full memory on demand
-- **Full CRUD** — create, edit, delete from the browser
-- **Memory templates** — Project, Decision, Reference, Snippet scaffolds
-- **Tag filtering** — sidebar tag browser across all memories
-- **Stats header** — live memory count and total chunk count
+- **Grid and List views** with metadata cards
+- **Semantic search** with relevance scores and three-tier expansion
+- **Full CRUD** from the browser with dedup warnings
+- **Related memories** displayed as clickable links on detail view
+- **Stale Memories tab** showing time-stale and code-stale memories with Mark Reviewed action
+- **Memory templates** for common types (Project, Decision, Reference, Snippet)
+- **Tag filtering** sidebar
 
-### Web API Endpoints
-
-The dashboard also exposes a REST API:
+### Web API
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/search?q=...&limit=10` | Semantic search (up to 50 results) |
+| `GET` | `/api/search?q=...&limit=10` | Semantic search |
 | `GET` | `/api/chunk/<key>/<chunk_id>` | Retrieve a single chunk |
 | `GET` | `/api/memory/<key>` | Retrieve full memory |
-| `POST` | `/api/memory` | Create a memory (JSON body: `key`, `content`, `tags`, `title`) |
-| `PUT` | `/api/memory/<key>` | Update a memory (JSON body: `content`, `tags`, `title`) |
+| `POST` | `/api/memory` | Create a memory |
+| `PUT` | `/api/memory/<key>` | Update a memory |
 | `DELETE` | `/api/memory/<key>` | Delete a memory |
-| `GET` | `/api/stats` | Memory count, chunk count, paths |
-| `GET` | `/health` | Health check (model status, counts) |
+| `GET` | `/api/related/<key>` | Get related memories |
+| `GET` | `/api/stale` | List stale memories |
+| `POST` | `/api/memory/<key>/reviewed` | Mark memory as reviewed |
+| `GET` | `/api/stats` | Memory count, chunk count |
+| `GET` | `/health` | Health check |
 
 ---
 
 ## CLI Utilities
 
 ```bash
-# Start the MCP server (stdio transport, default)
+# MCP server (stdio transport, default)
 python server.py
 
-# Start with SSE transport for remote access
+# SSE transport for remote access
 python server.py --transport sse --port 5100
 
-# Rebuild the ChromaDB index from JSON files (recovery tool)
+# Rebuild ChromaDB index from JSON (recovery)
 python server.py --rebuild-index
 
-# Export all memories to a portable JSON bundle
+# Export/import all memories
 python server.py --export
-# → engram_export_2026-03-16.json
-
-# Import from a JSON bundle
 python server.py --import-file engram_export_2026-03-16.json
 
-# Fix chunk_count on legacy memories
-python server.py --migrate
-
-# Health check — print model status, memory count, paths
+# Health check and self-test
 python server.py --health
-
-# Integration self-test (store → search → retrieve_chunk → delete)
 python server.py --self-test
 
-# Generate MCP client config JSON
+# Generate MCP client config
 python server.py --generate-config
 ```
 
@@ -227,18 +369,26 @@ python server.py --generate-config
 ```
 engram/
 ├── core/
-│   ├── embedder.py        # sentence-transformers wrapper (lazy load, batched, async)
-│   ├── chunker.py         # markdown-aware content chunker (800 char max per chunk)
-│   └── memory_manager.py  # storage engine (JSON + ChromaDB, sync + async APIs)
+│   ├── embedder.py          # sentence-transformers wrapper
+│   ├── chunker.py           # markdown-aware content chunker
+│   └── memory_manager.py    # storage engine (JSON + ChromaDB, dedup, relationships, staleness)
+├── hooks/
+│   ├── engram_stop.py       # Claude Code Stop hook entry point
+│   ├── engram_evaluator.py  # detached session evaluator
+│   └── test_engram_evaluator.py
 ├── data/
-│   ├── memories/          # JSON flat files — source of truth
-│   └── chroma/            # ChromaDB vector index — rebuilt from JSON if lost
+│   ├── memories/            # JSON flat files — source of truth
+│   └── chroma/              # ChromaDB vector index
 ├── templates/
-│   └── index.html         # web dashboard template
-├── server.py              # FastMCP server (stdio + SSE transport)
-├── webui.py               # Flask web dashboard + REST API
-├── install.py             # setup wizard
-└── requirements.txt       # pinned dependencies
+│   └── index.html           # web dashboard
+├── static/
+│   └── style.css            # dashboard styles
+├── server.py                # FastMCP server (8 MCP tools)
+├── webui.py                 # Flask web dashboard + REST API
+├── engram_index.py          # codebase indexer CLI
+├── config.json              # runtime config (dedup threshold, stale days, evaluator criteria)
+├── install.py               # setup wizard
+└── requirements.txt         # pinned dependencies
 ```
 
 ### Dependencies
@@ -250,42 +400,29 @@ engram/
 | `chromadb` | ~1.5.5 | Persistent vector store |
 | `flask` | ~3.1.3 | Web dashboard |
 
+No additional dependencies for the codebase indexer or session evaluator — both use the Claude Code CLI (`claude -p`) which runs under your existing subscription.
+
 ### Design Decisions
 
-**JSON as source of truth, ChromaDB as index.** If the vector index is ever lost or corrupted, `--rebuild-index` reconstructs it entirely from the JSON files. Your memories are never solely in a binary database.
+**JSON as source of truth.** If the vector index is corrupted, `--rebuild-index` reconstructs it from JSON. Your memories are never solely in a binary database.
 
-**Local embeddings only.** No external API calls for embedding. The model runs on CPU, works offline, and has zero ongoing cost. Your memory contents never leave your machine.
+**Local embeddings only.** No external API calls. The model runs on CPU, works offline, zero ongoing cost. Memory contents never leave your machine.
 
-**Batched embedding.** `embed_batch()` processes in groups of 8 to prevent CPU timeouts on large memories.
+**Dedup before store.** Every `store_memory` call checks for semantic near-duplicates. The threshold (0.92 cosine) is configurable. Self-updates (same key) are always allowed through.
 
-**Non-blocking encoding.** The MCP server uses async embedding (`embed_batch_async`) that runs in a thread pool executor, so encoding never blocks the event loop. This prevents MCP client timeouts when storing large memories with many chunks.
+**Fire-and-forget access tracking.** `last_accessed` updates run in background tasks — retrieval is never slowed down by tracking writes.
 
-**Dedicated ChromaDB executor.** ChromaDB operations run in an isolated 4-thread pool with 30-second timeouts. If a ChromaDB call times out, the zombie thread stays isolated and cannot exhaust the default executor used by other async work.
+**CLI-based synthesis.** The codebase indexer and session evaluator use `claude -p` subprocess calls instead of the Anthropic API. This uses your existing Claude Code subscription with zero marginal cost.
 
-**Eager startup initialization.** Both the embedding model and ChromaDB are loaded before the MCP server accepts connections. No blocking initialization during tool calls.
+**Non-blocking hooks.** The Stop hook spawns the evaluator as a detached subprocess and exits immediately. Sessions are never blocked by evaluation.
 
-**Thread-safe collection init.** Double-checked locking ensures ChromaDB collection initialization is safe across concurrent threads.
-
-**15,000 character limit per memory.** `store_memory` rejects content over 15,000 characters with a helpful error. For large documents, split into multiple memories with specific keys that follow a naming pattern:
-
-```
-lumen_adr_018          # ADR section 1
-lumen_adr_019          # ADR section 2
-sylvara_arch_overview  # Architecture overview
-sylvara_arch_api       # Architecture — API layer
-```
-
-This produces better chunking, more precise search results, and avoids embedding timeouts.
-
-**Agents must explicitly store.** Engram never writes memories automatically. Every `store_memory` call is an intentional act by the agent or user. No surprise writes.
-
-**Audit trail.** Every store appends a timestamped log line (`Created via Engram` / `Updated via Engram`) to the content, providing a built-in audit trail.
+**Human approval for automated captures.** The session evaluator never stores memories directly — it writes drafts to pending files. A human must approve, edit, or delete each draft.
 
 ---
 
 ## Storage Layout
 
-Memories are stored as plain JSON files:
+Memories are stored as plain JSON:
 
 ```json
 {
@@ -295,6 +432,9 @@ Memories are stored as plain JSON files:
   "tags": ["sylvara", "architecture", "decisions"],
   "created_at": "2026-03-16T14:23:00-07:00",
   "updated_at": "2026-03-16T14:23:00-07:00",
+  "last_accessed": "2026-04-01T09:15:00-07:00",
+  "related_to": ["sylvara_ops", "sylvara_billing"],
+  "potentially_stale": false,
   "chunk_count": 19,
   "chars": 7099,
   "lines": 142
