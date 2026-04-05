@@ -95,7 +95,11 @@ Plans:
   3. The Stop hook exits in under 10 seconds regardless of evaluator duration (evaluator spawns as detached subprocess)
   4. If stop_hook_active is true in the hook payload, the hook exits immediately with no action, preventing infinite evaluation loops
   5. Evaluation criteria and auto_approve_threshold are configurable per-project in .engram/config.json session_evaluator section
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 05-01-PLAN.md — Stop hook entry point (hooks/engram_stop.py) + detached evaluator subprocess (hooks/engram_evaluator.py) with claude.cmd evaluation, dedup gate, pending file writer
+- [ ] 05-02-PLAN.md — Pending memories approval skill (~/.claude/skills/engram-pending/SKILL.md) that auto-loads and surfaces drafts at session start
+- [ ] 05-03-PLAN.md — Config defaults (config.json session_evaluator section) + settings.json hook registration
 **Research flags**:
   - stop_hook_active check is mandatory as the absolute first action in hooks/engram_stop.py (EVAL-08)
   - Evaluator must be a detached subprocess — hook must not block (EVAL-09); Windows DETACHED_PROCESS flag requires explicit testing
@@ -111,4 +115,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Core Memory Enhancements | 2/3 | In Progress|  |
 | 3. Codebase Indexer | 0/3 | Not started | - |
 | 4. Staleness Detection | 0/2 | Not started | - |
-| 5. Session Evaluator | 0/TBD | Not started | - |
+| 5. Session Evaluator | 0/3 | Not started | - |
