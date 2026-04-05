@@ -66,16 +66,16 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Session Evaluator
 
-- [ ] **EVAL-01**: Claude Code Stop hook evaluates completed sessions against configurable criteria
-- [ ] **EVAL-02**: "Logic Win" triggers: bug resolved, new capability added, architectural decision made (configurable)
-- [ ] **EVAL-03**: "Milestone" triggers: phase completed, feature shipped, significant refactor done (configurable)
+- [x] **EVAL-01**: Claude Code Stop hook evaluates completed sessions against configurable criteria
+- [x] **EVAL-02**: "Logic Win" triggers: bug resolved, new capability added, architectural decision made (configurable)
+- [x] **EVAL-03**: "Milestone" triggers: phase completed, feature shipped, significant refactor done (configurable)
 - [ ] **EVAL-04**: If criteria met, drafts a memory and presents for approval before storing
-- [ ] **EVAL-05**: Deduplication gate (DEDU-01) runs automatically before approval prompt
-- [ ] **EVAL-06**: Criteria configurable per project in .engram/config.json session_evaluator section
-- [ ] **EVAL-07**: auto_approve_threshold of 0.0 means always ask; higher values auto-approve high-confidence captures
-- [ ] **EVAL-08**: Stop hook checks stop_hook_active flag to prevent infinite evaluation loops
-- [ ] **EVAL-09**: Evaluator spawns as detached subprocess — hook exits in under 10 seconds
-- [ ] **EVAL-10**: Always-on for every session (not gated to indexed projects)
+- [x] **EVAL-05**: Deduplication gate (DEDU-01) runs automatically before approval prompt
+- [x] **EVAL-06**: Criteria configurable per project in .engram/config.json session_evaluator section
+- [x] **EVAL-07**: auto_approve_threshold of 0.0 means always ask; higher values auto-approve high-confidence captures
+- [x] **EVAL-08**: Stop hook checks stop_hook_active flag to prevent infinite evaluation loops
+- [x] **EVAL-09**: Evaluator spawns as detached subprocess — hook exits in under 10 seconds
+- [x] **EVAL-10**: Always-on for every session (not gated to indexed projects)
 
 ## v2 Requirements
 
@@ -156,16 +156,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STAL-02 | Phase 4 | Complete |
 | STAL-03 | Phase 4 | Complete |
 | STAL-04 | Phase 4 | Complete |
-| EVAL-01 | Phase 5 | Pending |
-| EVAL-02 | Phase 5 | Pending |
-| EVAL-03 | Phase 5 | Pending |
+| EVAL-01 | Phase 5 | Complete |
+| EVAL-02 | Phase 5 | Complete |
+| EVAL-03 | Phase 5 | Complete |
 | EVAL-04 | Phase 5 | Pending |
-| EVAL-05 | Phase 5 | Pending |
-| EVAL-06 | Phase 5 | Pending |
-| EVAL-07 | Phase 5 | Pending |
-| EVAL-08 | Phase 5 | Pending |
-| EVAL-09 | Phase 5 | Pending |
-| EVAL-10 | Phase 5 | Pending |
+| EVAL-05 | Phase 5 | Complete |
+| EVAL-06 | Phase 5 | Complete |
+| EVAL-07 | Phase 5 | Complete |
+| EVAL-08 | Phase 5 | Complete |
+| EVAL-09 | Phase 5 | Complete |
+| EVAL-10 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 45 total

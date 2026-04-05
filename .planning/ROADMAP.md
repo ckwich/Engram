@@ -97,7 +97,7 @@ Plans:
   5. Evaluation criteria and auto_approve_threshold are configurable per-project in .engram/config.json session_evaluator section
 **Plans**: 3 plans
 Plans:
-- [ ] 05-01-PLAN.md — Stop hook entry point (hooks/engram_stop.py) + detached evaluator subprocess (hooks/engram_evaluator.py) with claude.cmd evaluation, dedup gate, pending file writer
+- [x] 05-01-PLAN.md — Stop hook entry point (hooks/engram_stop.py) + detached evaluator subprocess (hooks/engram_evaluator.py) with claude.cmd evaluation, dedup gate, pending file writer
 - [ ] 05-02-PLAN.md — Pending memories approval skill (~/.claude/skills/engram-pending/SKILL.md) that auto-loads and surfaces drafts at session start
 - [ ] 05-03-PLAN.md — Config defaults (config.json session_evaluator section) + settings.json hook registration
 **Research flags**:
