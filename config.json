@@ -1,4 +1,17 @@
 {
   "dedup_threshold": 0.92,
-  "stale_days": 90
+  "stale_days": 90,
+  "session_evaluator": {
+    "logic_win_triggers": [
+      "bug resolved",
+      "new capability added",
+      "architectural decision made"
+    ],
+    "milestone_triggers": [
+      "phase completed",
+      "feature shipped",
+      "significant refactor done"
+    ],
+    "auto_approve_threshold": 0.0
+  }
 }
