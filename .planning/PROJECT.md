@@ -36,10 +36,13 @@ AI agents working on any indexed project should automatically receive relevant a
 - ✓ Staleness detection and surfacing (WebUI tab + MCP tool) — Phase 4
 - ✓ Indexer-driven potentially_stale flagging on code changes — Phase 4
 
+- ✓ Session evaluator via Claude Code Stop hook — Phase 5
+- ✓ Approval gate for automated memory capture — Phase 5
+- ✓ Configurable session evaluation criteria per project — Phase 5
+
 ### Active
-- [ ] Session evaluator via Claude Code Stop hook
-- [ ] Approval gate for automated memory capture
-- [ ] Configurable session evaluation criteria per project
+
+(All milestone requirements complete)
 
 ### Out of Scope
 
@@ -103,4 +106,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-04 after Phase 4 completion*
+*Last updated: 2026-04-05 after Phase 5 completion — all phases complete*
