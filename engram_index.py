@@ -146,9 +146,13 @@ def assemble_context(project_root: Path, config: dict, domain_name: str, domain_
 
     # Planning artifacts
     for rel_path in config.get("planning_paths", DEFAULT_PLANNING_PATHS):
-        p = project_root / rel_path
-        if p.exists():
+        p = Path(rel_path) if Path(rel_path).is_absolute() else project_root / rel_path
+        if p.exists() and p.is_file():
             parts.append(f"=== {rel_path} ===\n{p.read_text(encoding='utf-8', errors='replace')}")
+        elif p.exists() and p.is_dir():
+            # Directory: read all .md files inside
+            for md_file in sorted(p.glob("**/*.md")):
+                parts.append(f"=== {md_file.name} ===\n{md_file.read_text(encoding='utf-8', errors='replace')}")
 
     # Domain source files
     max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
