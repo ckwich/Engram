@@ -171,9 +171,13 @@ def call_evaluator_claude(prompt: str) -> dict:
     }
 
     try:
+        # Resolve claude.cmd path — detached subprocesses may not inherit full PATH
+        import shutil
+        claude_cmd = shutil.which("claude.cmd") or shutil.which("claude") or "claude.cmd"
+
         result = subprocess.run(
             [
-                "claude.cmd", "-p",
+                claude_cmd, "-p",
                 "--tools", "",
                 "--no-session-persistence",
                 "--output-format", "json",
@@ -186,6 +190,10 @@ def call_evaluator_claude(prompt: str) -> dict:
             encoding="utf-8",
             timeout=120,
         )
+
+        if not result.stdout.strip():
+            logger.warning("Claude returned empty output (stdout empty)")
+            return fallback
 
         data = json.loads(result.stdout)
         if data.get("is_error"):
