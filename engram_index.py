@@ -459,6 +459,9 @@ def index_domain(
 
     # Lazy import — only when actually synthesizing (avoids chromadb dependency for dry-run)
     from core.memory_manager import memory_manager, DuplicateMemoryError
+    from core.embedder import embedder
+    embedder._load()
+    memory_manager._ensure_initialized()
 
     # Manual edit protection (INDX-13 / D-19): skip if memory was manually edited
     last_run = manifest.get("last_run")
