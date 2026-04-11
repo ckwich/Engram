@@ -516,7 +516,7 @@ async function openViewModal(key) {
     const m = await res.json();
     if (m.error) { document.getElementById('view-content').textContent = m.error; return; }
     document.getElementById('view-title').textContent = m.title || m.key;
-    const lastAccessed = m.last_accessed ? (m.last_accessed || '').slice(0, 10) : 'never';
+    const lastAccessed = m.last_accessed ? m.last_accessed.slice(0, 10) : 'never';
     document.getElementById('view-meta').textContent =
       `Key: ${m.key} · Created: ${(m.created_at || '').slice(0, 10)} · Updated: ${(m.updated_at || '').slice(0, 10)} · Accessed: ${lastAccessed} · ${m.chars || 0} chars`;
     document.getElementById('view-tags').innerHTML =

@@ -200,7 +200,12 @@ def call_evaluator_claude(prompt: str) -> dict:
             print(f"[evaluator] Claude returned error: {data.get('result', 'unknown')}", file=sys.stderr)
             return fallback
 
-        return json.loads(data.get("result", "{}"))
+        raw_result = data.get("result", "{}")
+        try:
+            return json.loads(raw_result)
+        except json.JSONDecodeError:
+            print(f"[evaluator] Malformed result JSON: {raw_result[:200]}", file=sys.stderr)
+            return fallback
     except Exception as e:
         print(f"[evaluator] Claude call failed: {e}", file=sys.stderr)
         return fallback
@@ -229,7 +234,9 @@ def write_pending_file(result: dict, payload: dict, dup_info: Optional[dict]) ->
     pending_dir = Path(payload["cwd"]) / ".engram" / "pending_memories"
     pending_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = f"{datetime.now().strftime('%Y%m%d')}_{result['draft_key']}.json"
+    # Sanitize draft_key to prevent path traversal
+    safe_key = result['draft_key'].replace('/', '_').replace('\\', '_').replace('..', '_')
+    filename = f"{datetime.now().strftime('%Y%m%d')}_{safe_key}.json"
     path = pending_dir / filename
     path.write_text(json.dumps(pending, indent=2), encoding="utf-8")
 

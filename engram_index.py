@@ -54,13 +54,14 @@ LOG_FILE = str(ENGRAM_DIR / "last_evolve.log")
 CREATE_NO_WINDOW = 0x08000000
 
 try:
+    popen_kwargs = dict(stderr=subprocess.STDOUT, close_fds=True)
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = CREATE_NO_WINDOW
     with open(LOG_FILE, "a", encoding="utf-8") as log:
+        popen_kwargs["stdout"] = log
         proc = subprocess.Popen(
             [VENV_PYTHON, ENGRAM_INDEX, "--mode", "evolve", "--project", PROJECT_ROOT],
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            creationflags=CREATE_NO_WINDOW,
-            close_fds=True,
+            **popen_kwargs,
         )
     sys.exit(0)
 except Exception as e:
@@ -192,11 +193,12 @@ def synthesize_domain(prompt: str, model: str = "sonnet") -> str:
     """
     Invoke claude -p to synthesize architectural understanding.
     Returns synthesized text or raises RuntimeError on failure.
-
-    On Windows, uses 'claude.cmd' (subprocess with shell=False requires the .cmd extension).
     """
+    import shutil
+    claude_cmd = shutil.which("claude.cmd") or shutil.which("claude") or "claude.cmd"
+
     result = subprocess.run(
-        ["claude.cmd", "-p",
+        [claude_cmd, "-p",
          "--tools", "",
          "--no-session-persistence",
          "--output-format", "json",
@@ -207,6 +209,9 @@ def synthesize_domain(prompt: str, model: str = "sonnet") -> str:
         encoding="utf-8",
         timeout=120,
     )
+
+    if not result.stdout.strip():
+        raise RuntimeError(f"claude -p returned empty output. stderr: {result.stderr[:200]}")
 
     try:
         data = json.loads(result.stdout)

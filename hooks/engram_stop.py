@@ -12,7 +12,10 @@ import sys
 from pathlib import Path
 
 CREATE_NO_WINDOW = 0x08000000
-VENV_PYTHON = r"C:/Dev/Engram/venv/Scripts/python.exe"
+# Resolve venv Python dynamically — works regardless of install location
+ENGRAM_ROOT = Path(__file__).parent.parent
+_is_windows = sys.platform == "win32"
+VENV_PYTHON = str(ENGRAM_ROOT / "venv" / ("Scripts" if _is_windows else "bin") / ("python.exe" if _is_windows else "python"))
 
 
 def main() -> None:
@@ -31,14 +34,18 @@ def main() -> None:
 
     try:
         log_file.parent.mkdir(parents=True, exist_ok=True)
+        popen_kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stderr": subprocess.STDOUT,
+            "close_fds": True,
+        }
+        if _is_windows:
+            popen_kwargs["creationflags"] = CREATE_NO_WINDOW
         with open(log_file, "a", encoding="utf-8") as log:
+            popen_kwargs["stdout"] = log
             subprocess.Popen(
                 [VENV_PYTHON, str(evaluator), json.dumps(payload)],
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                creationflags=CREATE_NO_WINDOW,
-                close_fds=True,
+                **popen_kwargs,
             )
     except Exception:
         pass  # fail-open: never block session end (D-04)
