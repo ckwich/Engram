@@ -33,7 +33,6 @@ This session will target eight agent-centered improvements:
 
 - Replacing `all-MiniLM-L6-v2` tonight
 - Rewriting the storage model
-- Removing current MCP tools during the overnight session
 - Performing a destructive migration of all existing memories
 - Introducing behavior that requires all dependent projects to update immediately
 
@@ -79,7 +78,7 @@ Cons:
 - Temporary duplication in the tool surface
 - Some internal logic will need to support both formatted and structured responses
 
-Recommendation: Preferred.
+Recommendation: Preferred as the implementation path, with an optional final cutover if every verification gate passes.
 
 ### Approach C — Separate agent-only sidecar service
 
@@ -106,10 +105,13 @@ The design is intentionally staged:
 3. Introduce additive metadata and scoped retrieval
 4. Add write helpers and lifecycle semantics
 5. Add session pinning only after retrieval/storage safety is proven
+6. Promote the new structured tool family to the primary surface only at the final overnight gate, and only if all verification passes remain green
+
+This means the overnight session will use compatibility shims as a safety net during implementation, but the target end state by morning is not a permanently duplicated tool surface. The desired end state is a fully upgraded primary interface with a compatibility bridge only where needed for safe transition.
 
 ## Tool Surface Design
 
-### Existing Tools
+### Existing Tools During Migration
 
 The current tools remain in place and continue returning human-formatted strings:
 
@@ -121,6 +123,8 @@ The current tools remain in place and continue returning human-formatted strings
 - `get_related_memories`
 - `get_stale_memories`
 - `delete_memory`
+
+These remain stable during the implementation waves and verification passes. They are treated as compatibility contracts until the final cutover decision.
 
 ### New Structured Tools
 
@@ -135,6 +139,11 @@ Add a parallel structured tool family:
 - `get_stale_memories_v2`
 
 Each returns structured data rather than formatted prose. Core fields should be stable and explicit.
+
+These tools are the intended long-term primary surface. During the overnight session they serve two purposes:
+
+1. Allow safe parallel verification against the existing string-based tools
+2. Provide the new canonical contract to promote at the final gate
 
 #### `search_memories_v2`
 
@@ -385,6 +394,20 @@ Run a health pass after every wave:
 
 If a wave fails, stop and repair before continuing.
 
+### Final Cutover Gate
+
+Only promote the new structured tool family to the primary surface if all of the following are true:
+
+- all tests pass
+- `server.py --self-test` passes
+- `server.py --health` passes
+- baseline memory count and chunk count remain valid
+- export/import smoke checks pass
+- sampled real-memory retrievals match or improve on baseline behavior
+- backward compatibility coverage for transition paths passes
+
+If any of these fail, the overnight session should ship the additive compatibility layer and stop there rather than forcing a risky cutover.
+
 ## Overnight Execution Phases
 
 ### Phase 0 — Safety setup
@@ -428,15 +451,17 @@ If a wave fails, stop and repair before continuing.
 
 - rerun all health passes
 - update README and tool docstrings
-- leave current tools intact
+- if all final cutover conditions pass, promote the structured tool family to the primary surface and leave compatibility shims or aliases only where required for transition safety
+- if final cutover conditions do not pass, preserve the additive dual-surface release and stop there
 
 ## Risks and Mitigations
 
 ### Risk: breaking live consumers
 
 Mitigation:
-- additive v2 tools
-- old tools preserved overnight
+- additive v2 tools during implementation
+- primary-surface promotion only at the final verified gate
+- compatibility shims retained if a hard cutover is not fully safe
 
 ### Risk: JSON / Chroma drift
 
@@ -466,8 +491,9 @@ Mitigation:
 By the end of the overnight session:
 
 - all eight improvements exist in usable form
-- existing MCP tools still work
-- new structured tools are available for agent-first use
+- the new structured tools are available and verified
+- the primary tool surface is upgraded if and only if the final cutover gate passes
+- compatibility shims remain where needed to protect dependent consumers
 - flat-file memories remain authoritative and intact
 - Chroma index remains rebuildable from JSON
 - baseline health checks and expanded tests pass
@@ -475,4 +501,4 @@ By the end of the overnight session:
 
 ## Recommendation
 
-Proceed with the additive-first overnight plan. It is the only option that realistically delivers all eight agent-centered improvements in one session while protecting live project dependencies and preserving the JSON/Chroma safety model.
+Proceed with the additive-first implementation plan plus a final verified cutover gate. This achieves the safest overnight development path while still targeting the fully upgraded end state by morning, provided all health and compatibility checks remain green.
