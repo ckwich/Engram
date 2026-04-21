@@ -17,8 +17,59 @@ import sys
 from fastmcp import FastMCP
 from core.embedder import embedder
 from core.memory_manager import memory_manager, DuplicateMemoryError, _config
+from core.tool_payloads import (
+    build_list_payload,
+    build_search_payload,
+    render_list_payload,
+    render_search_payload,
+)
 
 mcp = FastMCP("engram")
+
+
+def _clamp_search_limit(limit: int) -> int:
+    return min(max(limit, 1), 20)
+
+
+def _validate_search_query(query: str) -> str | None:
+    if not query or not query.strip():
+        return "❌ Query cannot be empty."
+    if len(query) > 2000:
+        return "❌ Query too long (max 2,000 chars). Shorten your search query."
+    return None
+
+
+@mcp.tool()
+async def search_memories_v2(query: str, limit: int = 5) -> dict:
+    """
+    Semantic search across all stored memories. Returns structured scored snippets only — NOT full content.
+
+    This is ALWAYS your first step when looking for information. Results include the key and
+    chunk_id needed for retrieve_chunk(). Only escalate to retrieve_chunk() or retrieve_memory()
+    if the snippet alone isn't sufficient.
+
+    Args:
+        query: Natural language search query. Semantic — 'scheduling problems' will find
+               'dispatch calendar issues' even without exact keyword overlap.
+        limit: Max results to return (default 5, max 20).
+
+    Returns:
+        Structured payload: {query, count, results}. Each result includes key, chunk_id,
+        title, score, snippet, and tags.
+    """
+    validation_error = _validate_search_query(query)
+    if validation_error:
+        return validation_error
+
+    try:
+        results = await memory_manager.search_memories_async(
+            query.strip(),
+            limit=_clamp_search_limit(limit),
+        )
+    except RuntimeError as e:
+        return f"❌ Engram error: {e}"
+
+    return build_search_payload(query, results)
 
 
 @mcp.tool()
@@ -36,28 +87,25 @@ async def search_memories(query: str, limit: int = 5) -> str:
         limit: Max results to return (default 5, max 20).
 
     Returns:
-        Scored list of matching chunks with snippets. Score is 0.0–1.0 (higher = more relevant).
+        Human-readable scored list of matching chunks with snippets. Score is 0.0–1.0
+        (higher = more relevant). For structured output, use search_memories_v2().
     """
-    if not query or not query.strip():
-        return "❌ Query cannot be empty."
-    if len(query) > 2000:
-        return "❌ Query too long (max 2,000 chars). Shorten your search query."
-    try:
-        results = await memory_manager.search_memories_async(query.strip(), limit=min(max(limit, 1), 20))
-    except RuntimeError as e:
-        return f"❌ Engram error: {e}"
-    if not results:
-        return f"🔍 No memories found for '{query}'"
+    payload = await search_memories_v2(query, limit)
+    if isinstance(payload, str):
+        return payload
+    return render_search_payload(payload)
 
-    lines = [f"🔍 {len(results)} results for '{query}':\n"]
-    for r in results:
-        tags = ", ".join(r["tags"]) if r["tags"] else "none"
-        lines.append(
-            f"[score: {r['score']}] {r['title']}\n"
-            f"  key={r['key']}  chunk_id={r['chunk_id']}  tags={tags}\n"
-            f"  snippet: {r['snippet']}\n"
-        )
-    return "\n".join(lines)
+
+@mcp.tool()
+async def list_memories_v2() -> dict:
+    """
+    List all stored memories as structured metadata only — keys, titles, tags, timestamps, chunk counts.
+    No content is returned. Use this when you need to browse what exists, not search by topic.
+
+    For topic-based lookup, prefer search_memories_v2() or search_memories() instead.
+    """
+    memories = await memory_manager.list_memories_async()
+    return build_list_payload(memories)
 
 
 @mcp.tool()
@@ -68,21 +116,8 @@ async def list_all_memories() -> str:
 
     For topic-based lookup, prefer search_memories() instead.
     """
-    memories = await memory_manager.list_memories_async()
-    if not memories:
-        return "📭 No memories stored yet."
-
-    lines = [f"📚 Engram Memory Directory — {len(memories)} memories\n{'='*50}\n"]
-    for m in memories:
-        tags = ", ".join(m["tags"]) if m["tags"] else "none"
-        lines.append(
-            f"🔑 {m['key']}\n"
-            f"   Title:   {m['title']}\n"
-            f"   Tags:    {tags}\n"
-            f"   Chunks:  {m['chunk_count']}\n"
-            f"   Updated: {m['updated_at'][:16]}\n"
-        )
-    return "\n".join(lines)
+    payload = await list_memories_v2()
+    return render_list_payload(payload)
 
 
 @mcp.tool()
