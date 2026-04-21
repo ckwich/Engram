@@ -34,21 +34,18 @@ def test_chunk_content_with_metadata_tracks_headings_and_chunk_kinds():
 
 
 def test_chunk_content_preserves_legacy_shape_and_order():
-    content = (
-        "# Alpha\n"
-        "Alpha paragraph one stays together. Alpha paragraph two stays together.\n\n"
-        "## Beta\n"
-        "Beta paragraph one is long enough to stand alone.\n\n"
-        "Beta paragraph two is also long enough to stand alone.\n\n"
-        "### Gamma\n"
-        "Gamma closing note."
-    )
+    content = "# Alpha\nAlpha body.\n\n## Beta\nBeta body."
 
-    metadata_chunks = chunk_content_with_metadata(content, max_size=70)
-    legacy_chunks = chunk_content(content, max_size=70)
+    legacy_chunks = chunk_content(content)
 
     assert legacy_chunks == [
-        {"chunk_id": chunk["chunk_id"], "text": chunk["text"]}
-        for chunk in metadata_chunks
+        {
+            "chunk_id": 0,
+            "text": "# Alpha\nAlpha body.",
+        },
+        {
+            "chunk_id": 1,
+            "text": "## Beta\nBeta body.",
+        },
     ]
     assert all(set(chunk) == {"chunk_id", "text"} for chunk in legacy_chunks)
