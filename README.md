@@ -115,12 +115,15 @@ for compatibility.
 | `retrieve_chunk_v2` | `(key, chunk_id)` | Structured single-chunk retrieval |
 | `retrieve_chunks_v2` | `(requests)` | Structured batch chunk retrieval |
 | `retrieve_memory_v2` | `(key)` | Structured full-memory retrieval |
-| `pin_memory` / `unpin_memory` / `list_pins` / `clear_pins` | session-scoped | Manage temporary working-set pins for search |
-| `store_memory` | `(key, content, tags, title, related_to, force)` | Create or update a memory |
-| `check_duplicate` | `(content, key='', threshold=None)` | Preview deduplication matches before storing |
-| `suggest_memory_metadata` | `(content, title='', tags='', related_to='')` | Suggest normalized metadata from draft content |
-| `validate_memory` | `(key, content, title='', tags='', related_to='', status='active', canonical=False)` | Validate a memory payload before storing |
-| `update_memory_metadata` | `(key, ...)` | Update metadata fields without rewriting content |
+| `pin_memory` | `(session_id, key)` | Pin a memory key into a temporary session working set |
+| `unpin_memory` | `(session_id, key)` | Remove one key from a session working set |
+| `list_pins` | `(session_id)` | List pinned keys for a session |
+| `clear_pins` | `(session_id)` | Clear all pinned keys for a session |
+| `store_memory` | `(key, content, title='', tags='', related_to='', force=False)` | Create or update a memory |
+| `check_duplicate` | `(key, content)` | Preview deduplication matches before storing |
+| `suggest_memory_metadata` | `(content)` | Suggest normalized metadata from draft content |
+| `validate_memory` | `(content, title=None, tags=None, related_to=None, status=None, project=None, domain=None, canonical=None)` | Validate a memory payload before storing |
+| `update_memory_metadata` | `(key, title=None, tags=None, related_to=None, project=None, domain=None, status=None, canonical=None)` | Update metadata fields without rewriting content |
 | `get_related_memories_v2` | `(key)` | Structured forward and reverse relationship traversal |
 | `get_stale_memories_v2` | `(days=90, type='all')` | Structured stale-memory surfacing |
 | `delete_memory` | `(key)` | Permanently delete a memory |
@@ -422,7 +425,7 @@ engram/
 │   └── index.html           # web dashboard
 ├── static/
 │   └── style.css            # dashboard styles
-├── server.py                # FastMCP server (8 MCP tools)
+├── server.py                # FastMCP server (structured + compatibility MCP tools)
 ├── webui.py                 # Flask web dashboard + REST API
 ├── engram_index.py          # codebase indexer CLI
 ├── config.json              # runtime config (dedup threshold, stale days, evaluator criteria)

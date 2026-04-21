@@ -69,6 +69,29 @@ class SessionPinStore:
                 self._save(data)
             return []
 
+    def remove_key(self, key: str) -> int:
+        """Remove a deleted memory key from every session pin list."""
+        normalized_key = self._normalize_key(key)
+
+        with self._lock:
+            data = self._load()
+            removed = 0
+            updated: dict[str, list[str]] = {}
+            changed = False
+
+            for session_id, pins in data.items():
+                filtered = [pin for pin in pins if pin != normalized_key]
+                if len(filtered) != len(pins):
+                    removed += len(pins) - len(filtered)
+                    changed = True
+                if filtered:
+                    updated[session_id] = filtered
+
+            if changed:
+                self._save(updated)
+
+            return removed
+
     @staticmethod
     def _normalize_session_id(session_id: str) -> str:
         text = str(session_id).strip()

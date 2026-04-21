@@ -44,6 +44,7 @@ class MemoryListItemPayload(TypedDict):
 class MemoryListPayload(TypedDict):
     count: int
     memories: list[MemoryListItemPayload]
+    error: SearchErrorPayload | None
 
 
 def build_search_payload(query: str, results: list[SearchResultPayload]) -> SearchPayload:
@@ -92,10 +93,25 @@ def build_list_payload(memories: list[MemoryListItemPayload]) -> MemoryListPaylo
     return {
         "count": len(memories),
         "memories": memories,
+        "error": None,
+    }
+
+
+def build_list_error_payload(code: str, message: str) -> MemoryListPayload:
+    return {
+        "count": 0,
+        "memories": [],
+        "error": {
+            "code": code,
+            "message": message,
+        },
     }
 
 
 def render_list_payload(payload: MemoryListPayload) -> str:
+    if payload["error"] is not None:
+        return payload["error"]["message"]
+
     memories = payload["memories"]
 
     if not memories:

@@ -23,6 +23,7 @@ from core.embedder import embedder
 from core.memory_manager import memory_manager, DuplicateMemoryError, _config
 from core.session_pins import SessionPinStore
 from core.tool_payloads import (
+    build_list_error_payload,
     build_list_payload,
     build_search_error_payload,
     build_search_payload,
@@ -194,12 +195,12 @@ async def search_memories_v2(
 
     normalized_session_id = _normalize_session_id(session_id)
     try:
-        if normalized_session_id is not None or pinned_first:
-            pinned_keys = (
-                session_pin_store.list_pins(normalized_session_id)
-                if normalized_session_id is not None
-                else []
-            )
+        pinned_keys = (
+            session_pin_store.list_pins(normalized_session_id)
+            if normalized_session_id is not None
+            else []
+        )
+        if pinned_keys:
             payload = await memory_manager.search_memories_structured_async(
                 query.strip(),
                 limit=_clamp_search_limit(limit),
@@ -414,12 +415,16 @@ async def list_memories_v2() -> MemoryListPayload:
     No content is returned. Use this when you need to browse what exists, not search by topic.
 
     Returns:
-        Structured payload: {count, memories}. Each memory includes key, title, tags,
-        updated_at, created_at, chars, and chunk_count.
+        Structured payload: {count, memories, error}. Each memory includes key, title,
+        tags, updated_at, created_at, chars, and chunk_count. On runtime failure,
+        memories is empty and error is {code, message}.
 
     For topic-based lookup, prefer search_memories_v2() or search_memories() instead.
     """
-    memories = await memory_manager.list_memories_async()
+    try:
+        memories = await memory_manager.list_memories_async()
+    except Exception as e:
+        return build_list_error_payload("runtime_error", f"❌ Engram error: {e}")
     return build_list_payload(memories)
 
 
@@ -1013,6 +1018,7 @@ async def delete_memory(key: str) -> str:
     except RuntimeError as e:
         return f"❌ Engram error: {e}"
     if deleted:
+        session_pin_store.remove_key(key)
         return f"🗑  Deleted memory: '{key}'"
     return f"❌ Memory not found: '{key}'"
 

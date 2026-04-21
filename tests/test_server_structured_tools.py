@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import importlib
 
+from core.session_pins import SessionPinStore
+
 
 def load_server_module():
     import server
@@ -48,6 +50,52 @@ def test_search_memories_v2_returns_structured_payload(monkeypatch):
     }
 
 
+def test_search_memories_v2_keeps_bounded_search_when_session_has_no_pins(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+    expected_results = [
+        {
+            "key": "alpha-note",
+            "chunk_id": 0,
+            "title": "Alpha note",
+            "score": 0.98,
+            "snippet": "Alpha snippet",
+            "tags": ["alpha"],
+        }
+    ]
+
+    class FakePinStore:
+        def list_pins(self, session_id: str) -> list[str]:
+            observed["session_id"] = session_id
+            return []
+
+    async def fake_search(query: str, limit: int = 5):
+        observed["query"] = query
+        observed["limit"] = limit
+        return expected_results
+
+    async def fail_if_structured(*args, **kwargs):
+        raise AssertionError("structured search path should not run when the session has no pins")
+
+    monkeypatch.setattr(server, "session_pin_store", FakePinStore())
+    monkeypatch.setattr(server.memory_manager, "search_memories_async", fake_search)
+    monkeypatch.setattr(server.memory_manager, "search_memories_structured_async", fail_if_structured)
+
+    payload = asyncio.run(server.search_memories_v2("alpha", limit=7, session_id="session-a"))
+
+    assert observed == {
+        "session_id": "session-a",
+        "query": "alpha",
+        "limit": 7,
+    }
+    assert payload == {
+        "query": "alpha",
+        "count": 1,
+        "results": expected_results,
+        "error": None,
+    }
+
+
 def test_list_memories_v2_returns_structured_payload(monkeypatch):
     server = load_server_module()
     expected_memories = [
@@ -72,6 +120,27 @@ def test_list_memories_v2_returns_structured_payload(monkeypatch):
     assert payload == {
         "count": 1,
         "memories": expected_memories,
+        "error": None,
+    }
+
+
+def test_list_memories_v2_runtime_failure_returns_structured_error(monkeypatch):
+    server = load_server_module()
+
+    async def fake_list():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(server.memory_manager, "list_memories_async", fake_list)
+
+    payload = asyncio.run(server.list_memories_v2())
+
+    assert payload == {
+        "count": 0,
+        "memories": [],
+        "error": {
+            "code": "runtime_error",
+            "message": "❌ Engram error: boom",
+        },
     }
 
 
@@ -228,6 +297,7 @@ def test_list_all_memories_renders_payload_from_v2(monkeypatch):
                     "chunk_count": 2,
                 }
             ],
+            "error": None,
         }
 
     monkeypatch.setattr(server, "list_memories_v2", fake_list_v2)
@@ -243,6 +313,26 @@ def test_list_all_memories_renders_payload_from_v2(monkeypatch):
         "   Chunks:  2\n"
         "   Updated: 2026-04-20T10:30\n"
     )
+
+
+def test_list_all_memories_renders_structured_runtime_error_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_list_v2():
+        return {
+            "count": 0,
+            "memories": [],
+            "error": {
+                "code": "runtime_error",
+                "message": "❌ Engram error: boom",
+            },
+        }
+
+    monkeypatch.setattr(server, "list_memories_v2", fake_list_v2)
+
+    rendered = asyncio.run(server.list_all_memories())
+
+    assert rendered == "❌ Engram error: boom"
 
 
 def test_retrieve_chunk_renders_payload_from_v2(monkeypatch):
@@ -757,3 +847,41 @@ def test_retrieve_chunks_v2_preserves_per_item_error_objects(monkeypatch):
         ],
         "error": None,
     }
+
+
+def test_delete_memory_clears_deleted_key_from_session_pins(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_delete(key: str) -> bool:
+        observed["deleted_key"] = key
+        return True
+
+    class FakePinStore:
+        def remove_key(self, key: str) -> int:
+            observed["removed_key"] = key
+            return 2
+
+    monkeypatch.setattr(server.memory_manager, "delete_memory_async", fake_delete)
+    monkeypatch.setattr(server, "session_pin_store", FakePinStore())
+
+    rendered = asyncio.run(server.delete_memory("alpha-note"))
+
+    assert observed == {
+        "deleted_key": "alpha-note",
+        "removed_key": "alpha-note",
+    }
+    assert rendered == "🗑  Deleted memory: 'alpha-note'"
+
+
+def test_session_pin_store_remove_key_clears_stale_pins_across_sessions(tmp_path):
+    store = SessionPinStore(tmp_path / "session_pins.json")
+    store.pin("session-a", "alpha-note")
+    store.pin("session-a", "beta-note")
+    store.pin("session-b", "alpha-note")
+
+    removed = store.remove_key("alpha-note")
+
+    assert removed == 2
+    assert store.list_pins("session-a") == ["beta-note"]
+    assert store.list_pins("session-b") == []
