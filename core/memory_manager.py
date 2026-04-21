@@ -128,6 +128,20 @@ def _normalize_optional_text(value: Any) -> Optional[str]:
     return text or None
 
 
+def _normalize_status(value: Any) -> Optional[str]:
+    """Normalize lifecycle status inputs to lower-case text."""
+    text = _normalize_optional_text(value)
+    return text.lower() if text else None
+
+
+def _coerce_allowed_status(value: Any, default: str = DEFAULT_MEMORY_STATUS) -> str:
+    """Coerce missing or unsupported lifecycle statuses to a safe default."""
+    normalized = _normalize_status(value)
+    if normalized in ALLOWED_MEMORY_STATUSES:
+        return normalized
+    return default
+
+
 def _normalize_tags(tags: Any) -> list[str]:
     """Normalize tags to a stable, de-duplicated list of non-empty strings."""
     if tags is None:
@@ -314,7 +328,7 @@ class MemoryManager:
         normalized["related_to"] = _normalize_related_to(normalized.get("related_to"))
         normalized["project"] = _normalize_optional_text(normalized.get("project"))
         normalized["domain"] = _normalize_optional_text(normalized.get("domain"))
-        normalized["status"] = _normalize_optional_text(normalized.get("status")) or DEFAULT_MEMORY_STATUS
+        normalized["status"] = _coerce_allowed_status(normalized.get("status"))
         normalized["canonical"] = _normalize_bool(normalized.get("canonical"), default=False)
         return normalized
 
@@ -742,7 +756,7 @@ class MemoryManager:
     ) -> dict:
         """Validate memory content and additive metadata fields."""
         normalized_related_to = _normalize_related_to(related_to)
-        normalized_status = _normalize_optional_text(status)
+        normalized_status = _normalize_status(status)
         normalized = {
             "title": _normalize_optional_text(title),
             "tags": _normalize_tags(tags),
@@ -803,7 +817,7 @@ class MemoryManager:
         """Collapse structured validation errors into a stable exception string."""
         return "; ".join(error["message"] for error in validation["errors"])
 
-    def _prepare_metadata_update(self, key: str, **changes) -> tuple[dict, list[dict]]:
+    def _prepare_metadata_update(self, key: str, **changes) -> tuple[dict, list[dict], Optional[str]]:
         """Apply additive metadata updates, persist JSON first, then reindex content."""
         existing = self._load_json(key)
         if existing is None:
@@ -846,7 +860,7 @@ class MemoryManager:
             else existing.get("domain")
         )
         resolved_status = (
-            _normalize_optional_text(changes.get("status")) or DEFAULT_MEMORY_STATUS
+            _normalize_status(changes.get("status")) or DEFAULT_MEMORY_STATUS
             if "status" in changes
             else existing.get("status", DEFAULT_MEMORY_STATUS)
         )
@@ -893,24 +907,33 @@ class MemoryManager:
 
         self._save_json(data)
 
+        cleanup_warning = None
         try:
             self._delete_chunks_from_chroma(key)
-        except Exception:
-            pass
+        except Exception as e:
+            cleanup_warning = (
+                f"Failed to delete old indexed chunks for '{key}' before reindex: {e}"
+            )
 
-        return data, chunks
+        return data, chunks, cleanup_warning
 
     def update_memory_metadata(self, key: str, **changes) -> dict:
         """Update metadata fields and reindex existing chunk content safely."""
-        data, chunks = self._prepare_metadata_update(key, **changes)
+        data, chunks, cleanup_warning = self._prepare_metadata_update(key, **changes)
         self._index_chunks(key, chunks, data)
-        return data
+        result = dict(data)
+        if cleanup_warning:
+            result["index_cleanup_warning"] = cleanup_warning
+        return result
 
     async def update_memory_metadata_async(self, key: str, **changes) -> dict:
         """Async metadata update wrapper with JSON-first / Chroma-second ordering."""
-        data, chunks = await _run_blocking(self._prepare_metadata_update, key, **changes)
+        data, chunks, cleanup_warning = await _run_blocking(self._prepare_metadata_update, key, **changes)
         await self._index_chunks_async(key, chunks, data)
-        return data
+        result = dict(data)
+        if cleanup_warning:
+            result["index_cleanup_warning"] = cleanup_warning
+        return result
 
     def _prepare_store(
         self,
@@ -938,24 +961,9 @@ class MemoryManager:
             if dup:
                 raise DuplicateMemoryError(dup)
 
-        if len(content) > MAX_MEMORY_CHARS:
-            raise ValueError(
-                f"Content is {len(content):,} chars — exceeds the {MAX_MEMORY_CHARS:,} char limit. "
-                f"Split this into smaller memories with more specific keys "
-                f"(e.g. '{key}_part1', '{key}_part2') for better chunking and retrieval."
-            )
-
-        normalized_tags = _normalize_tags(tags)
-        validated_related_to = _normalize_related_to(related_to)
-        if len(validated_related_to) > 10:
-            raise ValueError(
-                f"related_to has {len(validated_related_to)} entries — maximum is 10. "
-                f"Limit the number of explicit relationships per memory."
-            )
-        now = _now()
-
         # Preserve created_at and title if updating
         existing = self._load_json(key)
+        now = _now()
         created_at = existing["created_at"] if existing else now
         resolved_title = title or (existing["title"] if existing else key)
         resolved_project = (
@@ -969,7 +977,7 @@ class MemoryManager:
             else (existing.get("domain") if existing else None)
         )
         resolved_status = (
-            _normalize_optional_text(status)
+            _normalize_status(status)
             if status is not None
             else (existing.get("status") if existing else None)
         ) or DEFAULT_MEMORY_STATUS
@@ -978,6 +986,20 @@ class MemoryManager:
             if canonical is None and existing
             else _normalize_bool(canonical, default=False)
         )
+        validation = self.validate_memory(
+            content=content,
+            related_to=related_to if related_to is not None else (existing.get("related_to") if existing else []),
+            status=resolved_status,
+            tags=tags if tags is not None else (existing.get("tags") if existing else []),
+            title=resolved_title,
+            project=resolved_project,
+            domain=resolved_domain,
+            canonical=resolved_canonical,
+        )
+        if not validation["valid"]:
+            raise ValueError(self._validation_error_message(validation))
+
+        normalized_fields = validation["normalized"]
 
         # Append audit log to content
         action = "Updated" if existing else "Created"
@@ -987,15 +1009,15 @@ class MemoryManager:
             "key": key,
             "title": resolved_title,
             "content": content_with_log,
-            "tags": normalized_tags,
+            "tags": normalized_fields["tags"],
             "created_at": created_at,
             "updated_at": now,
             "last_accessed": existing.get("last_accessed", None) if existing else None,
-            "related_to": validated_related_to,
-            "project": resolved_project,
-            "domain": resolved_domain,
-            "status": resolved_status,
-            "canonical": resolved_canonical,
+            "related_to": normalized_fields["related_to"],
+            "project": normalized_fields["project"],
+            "domain": normalized_fields["domain"],
+            "status": normalized_fields["status"],
+            "canonical": normalized_fields["canonical"],
             "chars": len(content_with_log),
             "lines": len(content_with_log.splitlines()),
         }

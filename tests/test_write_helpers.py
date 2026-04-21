@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
+
+import pytest
 
 
 def load_server_module():
@@ -127,7 +130,122 @@ def test_update_memory_metadata_keeps_json_update_if_chunk_cleanup_fails(
     assert updated["canonical"] is True
     assert stored["status"] == "historical"
     assert stored["canonical"] is True
+    assert "index_cleanup_warning" in updated
+    assert "cleanup-failure-note" in updated["index_cleanup_warning"]
     assert fake_chroma_collection.operations[-2:] == ["delete", "upsert"]
+
+
+def test_update_memory_metadata_keeps_json_if_upsert_fails_after_save(
+    mm_module,
+    fake_chroma_collection,
+):
+    manager = mm_module.memory_manager
+    manager.store_memory(
+        key="upsert-failure-note",
+        content="# Upsert Failure\n\nExisting note body.",
+        tags=["ops"],
+        title="Upsert Failure",
+        status="active",
+    )
+
+    fake_chroma_collection.fail_upsert = True
+
+    with pytest.raises(RuntimeError, match="simulated chroma upsert failure"):
+        manager.update_memory_metadata(
+            "upsert-failure-note",
+            status="historical",
+            canonical=True,
+        )
+
+    stored = manager.retrieve_memory("upsert-failure-note")
+
+    assert stored["status"] == "historical"
+    assert stored["canonical"] is True
+
+
+def test_store_memory_rejects_invalid_status(mm_module):
+    with pytest.raises(ValueError, match="status must be one of"):
+        mm_module.memory_manager.store_memory(
+            key="invalid-status-note",
+            content="# Invalid Status\n\nBody",
+            tags=["ops"],
+            title="Invalid Status",
+            status="retired",
+        )
+
+
+def test_legacy_invalid_status_is_coerced_for_compatibility(mm_module):
+    legacy_path = mm_module._json_path("legacy-invalid-status")
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "key": "legacy-invalid-status",
+                "title": "Legacy invalid status",
+                "content": "Legacy body",
+                "tags": ["legacy"],
+                "related_to": [],
+                "status": "retired",
+                "canonical": False,
+                "created_at": "2026-04-20T00:00:00+00:00",
+                "updated_at": "2026-04-20T00:00:00+00:00",
+                "chars": 11,
+                "lines": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    memory = mm_module.memory_manager.retrieve_memory("legacy-invalid-status")
+    updated = mm_module.memory_manager.update_memory_metadata(
+        "legacy-invalid-status",
+        tags=["legacy", "normalized"],
+    )
+
+    assert memory["status"] == "active"
+    assert updated["status"] == "active"
+    assert updated["tags"] == ["legacy", "normalized"]
+
+
+def test_memory_manager_check_duplicate_and_store_enforce_dedup(mm_module, monkeypatch):
+    manager = mm_module.memory_manager
+    content = (
+        "# Release duplicate\n\n"
+        "This is a long release note body intended to exercise duplicate detection for the "
+        "memory manager. It contains enough repeated text to exceed the short-content bypass "
+        "and should be treated as a true duplicate candidate during semantic checks."
+    )
+
+    manager.store_memory(
+        key="existing-duplicate",
+        content=content,
+        tags=["release"],
+        title="Existing duplicate",
+        status="active",
+    )
+
+    collection = manager._get_collection()
+    original_query = collection.query
+
+    def duplicate_query(query_embeddings=None, n_results=1, include=None):
+        result = original_query(query_embeddings=query_embeddings, n_results=n_results, include=include)
+        result["distances"] = [[0.0 for _ in result["ids"][0]]]
+        return result
+
+    monkeypatch.setattr(collection, "query", duplicate_query)
+
+    duplicate = manager.check_duplicate("new-duplicate", content)
+
+    assert duplicate["duplicate"] is True
+    assert duplicate["match"]["existing_key"] == "existing-duplicate"
+
+    with pytest.raises(mm_module.DuplicateMemoryError):
+        manager.store_memory(
+            key="new-duplicate",
+            content=content,
+            tags=["release"],
+            title="New duplicate",
+            status="active",
+        )
 
 
 def test_check_duplicate_tool_returns_structured_payload(monkeypatch):
