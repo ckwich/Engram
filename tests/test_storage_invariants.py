@@ -63,6 +63,25 @@ def test_delete_stops_if_chroma_delete_fails(fake_chroma_collection, mm_module):
     assert stored["key"] == key
 
 
+def test_store_keeps_json_if_chroma_upsert_fails(fake_chroma_collection, mm_module):
+    key = "overnight-upsert-failure"
+    json_path = mm_module._json_path(key)
+    fake_chroma_collection.fail_upsert = True
+
+    with pytest.raises(RuntimeError, match="simulated chroma upsert failure"):
+        mm_module.memory_manager.store_memory(
+            key=key,
+            content="short note for upsert failure",
+            tags=["safety"],
+            title="Upsert failure",
+        )
+
+    assert json_path.exists(), "JSON must remain when Chroma upsert fails"
+    stored = mm_module.memory_manager.retrieve_memory(key)
+    assert stored is not None
+    assert stored["key"] == key
+
+
 def test_old_memory_without_new_fields_is_still_listed(isolated_storage):
     json_dir = isolated_storage["json_dir"]
     mm_module = isolated_storage["mm"]

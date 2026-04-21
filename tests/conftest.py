@@ -2,16 +2,48 @@ from __future__ import annotations
 
 import importlib
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 
+_SUITE_ROOT = Path(tempfile.mkdtemp(prefix="engram-tests-"))
+_SUITE_JSON_DIR = _SUITE_ROOT / "memories"
+_SUITE_CHROMA_DIR = _SUITE_ROOT / "chroma"
+
+_ORIGINAL_MKDIR = Path.mkdir
+
+
+def _guarded_mkdir(self, *args, **kwargs):
+    return None
+
+
+Path.mkdir = _guarded_mkdir
+try:
+    sys.modules.pop("core.memory_manager", None)
+    mm = importlib.import_module("core.memory_manager")
+finally:
+    Path.mkdir = _ORIGINAL_MKDIR
+
+_SUITE_JSON_DIR.mkdir(parents=True, exist_ok=True)
+_SUITE_CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+mm.JSON_DIR = _SUITE_JSON_DIR
+mm.CHROMA_DIR = _SUITE_CHROMA_DIR
+
+
 class FakeChromaCollection:
+    """Tiny in-memory Chroma stub for the storage invariants only.
+
+    It only implements the handful of methods these tests need and does not
+    attempt to model full ChromaDB behavior.
+    """
+
     def __init__(self):
         self.docs: dict[str, dict[str, Any]] = {}
         self.fail_delete = False
+        self.fail_upsert = False
         self.operations: list[str] = []
 
     def count(self) -> int:
@@ -61,6 +93,8 @@ class FakeChromaCollection:
 
     def upsert(self, ids, embeddings, documents, metadatas):
         self.operations.append("upsert")
+        if self.fail_upsert:
+            raise RuntimeError("simulated chroma upsert failure")
         for index, doc_id in enumerate(ids):
             self.docs[doc_id] = {
                 "id": doc_id,
@@ -84,23 +118,8 @@ def fake_chroma_collection():
 
 
 @pytest.fixture(autouse=True)
-def mm_module(tmp_path, monkeypatch):
-    json_dir = tmp_path / "memories"
-    chroma_dir = tmp_path / "chroma"
-    json_dir.mkdir()
-    chroma_dir.mkdir()
-
-    original_mkdir = Path.mkdir
-
-    def guarded_mkdir(self, *args, **kwargs):
-        return None
-
-    monkeypatch.setattr(Path, "mkdir", guarded_mkdir)
-    importlib.invalidate_caches()
-    sys.modules.pop("core.memory_manager", None)
-    module = importlib.import_module("core.memory_manager")
-    monkeypatch.setattr(Path, "mkdir", original_mkdir)
-    return module
+def mm_module():
+    return mm
 
 
 @pytest.fixture(autouse=True)
