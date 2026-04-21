@@ -85,7 +85,7 @@ def test_structured_search_prioritizes_pinned_results(mm_module):
     assert pinned_first_payload["results"][1]["pinned"] is False
 
 
-def test_search_memories_v2_loads_session_pins_for_pinned_first(monkeypatch):
+def test_search_memories_loads_session_pins_for_pinned_first(monkeypatch):
     server = load_server_module()
     observed: dict[str, object] = {}
 
@@ -119,7 +119,7 @@ def test_search_memories_v2_loads_session_pins_for_pinned_first(monkeypatch):
     monkeypatch.setattr(server.memory_manager, "search_memories_structured_async", fake_structured_search)
 
     payload = asyncio.run(
-        server.search_memories_v2(
+        server.search_memories(
             "shared query phrase",
             limit=7,
             session_id="session-a",

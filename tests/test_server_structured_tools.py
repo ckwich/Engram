@@ -18,7 +18,7 @@ def load_memory_manager_module():
     return importlib.reload(memory_manager_module)
 
 
-def test_search_memories_v2_returns_structured_payload(monkeypatch):
+def test_search_memories_returns_structured_payload(monkeypatch):
     server = load_server_module()
     observed: dict[str, object] = {}
     expected_results = [
@@ -39,7 +39,7 @@ def test_search_memories_v2_returns_structured_payload(monkeypatch):
 
     monkeypatch.setattr(server.memory_manager, "search_memories_async", fake_search)
 
-    payload = asyncio.run(server.search_memories_v2("alpha", limit=99))
+    payload = asyncio.run(server.search_memories("alpha", limit=99))
 
     assert observed == {"query": "alpha", "limit": 20}
     assert payload == {
@@ -50,7 +50,7 @@ def test_search_memories_v2_returns_structured_payload(monkeypatch):
     }
 
 
-def test_search_memories_v2_keeps_bounded_search_when_session_has_no_pins(monkeypatch):
+def test_search_memories_keeps_bounded_search_when_session_has_no_pins(monkeypatch):
     server = load_server_module()
     observed: dict[str, object] = {}
     expected_results = [
@@ -81,7 +81,7 @@ def test_search_memories_v2_keeps_bounded_search_when_session_has_no_pins(monkey
     monkeypatch.setattr(server.memory_manager, "search_memories_async", fake_search)
     monkeypatch.setattr(server.memory_manager, "search_memories_structured_async", fail_if_structured)
 
-    payload = asyncio.run(server.search_memories_v2("alpha", limit=7, session_id="session-a"))
+    payload = asyncio.run(server.search_memories("alpha", limit=7, session_id="session-a"))
 
     assert observed == {
         "session_id": "session-a",
@@ -96,7 +96,7 @@ def test_search_memories_v2_keeps_bounded_search_when_session_has_no_pins(monkey
     }
 
 
-def test_list_memories_v2_returns_structured_payload(monkeypatch):
+def test_list_memories_returns_structured_payload(monkeypatch):
     server = load_server_module()
     expected_memories = [
         {
@@ -115,7 +115,7 @@ def test_list_memories_v2_returns_structured_payload(monkeypatch):
 
     monkeypatch.setattr(server.memory_manager, "list_memories_async", fake_list)
 
-    payload = asyncio.run(server.list_memories_v2())
+    payload = asyncio.run(server.list_memories())
 
     assert payload == {
         "count": 1,
@@ -124,7 +124,7 @@ def test_list_memories_v2_returns_structured_payload(monkeypatch):
     }
 
 
-def test_list_memories_v2_runtime_failure_returns_structured_error(monkeypatch):
+def test_list_memories_runtime_failure_returns_structured_error(monkeypatch):
     server = load_server_module()
 
     async def fake_list():
@@ -132,7 +132,7 @@ def test_list_memories_v2_runtime_failure_returns_structured_error(monkeypatch):
 
     monkeypatch.setattr(server.memory_manager, "list_memories_async", fake_list)
 
-    payload = asyncio.run(server.list_memories_v2())
+    payload = asyncio.run(server.list_memories())
 
     assert payload == {
         "count": 0,
@@ -144,7 +144,7 @@ def test_list_memories_v2_runtime_failure_returns_structured_error(monkeypatch):
     }
 
 
-def test_search_memories_v2_blank_query_returns_structured_error(monkeypatch):
+def test_search_memories_blank_query_returns_structured_error(monkeypatch):
     server = load_server_module()
 
     async def fail_if_called(query: str, limit: int = 5):
@@ -152,7 +152,7 @@ def test_search_memories_v2_blank_query_returns_structured_error(monkeypatch):
 
     monkeypatch.setattr(server.memory_manager, "search_memories_async", fail_if_called)
 
-    payload = asyncio.run(server.search_memories_v2("   "))
+    payload = asyncio.run(server.search_memories("   "))
 
     assert payload == {
         "query": "   ",
@@ -165,7 +165,7 @@ def test_search_memories_v2_blank_query_returns_structured_error(monkeypatch):
     }
 
 
-def test_search_memories_v2_runtime_failure_returns_structured_error(monkeypatch):
+def test_search_memories_runtime_failure_returns_structured_error(monkeypatch):
     server = load_server_module()
 
     async def fake_search(query: str, limit: int = 5):
@@ -173,7 +173,7 @@ def test_search_memories_v2_runtime_failure_returns_structured_error(monkeypatch
 
     monkeypatch.setattr(server.memory_manager, "search_memories_async", fake_search)
 
-    payload = asyncio.run(server.search_memories_v2("alpha"))
+    payload = asyncio.run(server.search_memories("alpha"))
 
     assert payload == {
         "query": "alpha",
@@ -186,7 +186,7 @@ def test_search_memories_v2_runtime_failure_returns_structured_error(monkeypatch
     }
 
 
-def test_search_memories_v2_empty_results_returns_structured_payload(monkeypatch):
+def test_search_memories_empty_results_returns_structured_payload(monkeypatch):
     server = load_server_module()
 
     async def fake_search(query: str, limit: int = 5):
@@ -194,7 +194,7 @@ def test_search_memories_v2_empty_results_returns_structured_payload(monkeypatch
 
     monkeypatch.setattr(server.memory_manager, "search_memories_async", fake_search)
 
-    payload = asyncio.run(server.search_memories_v2("alpha"))
+    payload = asyncio.run(server.search_memories("alpha"))
 
     assert payload == {
         "query": "alpha",
@@ -204,12 +204,14 @@ def test_search_memories_v2_empty_results_returns_structured_payload(monkeypatch
     }
 
 
-def test_search_memories_renders_payload_from_v2(monkeypatch):
+def test_search_memories_text_renders_payload_from_structured_search(monkeypatch):
     server = load_server_module()
 
-    async def fake_search_v2(query: str, limit: int = 5):
+    async def fake_search(query: str, limit: int = 5, session_id=None, pinned_first: bool = False):
         assert query == "alpha"
         assert limit == 5
+        assert session_id is None
+        assert pinned_first is False
         return {
             "query": "alpha",
             "count": 1,
@@ -226,9 +228,9 @@ def test_search_memories_renders_payload_from_v2(monkeypatch):
             "error": None,
         }
 
-    monkeypatch.setattr(server, "search_memories_v2", fake_search_v2)
+    monkeypatch.setattr(server, "search_memories", fake_search)
 
-    rendered = asyncio.run(server.search_memories("alpha"))
+    rendered = asyncio.run(server.search_memories_text("alpha"))
 
     assert rendered == (
         "🔍 1 results for 'alpha':\n\n"
@@ -238,10 +240,10 @@ def test_search_memories_renders_payload_from_v2(monkeypatch):
     )
 
 
-def test_search_memories_renders_structured_validation_error_from_v2(monkeypatch):
+def test_search_memories_text_renders_structured_validation_error(monkeypatch):
     server = load_server_module()
 
-    async def fake_search_v2(query: str, limit: int = 5):
+    async def fake_search(query: str, limit: int = 5, session_id=None, pinned_first: bool = False):
         return {
             "query": query,
             "count": 0,
@@ -252,17 +254,17 @@ def test_search_memories_renders_structured_validation_error_from_v2(monkeypatch
             },
         }
 
-    monkeypatch.setattr(server, "search_memories_v2", fake_search_v2)
+    monkeypatch.setattr(server, "search_memories", fake_search)
 
-    rendered = asyncio.run(server.search_memories("   "))
+    rendered = asyncio.run(server.search_memories_text("   "))
 
     assert rendered == "❌ Query cannot be empty."
 
 
-def test_search_memories_renders_structured_runtime_error_from_v2(monkeypatch):
+def test_search_memories_text_renders_structured_runtime_error(monkeypatch):
     server = load_server_module()
 
-    async def fake_search_v2(query: str, limit: int = 5):
+    async def fake_search(query: str, limit: int = 5, session_id=None, pinned_first: bool = False):
         return {
             "query": query,
             "count": 0,
@@ -273,17 +275,17 @@ def test_search_memories_renders_structured_runtime_error_from_v2(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(server, "search_memories_v2", fake_search_v2)
+    monkeypatch.setattr(server, "search_memories", fake_search)
 
-    rendered = asyncio.run(server.search_memories("alpha"))
+    rendered = asyncio.run(server.search_memories_text("alpha"))
 
     assert rendered == "❌ Engram error: boom"
 
 
-def test_list_all_memories_renders_payload_from_v2(monkeypatch):
+def test_list_all_memories_renders_payload_from_structured_list(monkeypatch):
     server = load_server_module()
 
-    async def fake_list_v2():
+    async def fake_list():
         return {
             "count": 1,
             "memories": [
@@ -300,7 +302,7 @@ def test_list_all_memories_renders_payload_from_v2(monkeypatch):
             "error": None,
         }
 
-    monkeypatch.setattr(server, "list_memories_v2", fake_list_v2)
+    monkeypatch.setattr(server, "list_memories", fake_list)
 
     rendered = asyncio.run(server.list_all_memories())
 
@@ -315,10 +317,10 @@ def test_list_all_memories_renders_payload_from_v2(monkeypatch):
     )
 
 
-def test_list_all_memories_renders_structured_runtime_error_from_v2(monkeypatch):
+def test_list_all_memories_renders_structured_runtime_error(monkeypatch):
     server = load_server_module()
 
-    async def fake_list_v2():
+    async def fake_list():
         return {
             "count": 0,
             "memories": [],
@@ -328,17 +330,17 @@ def test_list_all_memories_renders_structured_runtime_error_from_v2(monkeypatch)
             },
         }
 
-    monkeypatch.setattr(server, "list_memories_v2", fake_list_v2)
+    monkeypatch.setattr(server, "list_memories", fake_list)
 
     rendered = asyncio.run(server.list_all_memories())
 
     assert rendered == "❌ Engram error: boom"
 
 
-def test_retrieve_chunk_renders_payload_from_v2(monkeypatch):
+def test_retrieve_chunk_text_renders_payload_from_structured_retrieve(monkeypatch):
     server = load_server_module()
 
-    async def fake_retrieve_chunk_v2(key: str, chunk_id: int):
+    async def fake_retrieve_chunk(key: str, chunk_id: int):
         assert key == "alpha-note"
         assert chunk_id == 0
         return {
@@ -355,9 +357,9 @@ def test_retrieve_chunk_renders_payload_from_v2(monkeypatch):
             "error": None,
         }
 
-    monkeypatch.setattr(server, "retrieve_chunk_v2", fake_retrieve_chunk_v2)
+    monkeypatch.setattr(server, "retrieve_chunk", fake_retrieve_chunk)
 
-    rendered = asyncio.run(server.retrieve_chunk("alpha-note", 0))
+    rendered = asyncio.run(server.retrieve_chunk_text("alpha-note", 0))
 
     assert rendered == (
         "📄 Chunk 0 from 'Alpha note'\n"
@@ -366,10 +368,10 @@ def test_retrieve_chunk_renders_payload_from_v2(monkeypatch):
     )
 
 
-def test_retrieve_chunk_renders_not_found_from_v2(monkeypatch):
+def test_retrieve_chunk_text_renders_not_found(monkeypatch):
     server = load_server_module()
 
-    async def fake_retrieve_chunk_v2(key: str, chunk_id: int):
+    async def fake_retrieve_chunk(key: str, chunk_id: int):
         return {
             "key": key,
             "chunk_id": chunk_id,
@@ -378,17 +380,17 @@ def test_retrieve_chunk_renders_not_found_from_v2(monkeypatch):
             "error": None,
         }
 
-    monkeypatch.setattr(server, "retrieve_chunk_v2", fake_retrieve_chunk_v2)
+    monkeypatch.setattr(server, "retrieve_chunk", fake_retrieve_chunk)
 
-    rendered = asyncio.run(server.retrieve_chunk("missing-note", 9))
+    rendered = asyncio.run(server.retrieve_chunk_text("missing-note", 9))
 
     assert rendered == "❌ Chunk not found: key='missing-note' chunk_id=9"
 
 
-def test_retrieve_chunk_renders_runtime_error_from_v2(monkeypatch):
+def test_retrieve_chunk_text_renders_runtime_error(monkeypatch):
     server = load_server_module()
 
-    async def fake_retrieve_chunk_v2(key: str, chunk_id: int):
+    async def fake_retrieve_chunk(key: str, chunk_id: int):
         return {
             "key": key,
             "chunk_id": chunk_id,
@@ -400,17 +402,17 @@ def test_retrieve_chunk_renders_runtime_error_from_v2(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(server, "retrieve_chunk_v2", fake_retrieve_chunk_v2)
+    monkeypatch.setattr(server, "retrieve_chunk", fake_retrieve_chunk)
 
-    rendered = asyncio.run(server.retrieve_chunk("alpha-note", 0))
+    rendered = asyncio.run(server.retrieve_chunk_text("alpha-note", 0))
 
     assert rendered == "❌ Engram error: boom"
 
 
-def test_retrieve_memory_renders_payload_from_v2(monkeypatch):
+def test_retrieve_memory_text_renders_payload_from_structured_retrieve(monkeypatch):
     server = load_server_module()
 
-    async def fake_retrieve_memory_v2(key: str):
+    async def fake_retrieve_memory(key: str):
         assert key == "alpha-note"
         return {
             "key": "alpha-note",
@@ -427,9 +429,9 @@ def test_retrieve_memory_renders_payload_from_v2(monkeypatch):
             "error": None,
         }
 
-    monkeypatch.setattr(server, "retrieve_memory_v2", fake_retrieve_memory_v2)
+    monkeypatch.setattr(server, "retrieve_memory", fake_retrieve_memory)
 
-    rendered = asyncio.run(server.retrieve_memory("alpha-note"))
+    rendered = asyncio.run(server.retrieve_memory_text("alpha-note"))
 
     assert rendered == (
         "📦 Alpha note\n"
@@ -441,10 +443,10 @@ def test_retrieve_memory_renders_payload_from_v2(monkeypatch):
     )
 
 
-def test_retrieve_memory_renders_not_found_from_v2(monkeypatch):
+def test_retrieve_memory_text_renders_not_found(monkeypatch):
     server = load_server_module()
 
-    async def fake_retrieve_memory_v2(key: str):
+    async def fake_retrieve_memory(key: str):
         return {
             "key": key,
             "found": False,
@@ -452,17 +454,17 @@ def test_retrieve_memory_renders_not_found_from_v2(monkeypatch):
             "error": None,
         }
 
-    monkeypatch.setattr(server, "retrieve_memory_v2", fake_retrieve_memory_v2)
+    monkeypatch.setattr(server, "retrieve_memory", fake_retrieve_memory)
 
-    rendered = asyncio.run(server.retrieve_memory("missing-note"))
+    rendered = asyncio.run(server.retrieve_memory_text("missing-note"))
 
     assert rendered == "❌ Memory not found: 'missing-note'"
 
 
-def test_retrieve_memory_renders_runtime_error_from_v2(monkeypatch):
+def test_retrieve_memory_text_renders_runtime_error(monkeypatch):
     server = load_server_module()
 
-    async def fake_retrieve_memory_v2(key: str):
+    async def fake_retrieve_memory(key: str):
         return {
             "key": key,
             "found": False,
@@ -473,14 +475,14 @@ def test_retrieve_memory_renders_runtime_error_from_v2(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(server, "retrieve_memory_v2", fake_retrieve_memory_v2)
+    monkeypatch.setattr(server, "retrieve_memory", fake_retrieve_memory)
 
-    rendered = asyncio.run(server.retrieve_memory("alpha-note"))
+    rendered = asyncio.run(server.retrieve_memory_text("alpha-note"))
 
     assert rendered == "❌ Engram error: boom"
 
 
-def test_retrieve_chunks_v2_returns_structured_batch_payload(monkeypatch):
+def test_retrieve_chunks_returns_structured_batch_payload(monkeypatch):
     server = load_server_module()
     observed: dict[str, object] = {}
     requests = [
@@ -510,7 +512,7 @@ def test_retrieve_chunks_v2_returns_structured_batch_payload(monkeypatch):
 
     monkeypatch.setattr(server.memory_manager, "retrieve_chunks_async", fake_retrieve_chunks)
 
-    payload = asyncio.run(server.retrieve_chunks_v2(requests))
+    payload = asyncio.run(server.retrieve_chunks(requests))
 
     assert observed == {"requests": requests}
     assert payload == {
@@ -732,7 +734,7 @@ def test_memory_manager_retrieve_chunks_reports_per_item_validation_errors(monke
     ]
 
 
-def test_retrieve_memory_v2_returns_structured_memory_payload(monkeypatch):
+def test_retrieve_memory_returns_structured_memory_payload(monkeypatch):
     server = load_server_module()
 
     async def fake_retrieve_memory(key: str):
@@ -756,7 +758,7 @@ def test_retrieve_memory_v2_returns_structured_memory_payload(monkeypatch):
 
     monkeypatch.setattr(server.memory_manager, "retrieve_memory_async", fake_retrieve_memory)
 
-    payload = asyncio.run(server.retrieve_memory_v2("alpha-note"))
+    payload = asyncio.run(server.retrieve_memory("alpha-note"))
 
     assert payload == {
         "key": "alpha-note",
@@ -781,7 +783,7 @@ def test_retrieve_memory_v2_returns_structured_memory_payload(monkeypatch):
     }
 
 
-def test_retrieve_chunk_v2_not_found_returns_found_false(monkeypatch):
+def test_retrieve_chunk_not_found_returns_found_false(monkeypatch):
     server = load_server_module()
     observed: dict[str, object] = {}
 
@@ -797,7 +799,7 @@ def test_retrieve_chunk_v2_not_found_returns_found_false(monkeypatch):
 
     monkeypatch.setattr(server.memory_manager, "retrieve_chunks_async", fake_retrieve_chunks)
 
-    payload = asyncio.run(server.retrieve_chunk_v2("missing-note", 9))
+    payload = asyncio.run(server.retrieve_chunk("missing-note", 9))
 
     assert observed == {"requests": [{"key": "missing-note", "chunk_id": 9}]}
     assert payload == {
@@ -809,7 +811,7 @@ def test_retrieve_chunk_v2_not_found_returns_found_false(monkeypatch):
     }
 
 
-def test_retrieve_chunks_v2_preserves_per_item_error_objects(monkeypatch):
+def test_retrieve_chunks_preserves_per_item_error_objects(monkeypatch):
     server = load_server_module()
 
     async def fake_retrieve_chunks(batch_requests: list[dict]):
@@ -828,7 +830,7 @@ def test_retrieve_chunks_v2_preserves_per_item_error_objects(monkeypatch):
 
     monkeypatch.setattr(server.memory_manager, "retrieve_chunks_async", fake_retrieve_chunks)
 
-    payload = asyncio.run(server.retrieve_chunks_v2([{"key": "alpha-note", "chunk_id": True}]))
+    payload = asyncio.run(server.retrieve_chunks([{"key": "alpha-note", "chunk_id": True}]))
 
     assert payload == {
         "requested_count": 1,

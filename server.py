@@ -4,11 +4,11 @@ Engram v0.1 — MCP Server
 Provides semantic memory tools to AI agents via the Model Context Protocol.
 
 Three-tier retrieval pattern (agents should follow this):
-  1. search_memories_v2(query) / search_memories(query)
+  1. search_memories(query) / search_memories_text(query)
      → scored snippets, identify key + chunk_id
-  2. retrieve_chunk_v2(key, chunk_id) / retrieve_chunk(key, chunk_id)
+  2. retrieve_chunk(key, chunk_id) / retrieve_chunk_text(key, chunk_id)
      → one relevant section, usually sufficient
-  3. retrieve_memory_v2(key) / retrieve_memory(key)
+  3. retrieve_memory(key) / retrieve_memory_text(key)
      → full content, use sparingly
 """
 
@@ -85,7 +85,7 @@ def _runtime_error_payload(message: str, **payload: Any) -> dict[str, Any]:
 
 
 def _retrieve_chunk_payload(result: dict | None, key: str, chunk_id: int) -> dict[str, Any]:
-    """Normalize chunk retrieval output into the v2 structured contract."""
+    """Normalize chunk retrieval output into the structured contract."""
     if not result:
         return {
             "key": key,
@@ -114,7 +114,7 @@ def _retrieve_chunk_payload(result: dict | None, key: str, chunk_id: int) -> dic
 
 
 def _retrieve_memory_payload(key: str, memory: dict | None) -> dict[str, Any]:
-    """Normalize full-memory retrieval output into the v2 structured contract."""
+    """Normalize full-memory retrieval output into the structured contract."""
     return {
         "key": key,
         "found": memory is not None,
@@ -163,7 +163,7 @@ def _render_retrieve_memory_payload(payload: dict[str, Any]) -> str:
 
 
 @mcp.tool()
-async def search_memories_v2(
+async def search_memories(
     query: str,
     limit: int = 5,
     session_id: str | None = None,
@@ -220,7 +220,7 @@ async def search_memories_v2(
 
 
 @mcp.tool()
-async def search_memories(query: str, limit: int = 5) -> str:
+async def search_memories_text(query: str, limit: int = 5) -> str:
     """
     Semantic search across all stored memories. Returns scored snippets only — NOT full content.
 
@@ -235,9 +235,9 @@ async def search_memories(query: str, limit: int = 5) -> str:
 
     Returns:
         Human-readable scored list of matching chunks with snippets. Score is 0.0–1.0
-        (higher = more relevant). For structured output, use search_memories_v2().
+        (higher = more relevant). For structured output, use search_memories().
     """
-    payload = await search_memories_v2(query, limit)
+    payload = await search_memories(query, limit)
     return render_search_payload(payload)
 
 
@@ -409,7 +409,7 @@ async def clear_pins(session_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def list_memories_v2() -> MemoryListPayload:
+async def list_memories() -> MemoryListPayload:
     """
     List all stored memories as structured metadata only — keys, titles, tags, timestamps, chunk counts.
     No content is returned. Use this when you need to browse what exists, not search by topic.
@@ -419,7 +419,7 @@ async def list_memories_v2() -> MemoryListPayload:
         tags, updated_at, created_at, chars, and chunk_count. On runtime failure,
         memories is empty and error is {code, message}.
 
-    For topic-based lookup, prefer search_memories_v2() or search_memories() instead.
+    For topic-based lookup, prefer search_memories() or search_memories_text() instead.
     """
     try:
         memories = await memory_manager.list_memories_async()
@@ -436,37 +436,37 @@ async def list_all_memories() -> str:
 
     For topic-based lookup, prefer search_memories() instead.
     """
-    payload = await list_memories_v2()
+    payload = await list_memories()
     return render_list_payload(payload)
 
 
 @mcp.tool()
-async def retrieve_chunk(key: str, chunk_id: int) -> str:
+async def retrieve_chunk_text(key: str, chunk_id: int) -> str:
     """
     Retrieve a single chunk from a memory by key and chunk_id.
 
-    Use this AFTER search_memories() identifies the relevant key and chunk_id.
+    Use this AFTER search_memories_text() or search_memories() identifies the relevant key and chunk_id.
     This is the middle tier — more content than a snippet, far fewer tokens than the full memory.
 
     Args:
-        key: The memory's unique key (from search_memories or list_all_memories results).
-        chunk_id: The chunk index (from search_memories results).
+        key: The memory's unique key (from search_memories(), search_memories_text(), or list_all_memories() results).
+        chunk_id: The chunk index returned by search results.
 
     Returns:
         Full text of the requested chunk, with its parent memory title. This is the
-        legacy text wrapper; for structured output, use retrieve_chunk_v2().
+        legacy text wrapper; for structured output, use retrieve_chunk().
     """
-    payload = await retrieve_chunk_v2(key, chunk_id)
+    payload = await retrieve_chunk(key, chunk_id)
     return _render_retrieve_chunk_payload(payload)
 
 
 @mcp.tool()
-async def retrieve_chunk_v2(key: str, chunk_id: int) -> dict[str, Any]:
+async def retrieve_chunk(key: str, chunk_id: int) -> dict[str, Any]:
     """
     Retrieve one chunk as structured data.
 
-    Use this AFTER search_memories_v2() or search_memories() identifies the relevant key
-    and chunk_id. Prefer this middle tier before escalating to retrieve_memory_v2().
+    Use this AFTER search_memories() or search_memories_text() identifies the relevant key
+    and chunk_id. Prefer this middle tier before escalating to retrieve_memory().
 
     Args:
         key: The memory's unique key.
@@ -492,13 +492,13 @@ async def retrieve_chunk_v2(key: str, chunk_id: int) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def retrieve_chunks_v2(requests: list[dict]) -> dict[str, Any]:
+async def retrieve_chunks(requests: list[dict]) -> dict[str, Any]:
     """
     Retrieve multiple chunks in one call as structured data.
 
-    Use this AFTER search_memories_v2() when you need several chunk matches at once.
+    Use this AFTER search_memories() when you need several chunk matches at once.
     It preserves request order and keeps not-found results explicit so you can avoid
-    escalating to retrieve_memory_v2() unless full memories are still necessary.
+    escalating to retrieve_memory() unless full memories are still necessary.
 
     Args:
         requests: Array of {key, chunk_id} objects.
@@ -541,7 +541,7 @@ async def retrieve_chunks_v2(requests: list[dict]) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def retrieve_memory(key: str) -> str:
+async def retrieve_memory_text(key: str) -> str:
     """
     Retrieve the full content of a memory by key.
 
@@ -553,20 +553,20 @@ async def retrieve_memory(key: str) -> str:
 
     Returns:
         Full memory content with metadata header. This is the legacy text wrapper;
-        for structured output, use retrieve_memory_v2().
+        for structured output, use retrieve_memory().
     """
-    payload = await retrieve_memory_v2(key)
+    payload = await retrieve_memory(key)
     return _render_retrieve_memory_payload(payload)
 
 
 @mcp.tool()
-async def retrieve_memory_v2(key: str) -> dict[str, Any]:
+async def retrieve_memory(key: str) -> dict[str, Any]:
     """
     Retrieve the full memory as structured metadata plus content.
 
     Use this ONLY when chunk retrieval is not sufficient. This is still the most
-    token-expensive read path, so prefer search_memories_v2() and retrieve_chunk_v2()
-    or retrieve_chunks_v2() first.
+    token-expensive read path, so prefer search_memories(), retrieve_chunk(),
+    or retrieve_chunks() first.
 
     Args:
         key: The memory's unique key.
@@ -848,7 +848,7 @@ async def update_memory_metadata(
 
 
 @mcp.tool()
-async def get_related_memories(key: str) -> str:
+async def get_related_memories_text(key: str) -> str:
     """
     Retrieve all memories related to the given key, bidirectionally.
 
@@ -887,7 +887,7 @@ async def get_related_memories(key: str) -> str:
 
 
 @mcp.tool()
-async def get_related_memories_v2(key: str) -> dict[str, Any]:
+async def get_related_memories(key: str) -> dict[str, Any]:
     """
     Retrieve related memories as structured forward and reverse link lists.
 
@@ -922,7 +922,7 @@ async def get_related_memories_v2(key: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def get_stale_memories(days: int = 90, type: str = "all") -> str:
+async def get_stale_memories_text(days: int = 90, type: str = "all") -> str:
     """
     Return memories that are time-stale (not accessed in N days) or code-stale
     (source files changed since last index run). No memories are deleted — surfacing only.
@@ -959,7 +959,7 @@ async def get_stale_memories(days: int = 90, type: str = "all") -> str:
 
 
 @mcp.tool()
-async def get_stale_memories_v2(days: int = 90, type: str = "all") -> dict[str, Any]:
+async def get_stale_memories(days: int = 90, type: str = "all") -> dict[str, Any]:
     """
     Return stale memories as structured metadata.
 
@@ -1000,6 +1000,18 @@ async def get_stale_memories_v2(days: int = 90, type: str = "all") -> dict[str, 
         "memories": results,
         "error": None,
     }
+
+
+# Python-level compatibility aliases from the additive rollout. These are intentionally
+# not registered as MCP tools, but they keep direct module callers from breaking
+# immediately after the tool-surface cleanup.
+search_memories_v2 = search_memories
+list_memories_v2 = list_memories
+retrieve_chunk_v2 = retrieve_chunk
+retrieve_chunks_v2 = retrieve_chunks
+retrieve_memory_v2 = retrieve_memory
+get_related_memories_v2 = get_related_memories
+get_stale_memories_v2 = get_stale_memories
 
 
 @mcp.tool()

@@ -15,7 +15,7 @@ Engram is a local-first MCP memory server that gives AI agents genuinely useful 
 ### Core Memory Server
 - **Semantic search** via sentence-transformers (all-MiniLM-L6-v2) — local, offline, zero cost
 - **Three-tier retrieval** — snippets, chunks, or full content based on what's actually needed
-- **Agent-first structured MCP tools** — canonical `*_v2` payloads for search, listing, retrieval, relationships, and staleness
+- **Agent-first structured MCP tools** — canonical structured payloads for search, listing, retrieval, relationships, and staleness
 - **Compatibility wrappers** — legacy text-returning tools still work for existing MCP clients
 - **Session pins** — promote a temporary working set in search without mutating stored memory metadata
 - **Markdown-aware chunking** — splits on headers first, then paragraphs, max 800 chars per chunk
@@ -48,26 +48,26 @@ Engram is a local-first MCP memory server that gives AI agents genuinely useful 
 ### Three-Tier Retrieval
 
 Agents should pay token costs proportional to what they actually need. New integrations
-should use the structured `*_v2` tools as the canonical path.
+should use the structured unsuffixed tools as the canonical path.
 
 ```
-Tier 1 — search_memories_v2("dispatch calendar")
+Tier 1 — search_memories("dispatch calendar")
          -> 5 scored snippets, ~50 tokens each
          -> identify the right key + chunk_id
 
-Tier 2 — retrieve_chunk_v2("sylvara_scheduler", chunk_id=3)
+Tier 2 — retrieve_chunk("sylvara_scheduler", chunk_id=3)
          -> one relevant section, ~200 tokens
          -> usually sufficient
 
-Tier 2b — retrieve_chunks_v2([{key, chunk_id}, ...])
+Tier 2b — retrieve_chunks([{key, chunk_id}, ...])
           -> fetch several known chunks in one round-trip
 
-Tier 3 — retrieve_memory_v2("sylvara_scheduler")
+Tier 3 — retrieve_memory("sylvara_scheduler")
          -> full content, intentional and explicit
 ```
 
-The legacy wrappers `search_memories`, `list_all_memories`, `retrieve_chunk`, and
-`retrieve_memory` remain available for compatibility. They render from the same
+The legacy wrappers `search_memories_text`, `list_all_memories`, `retrieve_chunk_text`,
+and `retrieve_memory_text` remain available for compatibility. They render from the same
 structured payloads, so old clients stay aligned with the canonical logic path.
 
 ### Semantic Search
@@ -102,19 +102,19 @@ The threshold (default 0.92) is configurable in `config.json`.
 
 ## MCP Tools
 
-Engram exposes an additive MCP surface. The structured `*_v2` tools are the
-canonical agent-first interface, and the original text-returning tools remain in place
-for compatibility.
+Engram exposes a structured-first MCP surface. The unsuffixed tools are the
+canonical agent-first interface, and the rendered text tools remain available
+under explicit compatibility names.
 
 ### Canonical Structured Tools
 
 | Tool | Signature | Purpose |
 |---|---|---|
-| `search_memories_v2` | `(query, limit=5, session_id=None, pinned_first=False)` | Semantic search with structured snippets and optional session-aware ranking |
-| `list_memories_v2` | `()` | Structured memory directory metadata |
-| `retrieve_chunk_v2` | `(key, chunk_id)` | Structured single-chunk retrieval |
-| `retrieve_chunks_v2` | `(requests)` | Structured batch chunk retrieval |
-| `retrieve_memory_v2` | `(key)` | Structured full-memory retrieval |
+| `search_memories` | `(query, limit=5, session_id=None, pinned_first=False)` | Semantic search with structured snippets and optional session-aware ranking |
+| `list_memories` | `()` | Structured memory directory metadata |
+| `retrieve_chunk` | `(key, chunk_id)` | Structured single-chunk retrieval |
+| `retrieve_chunks` | `(requests)` | Structured batch chunk retrieval |
+| `retrieve_memory` | `(key)` | Structured full-memory retrieval |
 | `pin_memory` | `(session_id, key)` | Pin a memory key into a temporary session working set |
 | `unpin_memory` | `(session_id, key)` | Remove one key from a session working set |
 | `list_pins` | `(session_id)` | List pinned keys for a session |
@@ -124,26 +124,26 @@ for compatibility.
 | `suggest_memory_metadata` | `(content)` | Suggest normalized metadata from draft content |
 | `validate_memory` | `(content, title=None, tags=None, related_to=None, status=None, project=None, domain=None, canonical=None)` | Validate a memory payload before storing |
 | `update_memory_metadata` | `(key, title=None, tags=None, related_to=None, project=None, domain=None, status=None, canonical=None)` | Update metadata fields without rewriting content |
-| `get_related_memories_v2` | `(key)` | Structured forward and reverse relationship traversal |
-| `get_stale_memories_v2` | `(days=90, type='all')` | Structured stale-memory surfacing |
+| `get_related_memories` | `(key)` | Structured forward and reverse relationship traversal |
+| `get_stale_memories` | `(days=90, type='all')` | Structured stale-memory surfacing |
 | `delete_memory` | `(key)` | Permanently delete a memory |
 
 ### Compatibility Wrappers
 
 | Tool | Returns | Notes |
 |---|---|---|
-| `search_memories` | Rendered text | Compatibility wrapper over `search_memories_v2` |
-| `list_all_memories` | Rendered text | Compatibility wrapper over `list_memories_v2` |
-| `retrieve_chunk` | Rendered text | Compatibility wrapper over `retrieve_chunk_v2` |
-| `retrieve_memory` | Rendered text | Compatibility wrapper over `retrieve_memory_v2` |
-| `get_related_memories` | Rendered text | Legacy text view of relationships |
-| `get_stale_memories` | Rendered text | Legacy text view of stale-memory results |
+| `search_memories_text` | Rendered text | Compatibility wrapper over `search_memories` |
+| `list_all_memories` | Rendered text | Compatibility wrapper over `list_memories` |
+| `retrieve_chunk_text` | Rendered text | Compatibility wrapper over `retrieve_chunk` |
+| `retrieve_memory_text` | Rendered text | Compatibility wrapper over `retrieve_memory` |
+| `get_related_memories_text` | Rendered text | Legacy text view of relationships |
+| `get_stale_memories_text` | Rendered text | Legacy text view of stale-memory results |
 
 ### Session Pins and Migration
 
 - Session pins are working-state only. They do not mutate memory JSON, tags, or long-term metadata.
-- Use `pin_memory` and `search_memories_v2(..., session_id=..., pinned_first=True)` when you want pinned memories to sort ahead of unpinned results.
-- Migration is additive, not a flag day. Existing clients can stay on the legacy wrappers, while new clients should target the structured tools directly.
+- Use `pin_memory` and `search_memories(..., session_id=..., pinned_first=True)` when you want pinned memories to sort ahead of unpinned results.
+- Structured reads now live on the unsuffixed tool names. The compatibility text wrappers moved to explicit `*_text` names, with `list_all_memories` retained for legacy browsing.
 - Compatibility wrappers render from the canonical structured payloads so the old and new surfaces stay behaviorally aligned.
 
 ---
