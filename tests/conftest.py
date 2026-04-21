@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import importlib
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
-
-from core import memory_manager as mm
 
 
 class FakeChromaCollection:
@@ -83,21 +84,41 @@ def fake_chroma_collection():
 
 
 @pytest.fixture(autouse=True)
-def isolated_storage(tmp_path, monkeypatch, fake_chroma_collection):
+def mm_module(tmp_path, monkeypatch):
     json_dir = tmp_path / "memories"
     chroma_dir = tmp_path / "chroma"
     json_dir.mkdir()
     chroma_dir.mkdir()
 
-    monkeypatch.setattr(mm, "JSON_DIR", json_dir)
-    monkeypatch.setattr(mm, "CHROMA_DIR", chroma_dir)
-    monkeypatch.setattr(mm.memory_manager, "_get_collection", lambda: fake_chroma_collection)
-    mm.memory_manager._collection = fake_chroma_collection
-    mm.memory_manager._chroma = object()
+    original_mkdir = Path.mkdir
 
-    monkeypatch.setattr(mm.embedder, "embed", lambda text: [0.0, 0.0, 0.0])
+    def guarded_mkdir(self, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr(Path, "mkdir", guarded_mkdir)
+    importlib.invalidate_caches()
+    sys.modules.pop("core.memory_manager", None)
+    module = importlib.import_module("core.memory_manager")
+    monkeypatch.setattr(Path, "mkdir", original_mkdir)
+    return module
+
+
+@pytest.fixture(autouse=True)
+def isolated_storage(tmp_path, monkeypatch, fake_chroma_collection, mm_module):
+    json_dir = tmp_path / "memories"
+    chroma_dir = tmp_path / "chroma"
+    json_dir.mkdir(exist_ok=True)
+    chroma_dir.mkdir(exist_ok=True)
+
+    monkeypatch.setattr(mm_module, "JSON_DIR", json_dir)
+    monkeypatch.setattr(mm_module, "CHROMA_DIR", chroma_dir)
+    monkeypatch.setattr(mm_module.memory_manager, "_get_collection", lambda: fake_chroma_collection)
+    mm_module.memory_manager._collection = fake_chroma_collection
+    mm_module.memory_manager._chroma = object()
+
+    monkeypatch.setattr(mm_module.embedder, "embed", lambda text: [0.0, 0.0, 0.0])
     monkeypatch.setattr(
-        mm.embedder,
+        mm_module.embedder,
         "embed_batch",
         lambda texts: [[0.0, 0.0, 0.0] for _ in texts],
     )
@@ -108,14 +129,15 @@ def isolated_storage(tmp_path, monkeypatch, fake_chroma_collection):
     async def _embed_batch_async(texts):
         return [[0.0, 0.0, 0.0] for _ in texts]
 
-    monkeypatch.setattr(mm.embedder, "embed_async", _embed_async)
-    monkeypatch.setattr(mm.embedder, "embed_batch_async", _embed_batch_async)
+    monkeypatch.setattr(mm_module.embedder, "embed_async", _embed_async)
+    monkeypatch.setattr(mm_module.embedder, "embed_batch_async", _embed_batch_async)
 
     yield {
         "json_dir": json_dir,
         "chroma_dir": chroma_dir,
         "collection": fake_chroma_collection,
+        "mm": mm_module,
     }
 
-    mm.memory_manager._collection = None
-    mm.memory_manager._chroma = None
+    mm_module.memory_manager._collection = None
+    mm_module.memory_manager._chroma = None

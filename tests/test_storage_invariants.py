@@ -4,19 +4,17 @@ import json
 
 import pytest
 
-from core import memory_manager as mm
 
-
-def test_store_writes_json_before_chroma_upsert(fake_chroma_collection, monkeypatch):
+def test_store_writes_json_before_chroma_upsert(fake_chroma_collection, monkeypatch, mm_module):
     key = "overnight-store-order"
-    json_path = mm._json_path(key)
+    json_path = mm_module._json_path(key)
     order: list[str] = []
 
-    original_save_json = mm.MemoryManager._save_json
+    original_save_json = mm_module.MemoryManager._save_json
     original_upsert = fake_chroma_collection.upsert
 
     def wrapped_save_json(data):
-        result = original_save_json(mm.memory_manager, data)
+        result = original_save_json(mm_module.memory_manager, data)
         order.append("json")
         return result
 
@@ -28,10 +26,10 @@ def test_store_writes_json_before_chroma_upsert(fake_chroma_collection, monkeypa
         order.append("chroma")
         return original_upsert(*args, **kwargs)
 
-    monkeypatch.setattr(mm.memory_manager, "_save_json", wrapped_save_json)
+    monkeypatch.setattr(mm_module.memory_manager, "_save_json", wrapped_save_json)
     monkeypatch.setattr(fake_chroma_collection, "upsert", wrapped_upsert)
 
-    mm.memory_manager.store_memory(
+    mm_module.memory_manager.store_memory(
         key=key,
         content="short note for storage ordering",
         tags=["safety"],
@@ -42,31 +40,32 @@ def test_store_writes_json_before_chroma_upsert(fake_chroma_collection, monkeypa
     assert json_path.exists()
 
 
-def test_delete_stops_if_chroma_delete_fails(fake_chroma_collection):
+def test_delete_stops_if_chroma_delete_fails(fake_chroma_collection, mm_module):
     key = "overnight-delete-failure"
-    mm.memory_manager.store_memory(
+    mm_module.memory_manager.store_memory(
         key=key,
         content="short note for delete failure",
         tags=["safety"],
         title="Delete failure",
     )
 
-    json_path = mm._json_path(key)
+    json_path = mm_module._json_path(key)
     assert json_path.exists()
 
     fake_chroma_collection.fail_delete = True
 
     with pytest.raises(RuntimeError, match="Failed to delete"):
-        mm.memory_manager.delete_memory(key)
+        mm_module.memory_manager.delete_memory(key)
 
     assert json_path.exists(), "JSON must remain intact when Chroma delete fails"
-    stored = mm.memory_manager.retrieve_memory(key)
+    stored = mm_module.memory_manager.retrieve_memory(key)
     assert stored is not None
     assert stored["key"] == key
 
 
 def test_old_memory_without_new_fields_is_still_listed(isolated_storage):
     json_dir = isolated_storage["json_dir"]
+    mm_module = isolated_storage["mm"]
     legacy_path = json_dir / "legacy-memory.json"
 
     legacy_path.write_text(
@@ -81,7 +80,7 @@ def test_old_memory_without_new_fields_is_still_listed(isolated_storage):
         encoding="utf-8",
     )
 
-    memories = mm.memory_manager.list_memories()
+    memories = mm_module.memory_manager.list_memories()
 
     assert len(memories) == 1
     assert memories[0]["key"] == "legacy-memory"
