@@ -41,6 +41,13 @@ from core.embedder import embedder
 MAX_MEMORY_CHARS = 15_000
 CHROMA_TIMEOUT = 30.0  # seconds — timeout for ChromaDB operations in async paths
 DEFAULT_MEMORY_STATUS = "active"
+ALLOWED_MEMORY_STATUSES = {
+    "active",
+    "draft",
+    "historical",
+    "superseded",
+    "archived",
+}
 
 # Dedicated executor for ChromaDB ops. If a Chroma call times out, the zombie
 # thread stays here and cannot fill the default executor used by other async work.
@@ -168,6 +175,74 @@ def _normalize_bool(value: Any, default: bool = False) -> bool:
         if text in {"false", "0", "no", "n", "off", ""}:
             return False
     return bool(value)
+
+
+def _extract_heading_title(content: str) -> Optional[str]:
+    """Suggest a title from the first markdown heading or text line."""
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip()
+            return heading or None
+        return line[:80].strip() or None
+    return None
+
+
+def _suggest_tags_from_content(content: str, max_tags: int = 5) -> list[str]:
+    """Extract a small stable tag set from headings and early prose."""
+    stop_words = {
+        "about",
+        "after",
+        "also",
+        "and",
+        "are",
+        "because",
+        "been",
+        "before",
+        "being",
+        "below",
+        "between",
+        "brief",
+        "content",
+        "could",
+        "draft",
+        "from",
+        "have",
+        "into",
+        "memory",
+        "more",
+        "note",
+        "notes",
+        "only",
+        "over",
+        "section",
+        "should",
+        "that",
+        "their",
+        "them",
+        "there",
+        "these",
+        "this",
+        "through",
+        "under",
+        "updated",
+        "using",
+        "with",
+        "without",
+    }
+    candidates = re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", content.lower())
+    tags: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in stop_words or candidate in seen:
+            continue
+        seen.add(candidate)
+        tags.append(candidate)
+        if len(tags) >= max_tags:
+            break
+    return tags
 
 
 async def _run_blocking(func, *args, **kwargs):
@@ -621,6 +696,225 @@ class MemoryManager:
             print(f"[Engram] WARNING: last_accessed batch update failed: {e}", file=sys.stderr)
 
     # ── Public API ──────────────────────────────────────────────────────────
+
+    def check_duplicate(self, key: str, content: str) -> dict:
+        """Check whether content is a near-duplicate of an existing memory."""
+        duplicate = self._check_dedup(content, key)
+        return {
+            "key": key,
+            "duplicate": duplicate is not None,
+            "match": duplicate,
+        }
+
+    async def check_duplicate_async(self, key: str, content: str) -> dict:
+        """Async wrapper for duplicate checks."""
+        return await _run_blocking(self.check_duplicate, key, content)
+
+    def suggest_memory_metadata(self, content: str) -> dict:
+        """Suggest lightweight metadata defaults from markdown content."""
+        stripped_content = _strip_audit_log(content).strip()
+        title = _extract_heading_title(stripped_content)
+        return {
+            "title": title or "Untitled memory",
+            "tags": _suggest_tags_from_content(stripped_content),
+            "project": None,
+            "domain": None,
+            "status": "draft",
+            "canonical": False,
+            "related_to": [],
+        }
+
+    async def suggest_memory_metadata_async(self, content: str) -> dict:
+        """Async wrapper for metadata suggestions."""
+        return await _run_blocking(self.suggest_memory_metadata, content)
+
+    def validate_memory(
+        self,
+        *,
+        content: str,
+        related_to: Any = None,
+        status: str = None,
+        tags: Any = None,
+        title: str = None,
+        project: str = None,
+        domain: str = None,
+        canonical: Any = None,
+    ) -> dict:
+        """Validate memory content and additive metadata fields."""
+        normalized_related_to = _normalize_related_to(related_to)
+        normalized_status = _normalize_optional_text(status)
+        normalized = {
+            "title": _normalize_optional_text(title),
+            "tags": _normalize_tags(tags),
+            "related_to": normalized_related_to,
+            "project": _normalize_optional_text(project),
+            "domain": _normalize_optional_text(domain),
+            "status": normalized_status or DEFAULT_MEMORY_STATUS,
+            "canonical": _normalize_bool(canonical, default=False),
+            "content_chars": len(content),
+        }
+
+        errors: list[dict[str, Any]] = []
+        if len(content) > MAX_MEMORY_CHARS:
+            errors.append(
+                {
+                    "field": "content",
+                    "code": "content_too_long",
+                    "message": (
+                        f"Content is {len(content):,} chars — exceeds the "
+                        f"{MAX_MEMORY_CHARS:,} char limit."
+                    ),
+                }
+            )
+
+        if len(normalized_related_to) > 10:
+            errors.append(
+                {
+                    "field": "related_to",
+                    "code": "too_many_related_memories",
+                    "message": (
+                        f"related_to has {len(normalized_related_to)} entries — maximum is 10."
+                    ),
+                }
+            )
+
+        if normalized_status and normalized_status not in ALLOWED_MEMORY_STATUSES:
+            allowed = ", ".join(sorted(ALLOWED_MEMORY_STATUSES))
+            errors.append(
+                {
+                    "field": "status",
+                    "code": "invalid_status",
+                    "message": f"status must be one of: {allowed}.",
+                }
+            )
+
+        return {
+            "valid": not errors,
+            "errors": errors,
+            "normalized": normalized,
+        }
+
+    async def validate_memory_async(self, **kwargs) -> dict:
+        """Async wrapper for memory validation."""
+        return await _run_blocking(self.validate_memory, **kwargs)
+
+    @staticmethod
+    def _validation_error_message(validation: dict) -> str:
+        """Collapse structured validation errors into a stable exception string."""
+        return "; ".join(error["message"] for error in validation["errors"])
+
+    def _prepare_metadata_update(self, key: str, **changes) -> tuple[dict, list[dict]]:
+        """Apply additive metadata updates, persist JSON first, then reindex content."""
+        existing = self._load_json(key)
+        if existing is None:
+            raise KeyError(key)
+
+        allowed_fields = {"title", "tags", "related_to", "project", "domain", "status", "canonical"}
+        unsupported = sorted(set(changes) - allowed_fields)
+        if unsupported:
+            raise ValueError(
+                f"Unsupported metadata fields: {', '.join(unsupported)}. "
+                f"Allowed fields: {', '.join(sorted(allowed_fields))}."
+            )
+
+        content = existing["content"]
+        stripped_content = _strip_audit_log(content)
+
+        resolved_title = (
+            (_normalize_optional_text(changes.get("title")) or key)
+            if "title" in changes
+            else existing["title"]
+        )
+        resolved_tags = (
+            _normalize_tags(changes.get("tags"))
+            if "tags" in changes
+            else existing["tags"]
+        )
+        resolved_related_to = (
+            _normalize_related_to(changes.get("related_to"))
+            if "related_to" in changes
+            else existing.get("related_to", [])
+        )
+        resolved_project = (
+            _normalize_optional_text(changes.get("project"))
+            if "project" in changes
+            else existing.get("project")
+        )
+        resolved_domain = (
+            _normalize_optional_text(changes.get("domain"))
+            if "domain" in changes
+            else existing.get("domain")
+        )
+        resolved_status = (
+            _normalize_optional_text(changes.get("status")) or DEFAULT_MEMORY_STATUS
+            if "status" in changes
+            else existing.get("status", DEFAULT_MEMORY_STATUS)
+        )
+        resolved_canonical = (
+            _normalize_bool(changes.get("canonical"), default=False)
+            if "canonical" in changes
+            else existing.get("canonical", False)
+        )
+
+        validation = self.validate_memory(
+            content=stripped_content,
+            related_to=resolved_related_to,
+            status=resolved_status,
+            tags=resolved_tags,
+            title=resolved_title,
+            project=resolved_project,
+            domain=resolved_domain,
+            canonical=resolved_canonical,
+        )
+        if not validation["valid"]:
+            raise ValueError(self._validation_error_message(validation))
+
+        now = _now()
+        data = self._normalize_memory_record(
+            {
+                **existing,
+                "key": key,
+                "title": resolved_title,
+                "content": content,
+                "tags": resolved_tags,
+                "related_to": resolved_related_to,
+                "project": resolved_project,
+                "domain": resolved_domain,
+                "status": resolved_status,
+                "canonical": resolved_canonical,
+                "updated_at": now,
+                "chars": len(content),
+                "lines": len(content.splitlines()),
+            }
+        )
+
+        chunks = chunk_content_with_metadata(content)
+        data["chunk_count"] = len(chunks)
+
+        self._save_json(data)
+
+        try:
+            self._delete_chunks_from_chroma(key)
+        except Exception as e:
+            print(
+                f"[Engram] WARNING: Failed to delete old chunks for '{key}': {e}. "
+                f"Stale chunks may remain until next rebuild_index.",
+                file=sys.stderr,
+            )
+
+        return data, chunks
+
+    def update_memory_metadata(self, key: str, **changes) -> dict:
+        """Update metadata fields and reindex existing chunk content safely."""
+        data, chunks = self._prepare_metadata_update(key, **changes)
+        self._index_chunks(key, chunks, data)
+        return data
+
+    async def update_memory_metadata_async(self, key: str, **changes) -> dict:
+        """Async metadata update wrapper with JSON-first / Chroma-second ordering."""
+        data, chunks = await _run_blocking(self._prepare_metadata_update, key, **changes)
+        await self._index_chunks_async(key, chunks, data)
+        return data
 
     def _prepare_store(
         self,

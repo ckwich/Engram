@@ -404,6 +404,204 @@ async def store_memory(
 
 
 @mcp.tool()
+async def check_duplicate(key: str, content: str) -> dict[str, Any]:
+    """
+    Check whether proposed content is a near-duplicate of an existing memory.
+
+    Use this before store_memory() when you want a structured duplicate warning
+    without attempting a write.
+
+    Args:
+        key: Proposed memory key. Self-updates for the same key are allowed.
+        content: Proposed memory content to compare semantically.
+
+    Returns:
+        Structured payload: {key, duplicate, match, error}. When duplicate is true,
+        match includes the existing key, title, and similarity score.
+    """
+    try:
+        result = await memory_manager.check_duplicate_async(key, content)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            duplicate=False,
+            match=None,
+        )
+
+    return {
+        "key": key,
+        "duplicate": result["duplicate"],
+        "match": result["match"],
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def suggest_memory_metadata(content: str) -> dict[str, Any]:
+    """
+    Suggest lightweight metadata defaults from markdown content.
+
+    Args:
+        content: Proposed memory content.
+
+    Returns:
+        Structured payload: {suggestion, error}. suggestion includes a title,
+        tags, lifecycle defaults, and empty related metadata fields.
+    """
+    try:
+        suggestion = await memory_manager.suggest_memory_metadata_async(content)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            suggestion=None,
+        )
+
+    return {
+        "suggestion": suggestion,
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def validate_memory(
+    content: str,
+    title: str | None = None,
+    tags: list[str] | None = None,
+    related_to: list[str] | None = None,
+    status: str | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    canonical: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Validate memory content and metadata before storing or updating.
+
+    Args:
+        content: Proposed memory content.
+        title: Optional display title.
+        tags: Optional tag list.
+        related_to: Optional related memory keys.
+        status: Optional lifecycle status.
+        project: Optional project label.
+        domain: Optional domain label.
+        canonical: Optional canonical-memory flag.
+
+    Returns:
+        Structured payload: {valid, errors, normalized, error}. Validation errors
+        are returned in errors; runtime failures populate error instead.
+    """
+    try:
+        result = await memory_manager.validate_memory_async(
+            content=content,
+            title=title,
+            tags=tags,
+            related_to=related_to,
+            status=status,
+            project=project,
+            domain=domain,
+            canonical=canonical,
+        )
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            valid=False,
+            errors=[],
+            normalized=None,
+        )
+
+    return {
+        "valid": result["valid"],
+        "errors": result["errors"],
+        "normalized": result["normalized"],
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def update_memory_metadata(
+    key: str,
+    title: str | None = None,
+    tags: list[str] | None = None,
+    related_to: list[str] | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Update metadata on an existing memory and reindex its current content.
+
+    This preserves the JSON-first / Chroma-second safety guarantee. Content is
+    unchanged; only metadata fields are updated and the existing chunks are reindexed.
+
+    Args:
+        key: Existing memory key to update.
+        title: Optional replacement title.
+        tags: Optional replacement tag list.
+        related_to: Optional replacement related-memory list.
+        project: Optional replacement project label.
+        domain: Optional replacement domain label.
+        status: Optional replacement lifecycle status.
+        canonical: Optional replacement canonical-memory flag.
+
+    Returns:
+        Structured payload: {key, updated, memory, error}. When updated is true,
+        memory contains the normalized stored record after reindexing.
+    """
+    changes = {
+        name: value
+        for name, value in {
+            "title": title,
+            "tags": tags,
+            "related_to": related_to,
+            "project": project,
+            "domain": domain,
+            "status": status,
+            "canonical": canonical,
+        }.items()
+        if value is not None
+    }
+
+    try:
+        memory = await memory_manager.update_memory_metadata_async(key, **changes)
+    except KeyError:
+        return {
+            "key": key,
+            "updated": False,
+            "memory": None,
+            "error": {
+                "code": "not_found",
+                "message": f"❌ Memory not found: '{key}'",
+            },
+        }
+    except ValueError as e:
+        return {
+            "key": key,
+            "updated": False,
+            "memory": None,
+            "error": {
+                "code": "invalid_metadata",
+                "message": str(e),
+            },
+        }
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            updated=False,
+            memory=None,
+        )
+
+    return {
+        "key": key,
+        "updated": True,
+        "memory": memory,
+        "error": None,
+    }
+
+
+@mcp.tool()
 async def get_related_memories(key: str) -> str:
     """
     Retrieve all memories related to the given key, bidirectionally.
