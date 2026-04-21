@@ -261,15 +261,6 @@ class MemoryManager:
         """Clamp result limits to a non-negative integer."""
         return max(int(limit), 0)
 
-    def _structured_candidate_limit(self, limit: int, total_chunks: int) -> int:
-        """Over-fetch semantic candidates so post-search filters still have enough room."""
-        if total_chunks <= 0:
-            return 1
-        normalized_limit = self._normalize_limit(limit)
-        if normalized_limit == 0:
-            return 1
-        return min(max(normalized_limit * 5, 20), total_chunks)
-
     @staticmethod
     def _normalize_filter_tags(tags: Any) -> list[str]:
         """Accept either a string or list-like tags filter."""
@@ -354,6 +345,16 @@ class MemoryManager:
             include=self._semantic_query_include(),
         )
 
+    def _query_structured_semantic_results(self, query_embedding: list[float]):
+        """Run a structured search query across the full indexed candidate set."""
+        col = self._get_collection()
+        total_chunks = col.count()
+        return col.query(
+            query_embeddings=[query_embedding],
+            n_results=total_chunks or 1,
+            include=self._semantic_query_include(),
+        )
+
     def _build_result_explanation(
         self,
         *,
@@ -427,7 +428,9 @@ class MemoryManager:
             raw_results["distances"][0],
         ):
             parent_key = meta.get("parent_key", "unknown")
-            memory = self._load_json(parent_key) or self._normalize_memory_record({"key": parent_key})
+            memory = self._load_json(parent_key)
+            if memory is None:
+                continue
             stale_info = self._memory_stale_state(memory)
 
             if normalized_project and memory["project"] != normalized_project:
@@ -933,10 +936,7 @@ class MemoryManager:
 
         query_embedding = embedder.embed(query)
         try:
-            raw = self._query_semantic_results(
-                query_embedding,
-                self._structured_candidate_limit(normalized_limit, self._get_collection().count()),
-            )
+            raw = self._query_structured_semantic_results(query_embedding)
         except Exception as e:
             print(f"[Engram] structured search failed: {e}", file=sys.stderr)
             return {"query": query, "count": 0, "results": []}
@@ -974,10 +974,7 @@ class MemoryManager:
 
         def _do_query():
             try:
-                return self._query_semantic_results(
-                    query_embedding,
-                    self._structured_candidate_limit(normalized_limit, self._get_collection().count()),
-                )
+                return self._query_structured_semantic_results(query_embedding)
             except Exception as e:
                 print(f"[Engram] structured search failed: {e}", file=sys.stderr)
                 return None

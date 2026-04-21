@@ -134,3 +134,60 @@ def test_legacy_memory_defaults_are_available_for_new_metadata(mm_module, isolat
     assert memory["canonical"] is False
     assert memory["tags"] == []
     assert memory["related_to"] == []
+
+
+def test_structured_search_skips_orphaned_index_chunks(mm_module):
+    mm_module.memory_manager.store_memory(
+        key="orphaned-memory",
+        content="This memory will lose its JSON source of truth.",
+        tags=["search"],
+        title="Orphaned memory",
+        project="engram",
+    )
+
+    mm_module._json_path("orphaned-memory").unlink()
+
+    payload = mm_module.memory_manager.search_memories_structured(
+        "lose its JSON source of truth",
+        limit=10,
+    )
+
+    assert payload == {
+        "query": "lose its JSON source of truth",
+        "count": 0,
+        "results": [],
+    }
+
+
+def test_structured_search_filters_do_not_starve_under_candidate_pressure(mm_module):
+    for index in range(25):
+        mm_module.memory_manager.store_memory(
+            key=f"irrelevant-{index}",
+            content=f"Irrelevant note {index} that will occupy the early candidate slots.",
+            tags=["noise"],
+            title=f"Irrelevant {index}",
+            project="other",
+            canonical=False,
+        )
+
+    mm_module.memory_manager.store_memory(
+        key="desired-match",
+        content="Targeted memory that should survive scoped filtering pressure.",
+        tags=["needle", "search"],
+        title="Desired match",
+        project="engram",
+        domain="agent",
+        canonical=True,
+    )
+
+    payload = mm_module.memory_manager.search_memories_structured(
+        "scoped filtering pressure",
+        limit=1,
+        project="engram",
+        canonical_only=True,
+    )
+
+    assert payload["count"] == 1
+    assert payload["results"][0]["key"] == "desired-match"
+    assert payload["results"][0]["project"] == "engram"
+    assert payload["results"][0]["canonical"] is True
