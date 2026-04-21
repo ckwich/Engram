@@ -4,15 +4,19 @@ Engram v0.1 — MCP Server
 Provides semantic memory tools to AI agents via the Model Context Protocol.
 
 Three-tier retrieval pattern (agents should follow this):
-  1. search_memories(query)         → scored snippets, identify key + chunk_id
-  2. retrieve_chunk(key, chunk_id)  → one relevant section, usually sufficient
-  3. retrieve_memory(key)           → full content, use sparingly
+  1. search_memories_v2(query) / search_memories(query)
+     → scored snippets, identify key + chunk_id
+  2. retrieve_chunk_v2(key, chunk_id) / retrieve_chunk(key, chunk_id)
+     → one relevant section, usually sufficient
+  3. retrieve_memory_v2(key) / retrieve_memory(key)
+     → full content, use sparingly
 """
 
 import argparse
 import json
 import os
 import sys
+from typing import Any
 
 from fastmcp import FastMCP
 from core.embedder import embedder
@@ -40,6 +44,55 @@ def _validate_search_query(query: str) -> str | None:
     if len(query) > 2000:
         return "❌ Query too long (max 2,000 chars). Shorten your search query."
     return None
+
+
+def _runtime_error_payload(message: str, **payload: Any) -> dict[str, Any]:
+    """Attach a stable structured runtime error payload."""
+    data = dict(payload)
+    data["error"] = {
+        "code": "runtime_error",
+        "message": message,
+    }
+    return data
+
+
+def _retrieve_chunk_payload(result: dict | None, key: str, chunk_id: int) -> dict[str, Any]:
+    """Normalize chunk retrieval output into the v2 structured contract."""
+    if not result:
+        return {
+            "key": key,
+            "chunk_id": chunk_id,
+            "found": False,
+            "chunk": None,
+            "error": None,
+        }
+
+    chunk = {
+        "title": result.get("title", key),
+        "text": result.get("text"),
+        "section_title": result.get("section_title"),
+        "heading_path": result.get("heading_path", []),
+        "chunk_kind": result.get("chunk_kind"),
+    }
+    error = result.get("error")
+
+    return {
+        "key": key,
+        "chunk_id": chunk_id,
+        "found": bool(result.get("found", True)),
+        "chunk": chunk if result.get("found", True) else None,
+        "error": error,
+    }
+
+
+def _retrieve_memory_payload(key: str, memory: dict | None) -> dict[str, Any]:
+    """Normalize full-memory retrieval output into the v2 structured contract."""
+    return {
+        "key": key,
+        "found": memory is not None,
+        "memory": memory,
+        "error": None,
+    }
 
 
 @mcp.tool()
@@ -152,6 +205,86 @@ async def retrieve_chunk(key: str, chunk_id: int) -> str:
 
 
 @mcp.tool()
+async def retrieve_chunk_v2(key: str, chunk_id: int) -> dict[str, Any]:
+    """
+    Retrieve one chunk as structured data.
+
+    Use this AFTER search_memories_v2() or search_memories() identifies the relevant key
+    and chunk_id. Prefer this middle tier before escalating to retrieve_memory_v2().
+
+    Args:
+        key: The memory's unique key.
+        chunk_id: The chunk index returned by search results.
+
+    Returns:
+        Structured payload: {key, chunk_id, found, chunk, error}. When found is true,
+        chunk includes title, text, and chunk metadata. When not found, chunk is null.
+    """
+    try:
+        results = await memory_manager.retrieve_chunks_async([{"key": key, "chunk_id": chunk_id}])
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            chunk_id=chunk_id,
+            found=False,
+            chunk=None,
+        )
+
+    result = results[0] if results else None
+    return _retrieve_chunk_payload(result, key, chunk_id)
+
+
+@mcp.tool()
+async def retrieve_chunks_v2(requests: list[dict]) -> dict[str, Any]:
+    """
+    Retrieve multiple chunks in one call as structured data.
+
+    Use this AFTER search_memories_v2() when you need several chunk matches at once.
+    It preserves request order and keeps not-found results explicit so you can avoid
+    escalating to retrieve_memory_v2() unless full memories are still necessary.
+
+    Args:
+        requests: Array of {key, chunk_id} objects.
+
+    Returns:
+        Structured payload: {requested_count, found_count, results, error}. Each result
+        includes key, chunk_id, found, chunk, and per-request validation details when needed.
+    """
+    if not isinstance(requests, list):
+        return {
+            "requested_count": 0,
+            "found_count": 0,
+            "results": [],
+            "error": {
+                "code": "invalid_requests",
+                "message": "❌ requests must be a list of {key, chunk_id} objects.",
+            },
+        }
+
+    try:
+        raw_results = await memory_manager.retrieve_chunks_async(requests)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            requested_count=len(requests),
+            found_count=0,
+            results=[],
+        )
+
+    results = [
+        _retrieve_chunk_payload(result, result.get("key", ""), result.get("chunk_id", -1))
+        for result in raw_results
+    ]
+    return {
+        "requested_count": len(requests),
+        "found_count": sum(1 for result in results if result["found"]),
+        "results": results,
+        "error": None,
+    }
+
+
+@mcp.tool()
 async def retrieve_memory(key: str) -> str:
     """
     Retrieve the full content of a memory by key.
@@ -178,6 +311,34 @@ async def retrieve_memory(key: str) -> str:
         f"📊 {result['chars']} chars | {result.get('chunk_count', '?')} chunks\n\n"
         f"{result['content']}"
     )
+
+
+@mcp.tool()
+async def retrieve_memory_v2(key: str) -> dict[str, Any]:
+    """
+    Retrieve the full memory as structured metadata plus content.
+
+    Use this ONLY when chunk retrieval is not sufficient. This is still the most
+    token-expensive read path, so prefer search_memories_v2() and retrieve_chunk_v2()
+    or retrieve_chunks_v2() first.
+
+    Args:
+        key: The memory's unique key.
+
+    Returns:
+        Structured payload: {key, found, memory, error}. When found is true, memory
+        contains the normalized metadata, lifecycle fields, related keys, and content.
+    """
+    try:
+        result = await memory_manager.retrieve_memory_async(key)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            found=False,
+            memory=None,
+        )
+    return _retrieve_memory_payload(key, result)
 
 
 @mcp.tool()
@@ -282,6 +443,41 @@ async def get_related_memories(key: str) -> str:
 
 
 @mcp.tool()
+async def get_related_memories_v2(key: str) -> dict[str, Any]:
+    """
+    Retrieve related memories as structured forward and reverse link lists.
+
+    Args:
+        key: The memory key to inspect.
+
+    Returns:
+        Structured payload: {key, found, forward, reverse, forward_count, reverse_count, error}.
+    """
+    try:
+        result = await memory_manager.get_related_memories_async(key)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            found=False,
+            forward=[],
+            reverse=[],
+            forward_count=0,
+            reverse_count=0,
+        )
+
+    return {
+        "key": key,
+        "found": result["found"],
+        "forward": result["forward"],
+        "reverse": result["reverse"],
+        "forward_count": len(result["forward"]),
+        "reverse_count": len(result["reverse"]),
+        "error": None,
+    }
+
+
+@mcp.tool()
 async def get_stale_memories(days: int = 90, type: str = "all") -> str:
     """
     Return memories that are time-stale (not accessed in N days) or code-stale
@@ -316,6 +512,50 @@ async def get_stale_memories(days: int = 90, type: str = "all") -> str:
             f"  detail: {r['stale_detail']}\n"
         )
     return "\n".join(lines)
+
+
+@mcp.tool()
+async def get_stale_memories_v2(days: int = 90, type: str = "all") -> dict[str, Any]:
+    """
+    Return stale memories as structured metadata.
+
+    Args:
+        days: Threshold in days for time-staleness.
+        type: 'time', 'code', or 'all'.
+
+    Returns:
+        Structured payload: {days, type, count, memories, error}.
+    """
+    if type not in ("time", "code", "all"):
+        return {
+            "days": days,
+            "type": type,
+            "count": 0,
+            "memories": [],
+            "error": {
+                "code": "invalid_type",
+                "message": "❌ type must be 'time', 'code', or 'all'.",
+            },
+        }
+
+    try:
+        results = await memory_manager.get_stale_memories_async(days=days, type=type)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            days=days,
+            type=type,
+            count=0,
+            memories=[],
+        )
+
+    return {
+        "days": days,
+        "type": type,
+        "count": len(results),
+        "memories": results,
+        "error": None,
+    }
 
 
 @mcp.tool()

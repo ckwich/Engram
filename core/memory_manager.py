@@ -797,6 +797,83 @@ class MemoryManager:
         await self._index_chunks_async(key, chunks, data)
         return data
 
+    @staticmethod
+    def _chunk_heading_path(meta: dict) -> list[str]:
+        """Convert stored heading metadata back into a structured path."""
+        heading_path = meta.get("heading_path", "")
+        if not heading_path:
+            return []
+        return [part.strip() for part in str(heading_path).split(" > ") if part.strip()]
+
+    @classmethod
+    def _build_chunk_result(
+        cls,
+        *,
+        key: str,
+        chunk_id: int,
+        text: Optional[str] = None,
+        meta: Optional[dict] = None,
+        found: bool = False,
+        error: Optional[str] = None,
+    ) -> dict:
+        """Build a stable structured chunk payload for retrieval tools."""
+        payload = {
+            "key": key,
+            "chunk_id": chunk_id,
+            "found": found,
+            "title": key,
+            "text": None,
+            "section_title": None,
+            "heading_path": [],
+            "chunk_kind": None,
+        }
+
+        if meta:
+            payload["title"] = meta.get("title", key)
+            payload["section_title"] = meta.get("section_title") or None
+            payload["heading_path"] = cls._chunk_heading_path(meta)
+            payload["chunk_kind"] = meta.get("chunk_kind") or None
+
+        if found:
+            payload["text"] = text
+        if error:
+            payload["error"] = error
+        return payload
+
+    @staticmethod
+    def _normalize_chunk_request(request: Any) -> dict:
+        """Normalize a single chunk retrieval request for batch retrieval."""
+        if not isinstance(request, dict):
+            return {
+                "key": "",
+                "chunk_id": -1,
+                "error": "request must be an object with key and chunk_id",
+            }
+
+        key = str(request.get("key", "")).strip()
+        if not key:
+            return {
+                "key": "",
+                "chunk_id": -1,
+                "error": "key is required",
+            }
+
+        raw_chunk_id = request.get("chunk_id")
+        try:
+            chunk_id = int(raw_chunk_id)
+        except (TypeError, ValueError):
+            return {
+                "key": key,
+                "chunk_id": raw_chunk_id,
+                "error": "chunk_id must be an integer",
+            }
+
+        return {
+            "key": key,
+            "chunk_id": chunk_id,
+            "error": None,
+        }
+
     def retrieve_memory(self, key: str) -> Optional[dict]:
         """Retrieve full memory content from JSON store."""
         return self._load_json(key)
@@ -828,12 +905,96 @@ class MemoryManager:
             print(f"[Engram] retrieve_chunk failed for {doc_id}: {e}", file=sys.stderr)
         return None
 
+    def retrieve_chunks(self, requests: list[dict]) -> list[dict]:
+        """
+        Retrieve multiple chunks in one batch.
+        Returns one structured result per request, preserving order.
+        """
+        if not requests:
+            return []
+
+        results: list[Optional[dict]] = [None] * len(requests)
+        doc_ids: list[str] = []
+        doc_positions: dict[str, list[tuple[int, str, int]]] = {}
+
+        for index, request in enumerate(requests):
+            normalized = self._normalize_chunk_request(request)
+            key = normalized["key"]
+            chunk_id = normalized["chunk_id"]
+            error = normalized["error"]
+
+            if error:
+                results[index] = self._build_chunk_result(
+                    key=key,
+                    chunk_id=chunk_id,
+                    found=False,
+                    error=error,
+                )
+                continue
+
+            doc_id = _chunk_doc_id(key, chunk_id)
+            doc_ids.append(doc_id)
+            doc_positions.setdefault(doc_id, []).append((index, key, chunk_id))
+
+        if doc_ids:
+            try:
+                col = self._get_collection()
+                raw = col.get(ids=list(dict.fromkeys(doc_ids)), include=["documents", "metadatas"])
+                docs_by_id = {
+                    doc_id: (document, meta)
+                    for doc_id, document, meta in zip(
+                        raw.get("ids", []),
+                        raw.get("documents", []),
+                        raw.get("metadatas", []),
+                    )
+                }
+
+                for doc_id, positions in doc_positions.items():
+                    document, meta = docs_by_id.get(doc_id, (None, None))
+                    for index, key, chunk_id in positions:
+                        if document is None:
+                            results[index] = self._build_chunk_result(
+                                key=key,
+                                chunk_id=chunk_id,
+                                found=False,
+                            )
+                            continue
+
+                        results[index] = self._build_chunk_result(
+                            key=key,
+                            chunk_id=chunk_id,
+                            text=document,
+                            meta=meta,
+                            found=True,
+                        )
+            except Exception as e:
+                print(f"[Engram] retrieve_chunks failed: {e}", file=sys.stderr)
+                for doc_id, positions in doc_positions.items():
+                    for index, key, chunk_id in positions:
+                        if results[index] is None:
+                            results[index] = self._build_chunk_result(
+                                key=key,
+                                chunk_id=chunk_id,
+                                found=False,
+                                error="batch retrieval failed",
+                            )
+
+        return [result for result in results if result is not None]
+
     async def retrieve_chunk_async(self, key: str, chunk_id: int) -> Optional[dict]:
         """Retrieve a specific chunk (async — non-blocking for MCP)."""
         result = await _run_chroma(self.retrieve_chunk, key, chunk_id)
         if result:
             asyncio.create_task(self._update_last_accessed_async([key]))
         return result
+
+    async def retrieve_chunks_async(self, requests: list[dict]) -> list[dict]:
+        """Retrieve multiple chunks (async — non-blocking for MCP)."""
+        results = await _run_chroma(self.retrieve_chunks, requests)
+        found_keys = list({result["key"] for result in results if result.get("found")})
+        if found_keys:
+            asyncio.create_task(self._update_last_accessed_async(found_keys))
+        return results
 
     def search_memories(self, query: str, limit: int = 5) -> list[dict]:
         """
