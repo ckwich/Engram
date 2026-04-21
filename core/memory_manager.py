@@ -30,16 +30,17 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import chromadb
 
-from core.chunker import chunk_content
+from core.chunker import chunk_content_with_metadata
 from core.embedder import embedder
 
 # ── Limits ────────────────────────────────────────────────────────────────────
 MAX_MEMORY_CHARS = 15_000
 CHROMA_TIMEOUT = 30.0  # seconds — timeout for ChromaDB operations in async paths
+DEFAULT_MEMORY_STATUS = "active"
 
 # Dedicated executor for ChromaDB ops. If a Chroma call times out, the zombie
 # thread stays here and cannot fill the default executor used by other async work.
@@ -112,6 +113,63 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def _normalize_optional_text(value: Any) -> Optional[str]:
+    """Normalize optional string-like metadata values."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_tags(tags: Any) -> list[str]:
+    """Normalize tags to a stable, de-duplicated list of non-empty strings."""
+    if tags is None:
+        return []
+
+    raw_tags = [tags] if isinstance(tags, str) else list(tags)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for tag in raw_tags:
+        text = str(tag).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _normalize_related_to(related_to: Any) -> list[str]:
+    """Normalize related memory keys while preserving order."""
+    if related_to is None:
+        return []
+
+    raw_keys = [related_to] if isinstance(related_to, str) else list(related_to)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for key in raw_keys:
+        text = str(key).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _normalize_bool(value: Any, default: bool = False) -> bool:
+    """Normalize permissive bool-like inputs without treating every string as true."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "y", "on"}:
+            return True
+        if text in {"false", "0", "no", "n", "off", ""}:
+            return False
+    return bool(value)
+
+
 async def _run_blocking(func, *args, **kwargs):
     """Run a blocking function in the default thread pool executor."""
     loop = asyncio.get_running_loop()
@@ -167,13 +225,260 @@ class MemoryManager:
 
     # ── Internal helpers ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _normalize_memory_record(data: Optional[dict]) -> Optional[dict]:
+        """Backfill additive metadata defaults without mutating on-disk legacy JSON."""
+        if data is None:
+            return None
+
+        normalized = dict(data)
+        key = normalized.get("key", "")
+        normalized["key"] = key
+        normalized["title"] = normalized.get("title") or key
+        normalized["tags"] = _normalize_tags(normalized.get("tags"))
+        normalized["related_to"] = _normalize_related_to(normalized.get("related_to"))
+        normalized["project"] = _normalize_optional_text(normalized.get("project"))
+        normalized["domain"] = _normalize_optional_text(normalized.get("domain"))
+        normalized["status"] = _normalize_optional_text(normalized.get("status")) or DEFAULT_MEMORY_STATUS
+        normalized["canonical"] = _normalize_bool(normalized.get("canonical"), default=False)
+        return normalized
+
+    @staticmethod
+    def _make_snippet(text: str, max_chars: int = 150) -> str:
+        """Truncate a chunk into a readable snippet without breaking callers."""
+        if len(text) <= max_chars:
+            return text
+        truncated = text[:max_chars].rsplit(" ", 1)
+        return (truncated[0] if len(truncated) > 1 else text[: max_chars - 3]) + "..."
+
+    @staticmethod
+    def _score_from_distance(distance: float) -> float:
+        """Convert Chroma cosine distance to a similarity score."""
+        return round(1 - (distance / 2), 3)
+
+    @staticmethod
+    def _normalize_limit(limit: int) -> int:
+        """Clamp result limits to a non-negative integer."""
+        return max(int(limit), 0)
+
+    def _structured_candidate_limit(self, limit: int, total_chunks: int) -> int:
+        """Over-fetch semantic candidates so post-search filters still have enough room."""
+        if total_chunks <= 0:
+            return 1
+        normalized_limit = self._normalize_limit(limit)
+        if normalized_limit == 0:
+            return 1
+        return min(max(normalized_limit * 5, 20), total_chunks)
+
+    @staticmethod
+    def _normalize_filter_tags(tags: Any) -> list[str]:
+        """Accept either a string or list-like tags filter."""
+        return _normalize_tags(tags)
+
+    def _chunk_metadata(self, key: str, chunk: dict, data: dict) -> dict:
+        """Build Chroma metadata for a chunk using normalized memory metadata."""
+        metadata = {
+            "parent_key": key,
+            "chunk_id": chunk["chunk_id"],
+            "chunk_index": chunk["chunk_id"],
+            "title": data["title"],
+            "tags": ",".join(data["tags"]),
+            "project": data["project"] or "",
+            "domain": data["domain"] or "",
+            "status": data["status"],
+            "canonical": data["canonical"],
+            "section_title": chunk.get("section_title", ""),
+            "heading_path": " > ".join(chunk.get("heading_path", [])),
+            "chunk_kind": chunk.get("chunk_kind", "section"),
+        }
+        if data.get("related_to"):
+            metadata["related_to"] = ",".join(data["related_to"])
+        return metadata
+
+    def _memory_stale_state(self, data: dict, days: int = None) -> dict:
+        """Return structured stale metadata for a memory record."""
+        threshold_days = days if days is not None else _config.get("stale_days", 90)
+        now_dt = datetime.now().astimezone()
+
+        is_time_stale = False
+        days_since = 0
+        last_accessed = data.get("last_accessed")
+        if last_accessed is not None:
+            try:
+                accessed_dt = datetime.fromisoformat(last_accessed)
+                if accessed_dt.tzinfo is None:
+                    accessed_dt = accessed_dt.astimezone()
+                delta = now_dt - accessed_dt
+                days_since = delta.days
+                is_time_stale = days_since >= threshold_days
+            except Exception:
+                pass
+
+        is_code_stale = bool(data.get("potentially_stale", False))
+        stale_reason = _normalize_optional_text(data.get("stale_reason")) or ""
+
+        if is_time_stale and is_code_stale:
+            stale_type = "both"
+            stale_detail = f"{days_since} days; {stale_reason}" if stale_reason else f"{days_since} days"
+        elif is_time_stale:
+            stale_type = "time"
+            stale_detail = f"{days_since} days"
+        elif is_code_stale:
+            stale_type = "code"
+            stale_detail = stale_reason
+        else:
+            stale_type = None
+            stale_detail = ""
+
+        return {
+            "stale_type": stale_type,
+            "stale_detail": stale_detail,
+            "last_accessed": last_accessed,
+            "stale_flagged_at": data.get("stale_flagged_at"),
+            "days_since": days_since,
+            "is_time_stale": is_time_stale,
+            "is_code_stale": is_code_stale,
+        }
+
+    @staticmethod
+    def _semantic_query_include() -> list[str]:
+        """Shared Chroma query include list for semantic search."""
+        return ["documents", "metadatas", "distances"]
+
+    def _query_semantic_results(self, query_embedding: list[float], limit: int):
+        """Run a semantic search query against the chunk index."""
+        col = self._get_collection()
+        return col.query(
+            query_embeddings=[query_embedding],
+            n_results=min(limit, col.count() or 1),
+            include=self._semantic_query_include(),
+        )
+
+    def _build_result_explanation(
+        self,
+        *,
+        score: float,
+        meta: dict,
+        memory: dict,
+        filter_tags: list[str],
+        include_stale: bool,
+        canonical_only: bool,
+        stale_info: dict,
+    ) -> str:
+        """Explain why a structured search result was ranked and kept."""
+        parts = [f"semantic score {score:.3f}"]
+
+        section_title = meta.get("section_title")
+        if section_title:
+            parts.append(f"section '{section_title}'")
+        elif meta.get("chunk_kind"):
+            parts.append(f"chunk kind {meta['chunk_kind']}")
+
+        if memory.get("project"):
+            parts.append(f"project={memory['project']}")
+        if memory.get("domain"):
+            parts.append(f"domain={memory['domain']}")
+
+        if filter_tags:
+            parts.append(f"matched tags {', '.join(filter_tags)}")
+        elif memory["tags"]:
+            parts.append(f"tags {', '.join(memory['tags'])}")
+
+        parts.append(f"status={memory['status']}")
+        parts.append("canonical memory" if memory["canonical"] else "non-canonical memory")
+
+        if stale_info["stale_type"]:
+            detail = stale_info["stale_detail"] or "flagged as stale"
+            parts.append(f"stale={stale_info['stale_type']} ({detail})")
+        elif not include_stale or canonical_only:
+            parts.append("fresh memory")
+
+        return "; ".join(parts)
+
+    def _build_structured_payload(
+        self,
+        *,
+        query: str,
+        raw_results,
+        limit: int,
+        project: Optional[str],
+        domain: Optional[str],
+        tags: list[str],
+        include_stale: bool,
+        canonical_only: bool,
+    ) -> dict:
+        """Filter and enrich semantic results into the structured payload."""
+        normalized_limit = self._normalize_limit(limit)
+        payload = {"query": query, "count": 0, "results": []}
+        if normalized_limit == 0:
+            return payload
+
+        if not raw_results or not raw_results.get("ids") or not raw_results["ids"][0]:
+            return payload
+
+        normalized_project = _normalize_optional_text(project)
+        normalized_domain = _normalize_optional_text(domain)
+        required_tags = self._normalize_filter_tags(tags)
+
+        enriched_results: list[dict] = []
+        for doc, meta, distance in zip(
+            raw_results["documents"][0],
+            raw_results["metadatas"][0],
+            raw_results["distances"][0],
+        ):
+            parent_key = meta.get("parent_key", "unknown")
+            memory = self._load_json(parent_key) or self._normalize_memory_record({"key": parent_key})
+            stale_info = self._memory_stale_state(memory)
+
+            if normalized_project and memory["project"] != normalized_project:
+                continue
+            if normalized_domain and memory["domain"] != normalized_domain:
+                continue
+            if required_tags and not all(tag in memory["tags"] for tag in required_tags):
+                continue
+            if canonical_only and not memory["canonical"]:
+                continue
+            if not include_stale and stale_info["stale_type"]:
+                continue
+
+            score = self._score_from_distance(distance)
+            enriched_results.append(
+                {
+                    "key": parent_key,
+                    "chunk_id": int(meta.get("chunk_id", 0)),
+                    "title": memory["title"],
+                    "score": score,
+                    "snippet": self._make_snippet(doc),
+                    "tags": memory["tags"],
+                    "project": memory["project"],
+                    "domain": memory["domain"],
+                    "status": memory["status"],
+                    "canonical": memory["canonical"],
+                    "stale_type": stale_info["stale_type"],
+                    "explanation": self._build_result_explanation(
+                        score=score,
+                        meta=meta,
+                        memory=memory,
+                        filter_tags=required_tags,
+                        include_stale=include_stale,
+                        canonical_only=canonical_only,
+                        stale_info=stale_info,
+                    ),
+                }
+            )
+
+        enriched_results.sort(key=lambda result: result["score"], reverse=True)
+        payload["results"] = enriched_results[:normalized_limit]
+        payload["count"] = len(payload["results"])
+        return payload
+
     def _load_json(self, key: str) -> Optional[dict]:
         path = _json_path(key)
         if not path.exists():
             return None
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                return self._normalize_memory_record(json.load(f))
         except Exception as e:
             print(f"[Engram] Failed to load JSON for key '{key}': {e}", file=sys.stderr)
             return None
@@ -195,7 +500,7 @@ class MemoryManager:
         if results and results.get("ids"):
             col.delete(ids=results["ids"])
 
-    def _index_chunks(self, key: str, chunks: list[dict], title: str, tags: list[str], related_to: list[str] = None):
+    def _index_chunks(self, key: str, chunks: list[dict], data: dict):
         """Embed and upsert chunks into ChromaDB (sync — used by webui/CLI)."""
         col = self._get_collection()
         if not chunks:
@@ -205,16 +510,7 @@ class MemoryManager:
         embeddings = embedder.embed_batch(texts)
 
         ids = [_chunk_doc_id(key, c["chunk_id"]) for c in chunks]
-        metadatas = [
-            {
-                "parent_key": key,
-                "chunk_id": c["chunk_id"],
-                "title": title,
-                "tags": ",".join(tags),
-                **({"related_to": ",".join(related_to)} if related_to else {}),
-            }
-            for c in chunks
-        ]
+        metadatas = [self._chunk_metadata(key, chunk, data) for chunk in chunks]
 
         col.upsert(
             ids=ids,
@@ -223,7 +519,7 @@ class MemoryManager:
             metadatas=metadatas,
         )
 
-    async def _index_chunks_async(self, key: str, chunks: list[dict], title: str, tags: list[str], related_to: list[str] = None):
+    async def _index_chunks_async(self, key: str, chunks: list[dict], data: dict):
         """Embed and upsert chunks into ChromaDB (async — non-blocking for MCP).
         ALL blocking ops run in executor — nothing touches the event loop directly."""
         if not chunks:
@@ -233,16 +529,7 @@ class MemoryManager:
         embeddings = await embedder.embed_batch_async(texts)
 
         ids = [_chunk_doc_id(key, c["chunk_id"]) for c in chunks]
-        metadatas = [
-            {
-                "parent_key": key,
-                "chunk_id": c["chunk_id"],
-                "title": title,
-                "tags": ",".join(tags),
-                **({"related_to": ",".join(related_to)} if related_to else {}),
-            }
-            for c in chunks
-        ]
+        metadatas = [self._chunk_metadata(key, chunk, data) for chunk in chunks]
 
         def _do_upsert():
             col = self._get_collection()
@@ -340,6 +627,10 @@ class MemoryManager:
         title: str = None,
         related_to: list[str] = None,
         force: bool = False,
+        project: str = None,
+        domain: str = None,
+        status: str = None,
+        canonical: Optional[bool] = None,
     ) -> tuple[dict, list[dict]]:
         """
         Shared preparation for store_memory / store_memory_async.
@@ -361,8 +652,8 @@ class MemoryManager:
                 f"(e.g. '{key}_part1', '{key}_part2') for better chunking and retrieval."
             )
 
-        tags = tags or []
-        validated_related_to = list(related_to) if related_to else []
+        normalized_tags = _normalize_tags(tags)
+        validated_related_to = _normalize_related_to(related_to)
         if len(validated_related_to) > 10:
             raise ValueError(
                 f"related_to has {len(validated_related_to)} entries — maximum is 10. "
@@ -374,6 +665,26 @@ class MemoryManager:
         existing = self._load_json(key)
         created_at = existing["created_at"] if existing else now
         resolved_title = title or (existing["title"] if existing else key)
+        resolved_project = (
+            _normalize_optional_text(project)
+            if project is not None
+            else (existing.get("project") if existing else None)
+        )
+        resolved_domain = (
+            _normalize_optional_text(domain)
+            if domain is not None
+            else (existing.get("domain") if existing else None)
+        )
+        resolved_status = (
+            _normalize_optional_text(status)
+            if status is not None
+            else (existing.get("status") if existing else None)
+        ) or DEFAULT_MEMORY_STATUS
+        resolved_canonical = (
+            _normalize_bool(existing.get("canonical"), default=False)
+            if canonical is None and existing
+            else _normalize_bool(canonical, default=False)
+        )
 
         # Append audit log to content
         action = "Updated" if existing else "Created"
@@ -383,17 +694,22 @@ class MemoryManager:
             "key": key,
             "title": resolved_title,
             "content": content_with_log,
-            "tags": tags,
+            "tags": normalized_tags,
             "created_at": created_at,
             "updated_at": now,
             "last_accessed": existing.get("last_accessed", None) if existing else None,
             "related_to": validated_related_to,
+            "project": resolved_project,
+            "domain": resolved_domain,
+            "status": resolved_status,
+            "canonical": resolved_canonical,
             "chars": len(content_with_log),
             "lines": len(content_with_log.splitlines()),
         }
+        data = self._normalize_memory_record(data)
 
         # 1. Chunk content and set count
-        chunks = chunk_content(content_with_log)
+        chunks = chunk_content_with_metadata(content_with_log)
         data["chunk_count"] = len(chunks)
 
         # 2. Write JSON (source of truth) FIRST — before touching ChromaDB
@@ -418,6 +734,10 @@ class MemoryManager:
         title: str = None,
         related_to: list[str] = None,
         force: bool = False,
+        project: str = None,
+        domain: str = None,
+        status: str = None,
+        canonical: Optional[bool] = None,
     ) -> dict:
         """
         Store or update a memory (sync — used by webui/CLI).
@@ -425,8 +745,19 @@ class MemoryManager:
         Returns the stored memory metadata dict.
         Raises DuplicateMemoryError if near-duplicate detected and force=False.
         """
-        data, chunks = self._prepare_store(key, content, tags, title, related_to, force)
-        self._index_chunks(key, chunks, data["title"], data["tags"], data.get("related_to", []))
+        data, chunks = self._prepare_store(
+            key,
+            content,
+            tags,
+            title,
+            related_to,
+            force,
+            project,
+            domain,
+            status,
+            canonical,
+        )
+        self._index_chunks(key, chunks, data)
         return data
 
     async def store_memory_async(
@@ -437,14 +768,30 @@ class MemoryManager:
         title: str = None,
         related_to: list[str] = None,
         force: bool = False,
+        project: str = None,
+        domain: str = None,
+        status: str = None,
+        canonical: Optional[bool] = None,
     ) -> dict:
         """
         Store or update a memory (async — non-blocking for MCP).
         Writes JSON first, then updates the vector index without blocking the event loop.
         Raises DuplicateMemoryError if near-duplicate detected and force=False.
         """
-        data, chunks = await _run_blocking(self._prepare_store, key, content, tags, title, related_to, force)
-        await self._index_chunks_async(key, chunks, data["title"], data["tags"], data.get("related_to", []))
+        data, chunks = await _run_blocking(
+            self._prepare_store,
+            key,
+            content,
+            tags,
+            title,
+            related_to,
+            force,
+            project,
+            domain,
+            status,
+            canonical,
+        )
+        await self._index_chunks_async(key, chunks, data)
         return data
 
     def retrieve_memory(self, key: str) -> Optional[dict]:
@@ -491,15 +838,14 @@ class MemoryManager:
         Returns scored snippets — NOT full content.
         Each result: {key, chunk_id, title, score, snippet, tags}
         """
-        col = self._get_collection()
+        normalized_limit = self._normalize_limit(limit)
+        if normalized_limit == 0:
+            return []
+
         query_embedding = embedder.embed(query)
 
         try:
-            results = col.query(
-                query_embeddings=[query_embedding],
-                n_results=min(limit, col.count() or 1),
-                include=["documents", "metadatas", "distances"],
-            )
+            results = self._query_semantic_results(query_embedding, normalized_limit)
         except Exception as e:
             print(f"[Engram] search failed: {e}", file=sys.stderr)
             return []
@@ -522,14 +868,7 @@ class MemoryManager:
             results["metadatas"][0],
             results["distances"][0],
         ):
-            # ChromaDB cosine distance: 0 = identical, 2 = opposite
-            # Convert to a 0–1 similarity score
-            score = round(1 - (distance / 2), 3)
-            if len(doc) > 150:
-                truncated = doc[:150].rsplit(" ", 1)
-                snippet = (truncated[0] if len(truncated) > 1 else doc[:147]) + "..."
-            else:
-                snippet = doc
+            score = MemoryManager._score_from_distance(distance)
             parent_key = meta.get("parent_key", "unknown")
             output.append({
                 "key": parent_key,
@@ -537,7 +876,7 @@ class MemoryManager:
                 "title": meta.get("title", parent_key),
                 "tags": [t.strip() for t in meta.get("tags", "").split(",") if t.strip()],
                 "score": score,
-                "snippet": snippet,
+                "snippet": MemoryManager._make_snippet(doc),
             })
 
         # Sort by score descending
@@ -551,16 +890,15 @@ class MemoryManager:
         dedicated Chroma executor via _run_chroma(). Same return format as
         search_memories(). Nothing touches the event loop directly.
         """
+        normalized_limit = self._normalize_limit(limit)
+        if normalized_limit == 0:
+            return []
+
         query_embedding = await embedder.embed_async(query)
 
         def _do_query():
-            col = self._get_collection()
             try:
-                return col.query(
-                    query_embeddings=[query_embedding],
-                    n_results=min(limit, col.count() or 1),
-                    include=["documents", "metadatas", "distances"],
-                )
+                return self._query_semantic_results(query_embedding, normalized_limit)
             except Exception as e:
                 print(f"[Engram] search failed: {e}", file=sys.stderr)
                 return None
@@ -571,6 +909,94 @@ class MemoryManager:
             keys = list({r["key"] for r in results})
             asyncio.create_task(self._update_last_accessed_async(keys))
         return results
+
+    def search_memories_structured(
+        self,
+        query: str,
+        limit: int = 5,
+        project: str = None,
+        domain: str = None,
+        tags: Any = None,
+        include_stale: bool = True,
+        canonical_only: bool = False,
+    ) -> dict:
+        """
+        Semantic search with additive metadata filters and explanations.
+        Returns {query, count, results}, where results are enriched chunk matches.
+        """
+        if not query.strip():
+            return {"query": query, "count": 0, "results": []}
+
+        normalized_limit = self._normalize_limit(limit)
+        if normalized_limit == 0:
+            return {"query": query, "count": 0, "results": []}
+
+        query_embedding = embedder.embed(query)
+        try:
+            raw = self._query_semantic_results(
+                query_embedding,
+                self._structured_candidate_limit(normalized_limit, self._get_collection().count()),
+            )
+        except Exception as e:
+            print(f"[Engram] structured search failed: {e}", file=sys.stderr)
+            return {"query": query, "count": 0, "results": []}
+
+        return self._build_structured_payload(
+            query=query,
+            raw_results=raw,
+            limit=normalized_limit,
+            project=project,
+            domain=domain,
+            tags=tags,
+            include_stale=include_stale,
+            canonical_only=canonical_only,
+        )
+
+    async def search_memories_structured_async(
+        self,
+        query: str,
+        limit: int = 5,
+        project: str = None,
+        domain: str = None,
+        tags: Any = None,
+        include_stale: bool = True,
+        canonical_only: bool = False,
+    ) -> dict:
+        """Async wrapper for structured semantic search."""
+        if not query.strip():
+            return {"query": query, "count": 0, "results": []}
+
+        normalized_limit = self._normalize_limit(limit)
+        if normalized_limit == 0:
+            return {"query": query, "count": 0, "results": []}
+
+        query_embedding = await embedder.embed_async(query)
+
+        def _do_query():
+            try:
+                return self._query_semantic_results(
+                    query_embedding,
+                    self._structured_candidate_limit(normalized_limit, self._get_collection().count()),
+                )
+            except Exception as e:
+                print(f"[Engram] structured search failed: {e}", file=sys.stderr)
+                return None
+
+        raw = await _run_chroma(_do_query)
+        payload = self._build_structured_payload(
+            query=query,
+            raw_results=raw,
+            limit=normalized_limit,
+            project=project,
+            domain=domain,
+            tags=tags,
+            include_stale=include_stale,
+            canonical_only=canonical_only,
+        )
+        if payload["results"]:
+            keys = list({result["key"] for result in payload["results"]})
+            asyncio.create_task(self._update_last_accessed_async(keys))
+        return payload
 
     def list_memories(self) -> list[dict]:
         """
@@ -701,70 +1127,34 @@ class MemoryManager:
             List of dicts with key, title, tags, stale_type, stale_detail, last_accessed, stale_flagged_at.
         """
         threshold_days = days if days is not None else _config.get("stale_days", 90)
-        now_dt = datetime.now().astimezone()
         results = []
 
         for path in JSON_DIR.glob("*.json"):
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                    data = self._normalize_memory_record(json.load(f))
             except Exception:
                 continue
 
-            # Time-staleness: last_accessed is set and older than threshold
-            is_time_stale = False
-            days_since = 0
-            la = data.get("last_accessed")
-            if la is not None:
-                try:
-                    la_dt = datetime.fromisoformat(la)
-                    if la_dt.tzinfo is None:
-                        la_dt = la_dt.astimezone()
-                    delta = now_dt - la_dt
-                    days_since = delta.days
-                    if days_since >= threshold_days:
-                        is_time_stale = True
-                except Exception:
-                    pass
-
-            # Code-staleness: potentially_stale flag set by indexer
-            is_code_stale = bool(data.get("potentially_stale", False))
-
-            if not is_time_stale and not is_code_stale:
+            stale_info = self._memory_stale_state(data, threshold_days)
+            if not stale_info["stale_type"]:
                 continue
-
-            # Determine stale type
-            if is_time_stale and is_code_stale:
-                stale_type = "both"
-            elif is_time_stale:
-                stale_type = "time"
-            else:
-                stale_type = "code"
-
-            # Build detail string
-            stale_reason = data.get("stale_reason", "")
-            if stale_type == "time":
-                stale_detail = f"{days_since} days"
-            elif stale_type == "code":
-                stale_detail = stale_reason
-            else:
-                stale_detail = f"{days_since} days; {stale_reason}"
 
             # Apply type filter
-            if type == "time" and not is_time_stale:
+            if type == "time" and not stale_info["is_time_stale"]:
                 continue
-            if type == "code" and not is_code_stale:
+            if type == "code" and not stale_info["is_code_stale"]:
                 continue
 
             results.append({
                 "key": data.get("key", ""),
                 "title": data.get("title", data.get("key", "")),
                 "tags": data.get("tags", []),
-                "stale_type": stale_type,
-                "stale_detail": stale_detail,
-                "last_accessed": la,
-                "stale_flagged_at": data.get("stale_flagged_at"),
-                "_days_since": days_since,
+                "stale_type": stale_info["stale_type"],
+                "stale_detail": stale_info["stale_detail"],
+                "last_accessed": stale_info["last_accessed"],
+                "stale_flagged_at": stale_info["stale_flagged_at"],
+                "_days_since": stale_info["days_since"],
             })
 
         # Sort: code-stale entries first by stale_flagged_at desc, then time entries by days_since desc
@@ -799,14 +1189,9 @@ class MemoryManager:
         for path in JSON_DIR.glob("*.json"):
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                chunks = chunk_content(data["content"])
-                self._index_chunks(
-                    data["key"],
-                    chunks,
-                    data.get("title", data["key"]),
-                    data.get("tags", []),
-                )
+                    data = self._normalize_memory_record(json.load(f))
+                chunks = chunk_content_with_metadata(data["content"])
+                self._index_chunks(data["key"], chunks, data)
                 rebuilt += 1
             except Exception as e:
                 skipped += 1
