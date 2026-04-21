@@ -245,6 +245,151 @@ def test_list_all_memories_renders_payload_from_v2(monkeypatch):
     )
 
 
+def test_retrieve_chunk_renders_payload_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_retrieve_chunk_v2(key: str, chunk_id: int):
+        assert key == "alpha-note"
+        assert chunk_id == 0
+        return {
+            "key": "alpha-note",
+            "chunk_id": 0,
+            "found": True,
+            "chunk": {
+                "title": "Alpha note",
+                "text": "Alpha chunk",
+                "section_title": "Overview",
+                "heading_path": ["Alpha", "Overview"],
+                "chunk_kind": "section",
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "retrieve_chunk_v2", fake_retrieve_chunk_v2)
+
+    rendered = asyncio.run(server.retrieve_chunk("alpha-note", 0))
+
+    assert rendered == (
+        "📄 Chunk 0 from 'Alpha note'\n"
+        "🔑 Key: alpha-note\n\n"
+        "Alpha chunk"
+    )
+
+
+def test_retrieve_chunk_renders_not_found_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_retrieve_chunk_v2(key: str, chunk_id: int):
+        return {
+            "key": key,
+            "chunk_id": chunk_id,
+            "found": False,
+            "chunk": None,
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "retrieve_chunk_v2", fake_retrieve_chunk_v2)
+
+    rendered = asyncio.run(server.retrieve_chunk("missing-note", 9))
+
+    assert rendered == "❌ Chunk not found: key='missing-note' chunk_id=9"
+
+
+def test_retrieve_chunk_renders_runtime_error_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_retrieve_chunk_v2(key: str, chunk_id: int):
+        return {
+            "key": key,
+            "chunk_id": chunk_id,
+            "found": False,
+            "chunk": None,
+            "error": {
+                "code": "runtime_error",
+                "message": "❌ Engram error: boom",
+            },
+        }
+
+    monkeypatch.setattr(server, "retrieve_chunk_v2", fake_retrieve_chunk_v2)
+
+    rendered = asyncio.run(server.retrieve_chunk("alpha-note", 0))
+
+    assert rendered == "❌ Engram error: boom"
+
+
+def test_retrieve_memory_renders_payload_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_retrieve_memory_v2(key: str):
+        assert key == "alpha-note"
+        return {
+            "key": "alpha-note",
+            "found": True,
+            "memory": {
+                "key": "alpha-note",
+                "title": "Alpha note",
+                "tags": ["alpha", "ops"],
+                "updated_at": "2026-04-20T10:30:00+00:00",
+                "chunk_count": 2,
+                "chars": 123,
+                "content": "Alpha body",
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "retrieve_memory_v2", fake_retrieve_memory_v2)
+
+    rendered = asyncio.run(server.retrieve_memory("alpha-note"))
+
+    assert rendered == (
+        "📦 Alpha note\n"
+        "🔑 Key: alpha-note\n"
+        "🏷  Tags: alpha, ops\n"
+        "📅 Updated: 2026-04-20T10:30\n"
+        "📊 123 chars | 2 chunks\n\n"
+        "Alpha body"
+    )
+
+
+def test_retrieve_memory_renders_not_found_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_retrieve_memory_v2(key: str):
+        return {
+            "key": key,
+            "found": False,
+            "memory": None,
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "retrieve_memory_v2", fake_retrieve_memory_v2)
+
+    rendered = asyncio.run(server.retrieve_memory("missing-note"))
+
+    assert rendered == "❌ Memory not found: 'missing-note'"
+
+
+def test_retrieve_memory_renders_runtime_error_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_retrieve_memory_v2(key: str):
+        return {
+            "key": key,
+            "found": False,
+            "memory": None,
+            "error": {
+                "code": "runtime_error",
+                "message": "❌ Engram error: boom",
+            },
+        }
+
+    monkeypatch.setattr(server, "retrieve_memory_v2", fake_retrieve_memory_v2)
+
+    rendered = asyncio.run(server.retrieve_memory("alpha-note"))
+
+    assert rendered == "❌ Engram error: boom"
+
+
 def test_retrieve_chunks_v2_returns_structured_batch_payload(monkeypatch):
     server = load_server_module()
     observed: dict[str, object] = {}

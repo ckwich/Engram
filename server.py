@@ -122,6 +122,45 @@ def _retrieve_memory_payload(key: str, memory: dict | None) -> dict[str, Any]:
     }
 
 
+def _render_retrieve_chunk_payload(payload: dict[str, Any]) -> str:
+    """Render the structured chunk payload for legacy text-returning callers."""
+    error = payload.get("error")
+    if error is not None:
+        return error["message"]
+    if not payload.get("found"):
+        return f"❌ Chunk not found: key='{payload['key']}' chunk_id={payload['chunk_id']}"
+
+    chunk = payload.get("chunk") or {}
+    title = chunk.get("title") or payload["key"]
+    text = chunk.get("text") or ""
+    return (
+        f"📄 Chunk {payload['chunk_id']} from '{title}'\n"
+        f"🔑 Key: {payload['key']}\n\n"
+        f"{text}"
+    )
+
+
+def _render_retrieve_memory_payload(payload: dict[str, Any]) -> str:
+    """Render the structured full-memory payload for legacy text-returning callers."""
+    error = payload.get("error")
+    if error is not None:
+        return error["message"]
+    if not payload.get("found"):
+        return f"❌ Memory not found: '{payload['key']}'"
+
+    memory = payload.get("memory") or {}
+    tags = ", ".join(memory.get("tags", [])) or "none"
+    updated_at = str(memory.get("updated_at", ""))[:16]
+    return (
+        f"📦 {memory.get('title', payload['key'])}\n"
+        f"🔑 Key: {memory.get('key', payload['key'])}\n"
+        f"🏷  Tags: {tags}\n"
+        f"📅 Updated: {updated_at}\n"
+        f"📊 {memory.get('chars', '?')} chars | {memory.get('chunk_count', '?')} chunks\n\n"
+        f"{memory.get('content', '')}"
+    )
+
+
 @mcp.tool()
 async def search_memories_v2(
     query: str,
@@ -409,16 +448,11 @@ async def retrieve_chunk(key: str, chunk_id: int) -> str:
         chunk_id: The chunk index (from search_memories results).
 
     Returns:
-        Full text of the requested chunk, with its parent memory title.
+        Full text of the requested chunk, with its parent memory title. This is the
+        legacy text wrapper; for structured output, use retrieve_chunk_v2().
     """
-    result = await memory_manager.retrieve_chunk_async(key, chunk_id)
-    if not result:
-        return f"❌ Chunk not found: key='{key}' chunk_id={chunk_id}"
-    return (
-        f"📄 Chunk {chunk_id} from '{result['title']}'\n"
-        f"🔑 Key: {key}\n\n"
-        f"{result['text']}"
-    )
+    payload = await retrieve_chunk_v2(key, chunk_id)
+    return _render_retrieve_chunk_payload(payload)
 
 
 @mcp.tool()
@@ -513,21 +547,11 @@ async def retrieve_memory(key: str) -> str:
         key: The memory's unique key.
 
     Returns:
-        Full memory content with metadata header.
+        Full memory content with metadata header. This is the legacy text wrapper;
+        for structured output, use retrieve_memory_v2().
     """
-    result = await memory_manager.retrieve_memory_async(key)
-    if not result:
-        return f"❌ Memory not found: '{key}'"
-
-    tags = ", ".join(result.get("tags", [])) or "none"
-    return (
-        f"📦 {result.get('title', key)}\n"
-        f"🔑 Key: {result['key']}\n"
-        f"🏷  Tags: {tags}\n"
-        f"📅 Updated: {result['updated_at'][:16]}\n"
-        f"📊 {result['chars']} chars | {result.get('chunk_count', '?')} chunks\n\n"
-        f"{result['content']}"
-    )
+    payload = await retrieve_memory_v2(key)
+    return _render_retrieve_memory_payload(payload)
 
 
 @mcp.tool()
