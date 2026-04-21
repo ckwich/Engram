@@ -21,6 +21,7 @@ from typing import Any
 from fastmcp import FastMCP
 from core.embedder import embedder
 from core.memory_manager import memory_manager, DuplicateMemoryError, _config
+from core.session_pins import SessionPinStore
 from core.tool_payloads import (
     build_list_payload,
     build_search_error_payload,
@@ -32,6 +33,7 @@ from core.tool_payloads import (
 )
 
 mcp = FastMCP("engram")
+session_pin_store = SessionPinStore()
 
 
 def _clamp_search_limit(limit: int) -> int:
@@ -44,6 +46,24 @@ def _validate_search_query(query: str) -> str | None:
     if len(query) > 2000:
         return "❌ Query too long (max 2,000 chars). Shorten your search query."
     return None
+
+
+def _normalize_session_id(session_id: str | None) -> str | None:
+    if session_id is None:
+        return None
+    normalized = str(session_id).strip()
+    return normalized or None
+
+
+def _pin_payload(session_id: str, pins: list[str], **extra: Any) -> dict[str, Any]:
+    payload = {
+        "session_id": session_id,
+        "count": len(pins),
+        "pins": pins,
+        "error": None,
+    }
+    payload.update(extra)
+    return payload
 
 
 def _runtime_error_payload(message: str, **payload: Any) -> dict[str, Any]:
@@ -96,7 +116,12 @@ def _retrieve_memory_payload(key: str, memory: dict | None) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def search_memories_v2(query: str, limit: int = 5) -> SearchPayload:
+async def search_memories_v2(
+    query: str,
+    limit: int = 5,
+    session_id: str | None = None,
+    pinned_first: bool = False,
+) -> SearchPayload:
     """
     Semantic search across all stored memories. Returns structured scored snippets only — NOT full content.
 
@@ -108,23 +133,41 @@ async def search_memories_v2(query: str, limit: int = 5) -> SearchPayload:
         query: Natural language search query. Semantic — 'scheduling problems' will find
                'dispatch calendar issues' even without exact keyword overlap.
         limit: Max results to return (default 5, max 20).
+        session_id: Optional session identifier used to load session-scoped pinned keys.
+        pinned_first: When true, pinned results for the session sort ahead of unpinned results.
 
     Returns:
         Structured payload: {query, count, results, error}. Each result includes key,
-        chunk_id, title, score, snippet, and tags. On validation or runtime failure,
-        results is empty and error is {code, message}.
+        chunk_id, title, score, snippet, and tags. Session-aware searches may also
+        include structured explanation and pin metadata. On validation or runtime
+        failure, results is empty and error is {code, message}.
     """
     validation_error = _validate_search_query(query)
     if validation_error:
         return build_search_error_payload(query, "invalid_query", validation_error)
 
+    normalized_session_id = _normalize_session_id(session_id)
     try:
-        results = await memory_manager.search_memories_async(
-            query.strip(),
-            limit=_clamp_search_limit(limit),
-        )
+        if normalized_session_id is not None or pinned_first:
+            pinned_keys = (
+                session_pin_store.list_pins(normalized_session_id)
+                if normalized_session_id is not None
+                else []
+            )
+            payload = await memory_manager.search_memories_structured_async(
+                query.strip(),
+                limit=_clamp_search_limit(limit),
+                pinned_keys=pinned_keys,
+                pinned_first=pinned_first,
+            )
+            payload["error"] = None
+            return payload
+
+        results = await memory_manager.search_memories_async(query.strip(), limit=_clamp_search_limit(limit))
     except RuntimeError as e:
         return build_search_error_payload(query, "runtime_error", f"❌ Engram error: {e}")
+    except ValueError as e:
+        return build_search_error_payload(query, "invalid_session", f"❌ {e}")
 
     return build_search_payload(query, results)
 
@@ -149,6 +192,162 @@ async def search_memories(query: str, limit: int = 5) -> str:
     """
     payload = await search_memories_v2(query, limit)
     return render_search_payload(payload)
+
+
+@mcp.tool()
+async def pin_memory(session_id: str, key: str) -> dict[str, Any]:
+    """
+    Pin a memory key for the current session so it can be promoted in session-aware searches.
+
+    Pins are session-scoped working state only. They do not modify stored memory JSON or
+    long-term memory metadata.
+
+    Args:
+        session_id: Session identifier for the active working context.
+        key: Existing memory key to pin.
+
+    Returns:
+        Structured payload: {session_id, count, pins, pinned, error}. When the key does not
+        exist, error is populated and the pin list is unchanged.
+    """
+    normalized_session_id = _normalize_session_id(session_id)
+    if normalized_session_id is None:
+        return _runtime_error_payload(
+            "❌ session_id is required.",
+            session_id="",
+            count=0,
+            pins=[],
+            pinned=False,
+        )
+
+    if memory_manager.retrieve_memory(key) is None:
+        return {
+            "session_id": normalized_session_id,
+            "count": 0,
+            "pins": session_pin_store.list_pins(normalized_session_id),
+            "pinned": False,
+            "error": {
+                "code": "not_found",
+                "message": f"❌ Memory not found: '{key}'",
+            },
+        }
+
+    try:
+        pins = session_pin_store.pin(normalized_session_id, key)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+            pinned=False,
+        )
+
+    return _pin_payload(normalized_session_id, pins, pinned=True)
+
+
+@mcp.tool()
+async def unpin_memory(session_id: str, key: str) -> dict[str, Any]:
+    """
+    Remove a pinned memory key from a session.
+
+    Args:
+        session_id: Session identifier for the active working context.
+        key: Memory key to remove from the session pin list.
+
+    Returns:
+        Structured payload: {session_id, count, pins, unpinned, error}.
+    """
+    normalized_session_id = _normalize_session_id(session_id)
+    if normalized_session_id is None:
+        return _runtime_error_payload(
+            "❌ session_id is required.",
+            session_id="",
+            count=0,
+            pins=[],
+            unpinned=False,
+        )
+
+    try:
+        pins = session_pin_store.unpin(normalized_session_id, key)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+            unpinned=False,
+        )
+
+    return _pin_payload(normalized_session_id, pins, unpinned=True)
+
+
+@mcp.tool()
+async def list_pins(session_id: str) -> dict[str, Any]:
+    """
+    List pinned memory keys for a session.
+
+    Args:
+        session_id: Session identifier for the active working context.
+
+    Returns:
+        Structured payload: {session_id, count, pins, error}.
+    """
+    normalized_session_id = _normalize_session_id(session_id)
+    if normalized_session_id is None:
+        return _runtime_error_payload(
+            "❌ session_id is required.",
+            session_id="",
+            count=0,
+            pins=[],
+        )
+
+    try:
+        pins = session_pin_store.list_pins(normalized_session_id)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+        )
+
+    return _pin_payload(normalized_session_id, pins)
+
+
+@mcp.tool()
+async def clear_pins(session_id: str) -> dict[str, Any]:
+    """
+    Clear all pinned memory keys for a session.
+
+    Args:
+        session_id: Session identifier for the active working context.
+
+    Returns:
+        Structured payload: {session_id, count, pins, cleared, error}.
+    """
+    normalized_session_id = _normalize_session_id(session_id)
+    if normalized_session_id is None:
+        return _runtime_error_payload(
+            "❌ session_id is required.",
+            session_id="",
+            count=0,
+            pins=[],
+            cleared=False,
+        )
+
+    try:
+        pins = session_pin_store.clear(normalized_session_id)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+            cleared=False,
+        )
+
+    return _pin_payload(normalized_session_id, pins, cleared=True)
 
 
 @mcp.tool()

@@ -444,6 +444,21 @@ class MemoryManager:
             include=self._semantic_query_include(),
         )
 
+    @staticmethod
+    def _normalize_pinned_keys(pinned_keys: Any) -> set[str]:
+        """Normalize pinned key collections into a comparable set."""
+        if pinned_keys is None:
+            return set()
+        if isinstance(pinned_keys, str):
+            candidates = [pinned_keys]
+        else:
+            candidates = list(pinned_keys)
+        return {
+            str(candidate).strip()
+            for candidate in candidates
+            if str(candidate).strip()
+        }
+
     def _build_result_explanation(
         self,
         *,
@@ -454,9 +469,15 @@ class MemoryManager:
         include_stale: bool,
         canonical_only: bool,
         stale_info: dict,
+        pinned: bool,
+        pinned_first: bool,
     ) -> str:
         """Explain why a structured search result was ranked and kept."""
         parts = [f"semantic score {score:.3f}"]
+        if pinned:
+            parts.insert(0, "session-pinned")
+            if pinned_first:
+                parts.insert(1, "promoted ahead of unpinned results")
 
         section_title = meta.get("section_title")
         if section_title:
@@ -496,6 +517,8 @@ class MemoryManager:
         tags: list[str],
         include_stale: bool,
         canonical_only: bool,
+        pinned_keys: Any = None,
+        pinned_first: bool = False,
     ) -> dict:
         """Filter and enrich semantic results into the structured payload."""
         normalized_limit = self._normalize_limit(limit)
@@ -509,6 +532,7 @@ class MemoryManager:
         normalized_project = _normalize_optional_text(project)
         normalized_domain = _normalize_optional_text(domain)
         required_tags = self._normalize_filter_tags(tags)
+        normalized_pinned_keys = self._normalize_pinned_keys(pinned_keys)
 
         enriched_results: list[dict] = []
         for doc, meta, distance in zip(
@@ -534,6 +558,7 @@ class MemoryManager:
                 continue
 
             score = self._score_from_distance(distance)
+            is_pinned = parent_key in normalized_pinned_keys
             enriched_results.append(
                 {
                     "key": parent_key,
@@ -547,6 +572,7 @@ class MemoryManager:
                     "status": memory["status"],
                     "canonical": memory["canonical"],
                     "stale_type": stale_info["stale_type"],
+                    "pinned": is_pinned,
                     "explanation": self._build_result_explanation(
                         score=score,
                         meta=meta,
@@ -555,11 +581,20 @@ class MemoryManager:
                         include_stale=include_stale,
                         canonical_only=canonical_only,
                         stale_info=stale_info,
+                        pinned=is_pinned,
+                        pinned_first=pinned_first,
                     ),
                 }
             )
 
-        enriched_results.sort(key=lambda result: result["score"], reverse=True)
+        enriched_results.sort(
+            key=lambda result: (
+                0 if pinned_first and result["pinned"] else 1,
+                -result["score"],
+                result["key"],
+                result["chunk_id"],
+            )
+        )
         payload["results"] = enriched_results[:normalized_limit]
         payload["count"] = len(payload["results"])
         return payload
@@ -1410,6 +1445,8 @@ class MemoryManager:
         tags: Any = None,
         include_stale: bool = True,
         canonical_only: bool = False,
+        pinned_keys: Any = None,
+        pinned_first: bool = False,
     ) -> dict:
         """
         Semantic search with additive metadata filters and explanations.
@@ -1438,6 +1475,8 @@ class MemoryManager:
             tags=tags,
             include_stale=include_stale,
             canonical_only=canonical_only,
+            pinned_keys=pinned_keys,
+            pinned_first=pinned_first,
         )
 
     async def search_memories_structured_async(
@@ -1449,6 +1488,8 @@ class MemoryManager:
         tags: Any = None,
         include_stale: bool = True,
         canonical_only: bool = False,
+        pinned_keys: Any = None,
+        pinned_first: bool = False,
     ) -> dict:
         """Async wrapper for structured semantic search."""
         if not query.strip():
@@ -1477,6 +1518,8 @@ class MemoryManager:
             tags=tags,
             include_stale=include_stale,
             canonical_only=canonical_only,
+            pinned_keys=pinned_keys,
+            pinned_first=pinned_first,
         )
         if payload["results"]:
             keys = list({result["key"] for result in payload["results"]})
