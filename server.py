@@ -19,9 +19,12 @@ from core.embedder import embedder
 from core.memory_manager import memory_manager, DuplicateMemoryError, _config
 from core.tool_payloads import (
     build_list_payload,
+    build_search_error_payload,
     build_search_payload,
+    MemoryListPayload,
     render_list_payload,
     render_search_payload,
+    SearchPayload,
 )
 
 mcp = FastMCP("engram")
@@ -40,7 +43,7 @@ def _validate_search_query(query: str) -> str | None:
 
 
 @mcp.tool()
-async def search_memories_v2(query: str, limit: int = 5) -> dict:
+async def search_memories_v2(query: str, limit: int = 5) -> SearchPayload:
     """
     Semantic search across all stored memories. Returns structured scored snippets only — NOT full content.
 
@@ -54,12 +57,13 @@ async def search_memories_v2(query: str, limit: int = 5) -> dict:
         limit: Max results to return (default 5, max 20).
 
     Returns:
-        Structured payload: {query, count, results}. Each result includes key, chunk_id,
-        title, score, snippet, and tags.
+        Structured payload: {query, count, results, error}. Each result includes key,
+        chunk_id, title, score, snippet, and tags. On validation or runtime failure,
+        results is empty and error is {code, message}.
     """
     validation_error = _validate_search_query(query)
     if validation_error:
-        return validation_error
+        return build_search_error_payload(query, "invalid_query", validation_error)
 
     try:
         results = await memory_manager.search_memories_async(
@@ -67,7 +71,7 @@ async def search_memories_v2(query: str, limit: int = 5) -> dict:
             limit=_clamp_search_limit(limit),
         )
     except RuntimeError as e:
-        return f"❌ Engram error: {e}"
+        return build_search_error_payload(query, "runtime_error", f"❌ Engram error: {e}")
 
     return build_search_payload(query, results)
 
@@ -91,16 +95,18 @@ async def search_memories(query: str, limit: int = 5) -> str:
         (higher = more relevant). For structured output, use search_memories_v2().
     """
     payload = await search_memories_v2(query, limit)
-    if isinstance(payload, str):
-        return payload
     return render_search_payload(payload)
 
 
 @mcp.tool()
-async def list_memories_v2() -> dict:
+async def list_memories_v2() -> MemoryListPayload:
     """
     List all stored memories as structured metadata only — keys, titles, tags, timestamps, chunk counts.
     No content is returned. Use this when you need to browse what exists, not search by topic.
+
+    Returns:
+        Structured payload: {count, memories}. Each memory includes key, title, tags,
+        updated_at, created_at, chars, and chunk_count.
 
     For topic-based lookup, prefer search_memories_v2() or search_memories() instead.
     """

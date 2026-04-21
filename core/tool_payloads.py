@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import TypedDict
 
 
+class SearchErrorPayload(TypedDict):
+    code: str
+    message: str
+
+
 class SearchResultPayload(TypedDict):
     key: str
     chunk_id: int
@@ -16,6 +21,7 @@ class SearchPayload(TypedDict):
     query: str
     count: int
     results: list[SearchResultPayload]
+    error: SearchErrorPayload | None
 
 
 class MemoryListItemPayload(TypedDict):
@@ -38,10 +44,26 @@ def build_search_payload(query: str, results: list[SearchResultPayload]) -> Sear
         "query": query,
         "count": len(results),
         "results": results,
+        "error": None,
+    }
+
+
+def build_search_error_payload(query: str, code: str, message: str) -> SearchPayload:
+    return {
+        "query": query,
+        "count": 0,
+        "results": [],
+        "error": {
+            "code": code,
+            "message": message,
+        },
     }
 
 
 def render_search_payload(payload: SearchPayload) -> str:
+    if payload["error"] is not None:
+        return payload["error"]["message"]
+
     query = payload["query"]
     results = payload["results"]
 

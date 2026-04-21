@@ -38,6 +38,7 @@ def test_search_memories_v2_returns_structured_payload(monkeypatch):
         "query": "alpha",
         "count": 1,
         "results": expected_results,
+        "error": None,
     }
 
 
@@ -68,6 +69,66 @@ def test_list_memories_v2_returns_structured_payload(monkeypatch):
     }
 
 
+def test_search_memories_v2_blank_query_returns_structured_error(monkeypatch):
+    server = load_server_module()
+
+    async def fail_if_called(query: str, limit: int = 5):
+        raise AssertionError("search_memories_async should not run for invalid queries")
+
+    monkeypatch.setattr(server.memory_manager, "search_memories_async", fail_if_called)
+
+    payload = asyncio.run(server.search_memories_v2("   "))
+
+    assert payload == {
+        "query": "   ",
+        "count": 0,
+        "results": [],
+        "error": {
+            "code": "invalid_query",
+            "message": "❌ Query cannot be empty.",
+        },
+    }
+
+
+def test_search_memories_v2_runtime_failure_returns_structured_error(monkeypatch):
+    server = load_server_module()
+
+    async def fake_search(query: str, limit: int = 5):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(server.memory_manager, "search_memories_async", fake_search)
+
+    payload = asyncio.run(server.search_memories_v2("alpha"))
+
+    assert payload == {
+        "query": "alpha",
+        "count": 0,
+        "results": [],
+        "error": {
+            "code": "runtime_error",
+            "message": "❌ Engram error: boom",
+        },
+    }
+
+
+def test_search_memories_v2_empty_results_returns_structured_payload(monkeypatch):
+    server = load_server_module()
+
+    async def fake_search(query: str, limit: int = 5):
+        return []
+
+    monkeypatch.setattr(server.memory_manager, "search_memories_async", fake_search)
+
+    payload = asyncio.run(server.search_memories_v2("alpha"))
+
+    assert payload == {
+        "query": "alpha",
+        "count": 0,
+        "results": [],
+        "error": None,
+    }
+
+
 def test_search_memories_renders_payload_from_v2(monkeypatch):
     server = load_server_module()
 
@@ -87,6 +148,7 @@ def test_search_memories_renders_payload_from_v2(monkeypatch):
                     "tags": ["alpha", "ops"],
                 }
             ],
+            "error": None,
         }
 
     monkeypatch.setattr(server, "search_memories_v2", fake_search_v2)
@@ -99,6 +161,48 @@ def test_search_memories_renders_payload_from_v2(monkeypatch):
         "  key=alpha-note  chunk_id=0  tags=alpha, ops\n"
         "  snippet: Alpha snippet\n"
     )
+
+
+def test_search_memories_renders_structured_validation_error_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_search_v2(query: str, limit: int = 5):
+        return {
+            "query": query,
+            "count": 0,
+            "results": [],
+            "error": {
+                "code": "invalid_query",
+                "message": "❌ Query cannot be empty.",
+            },
+        }
+
+    monkeypatch.setattr(server, "search_memories_v2", fake_search_v2)
+
+    rendered = asyncio.run(server.search_memories("   "))
+
+    assert rendered == "❌ Query cannot be empty."
+
+
+def test_search_memories_renders_structured_runtime_error_from_v2(monkeypatch):
+    server = load_server_module()
+
+    async def fake_search_v2(query: str, limit: int = 5):
+        return {
+            "query": query,
+            "count": 0,
+            "results": [],
+            "error": {
+                "code": "runtime_error",
+                "message": "❌ Engram error: boom",
+            },
+        }
+
+    monkeypatch.setattr(server, "search_memories_v2", fake_search_v2)
+
+    rendered = asyncio.run(server.search_memories("alpha"))
+
+    assert rendered == "❌ Engram error: boom"
 
 
 def test_list_all_memories_renders_payload_from_v2(monkeypatch):
