@@ -21,6 +21,7 @@ cannot exhaust the default executor and block other async work.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -293,6 +294,8 @@ class MemoryManager:
     def __init__(self):
         self._chroma: Optional[chromadb.ClientAPI] = None
         self._collection = None
+        self._json_locks_guard = threading.Lock()
+        self._json_locks: dict[str, threading.RLock] = {}
 
     # ── ChromaDB thread-safe lazy init ───────────────────────────────────
 
@@ -315,6 +318,20 @@ class MemoryManager:
         self._get_collection()
 
     # ── Internal helpers ────────────────────────────────────────────────────
+
+    def _json_key_lock(self, key: str) -> threading.RLock:
+        with self._json_locks_guard:
+            lock = self._json_locks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                self._json_locks[key] = lock
+            return lock
+
+    @contextmanager
+    def _locked_json_key(self, key: str):
+        lock = self._json_key_lock(key)
+        with lock:
+            yield
 
     @staticmethod
     def _normalize_memory_record(data: Optional[dict]) -> Optional[dict]:
@@ -751,14 +768,15 @@ class MemoryManager:
         now = _now()
         def _do_updates():
             for key in keys:
-                data = self._load_json(key)
-                if data is None:
-                    continue
-                data["last_accessed"] = now
-                try:
-                    self._save_json(data, require_existing=True)
-                except Exception as e:
-                    print(f"[Engram] WARNING: last_accessed update failed for '{key}': {e}", file=sys.stderr)
+                with self._locked_json_key(key):
+                    data = self._load_json(key)
+                    if data is None:
+                        continue
+                    data["last_accessed"] = now
+                    try:
+                        self._save_json(data, require_existing=True)
+                    except Exception as e:
+                        print(f"[Engram] WARNING: last_accessed update failed for '{key}': {e}", file=sys.stderr)
         try:
             await _run_blocking(_do_updates)
         except Exception as e:
@@ -1588,29 +1606,30 @@ class MemoryManager:
         fails, JSON is still intact (consistent state). If Chroma succeeds but
         JSON delete fails (unlikely), rebuild_index can recover."""
         path = _json_path(key)
-        if not path.exists():
-            return False
+        with self._locked_json_key(key):
+            if not path.exists():
+                return False
 
-        # 1. Delete from ChromaDB first — prevents ghost search results
-        try:
-            self._delete_chunks_from_chroma(key)
-        except Exception as e:
-            print(f"[Engram] WARNING: Failed to delete chunks for '{key}': {e}. "
-                  f"JSON not deleted to keep consistent state.", file=sys.stderr)
-            raise RuntimeError(f"Failed to delete '{key}' from index: {e}")
-
-        # 2. Delete JSON (source of truth) — Chroma is already clean
-        #    Retry on Windows PermissionError (fire-and-forget tasks may hold the file briefly)
-        import time as _time
-        for attempt in range(3):
+            # 1. Delete from ChromaDB first — prevents ghost search results
             try:
-                path.unlink()
-                break
-            except PermissionError:
-                if attempt < 2:
-                    _time.sleep(0.05)
-                else:
-                    raise
+                self._delete_chunks_from_chroma(key)
+            except Exception as e:
+                print(f"[Engram] WARNING: Failed to delete chunks for '{key}': {e}. "
+                      f"JSON not deleted to keep consistent state.", file=sys.stderr)
+                raise RuntimeError(f"Failed to delete '{key}' from index: {e}")
+
+            # 2. Delete JSON (source of truth) — Chroma is already clean
+            #    Retry on Windows PermissionError (fire-and-forget tasks may hold the file briefly)
+            import time as _time
+            for attempt in range(3):
+                try:
+                    path.unlink()
+                    break
+                except PermissionError:
+                    if attempt < 2:
+                        _time.sleep(0.05)
+                    else:
+                        raise
         return True
 
     async def delete_memory_async(self, key: str) -> bool:

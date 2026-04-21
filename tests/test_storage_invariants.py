@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 
 import pytest
 
@@ -155,6 +157,63 @@ def test_save_json_require_existing_does_not_recreate_deleted_memory(isolated_st
 
     assert saved is False
     assert not json_path.exists()
+
+
+def test_delete_waits_for_overlapping_last_access_update_and_memory_stays_deleted(monkeypatch, isolated_storage):
+    mm_module = isolated_storage["mm"]
+    manager = mm_module.memory_manager
+    key = "overnight-access-delete-overlap"
+    json_path = mm_module._json_path(key)
+
+    payload = {
+        "key": key,
+        "title": "Overlap target",
+        "content": "stable content",
+        "tags": [],
+        "created_at": "2026-04-21T00:00:00+00:00",
+        "updated_at": "2026-04-21T00:00:00+00:00",
+        "chunk_count": 1,
+        "chars": 14,
+    }
+
+    manager._save_json(payload)
+    original_load_json = manager._load_json
+    loaded_event = threading.Event()
+    continue_event = threading.Event()
+
+    def wrapped_load_json(loaded_key: str):
+        data = original_load_json(loaded_key)
+        if loaded_key == key and data is not None:
+            loaded_event.set()
+            continue_event.wait(timeout=2)
+        return data
+
+    monkeypatch.setattr(manager, "_load_json", wrapped_load_json)
+    monkeypatch.setattr(manager, "_delete_chunks_from_chroma", lambda key: None)
+
+    update_thread = threading.Thread(
+        target=lambda: asyncio.run(manager._update_last_accessed_async([key])),
+    )
+    update_thread.start()
+
+    assert loaded_event.wait(timeout=2), "background access update should load the JSON before delete starts"
+
+    delete_result: dict[str, object] = {}
+
+    def run_delete():
+        delete_result["deleted"] = manager.delete_memory(key)
+
+    delete_thread = threading.Thread(target=run_delete)
+    delete_thread.start()
+    assert delete_thread.is_alive(), "delete should wait for the in-flight access update on the same key"
+
+    continue_event.set()
+    update_thread.join(timeout=2)
+    delete_thread.join(timeout=2)
+
+    assert delete_result == {"deleted": True}
+    assert not json_path.exists()
+    assert manager._load_json(key) is None
 
 
 def test_old_memory_without_new_fields_is_still_listed(isolated_storage):
