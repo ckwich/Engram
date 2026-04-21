@@ -82,6 +82,81 @@ def test_store_keeps_json_if_chroma_upsert_fails(fake_chroma_collection, mm_modu
     assert stored["key"] == key
 
 
+def test_save_json_replace_is_atomic_for_concurrent_readers(monkeypatch, isolated_storage):
+    mm_module = isolated_storage["mm"]
+    manager = mm_module.memory_manager
+    key = "overnight-atomic-save"
+    json_path = mm_module._json_path(key)
+
+    original_payload = {
+        "key": key,
+        "title": "Original",
+        "content": "stable old content",
+        "tags": [],
+        "created_at": "2026-04-21T00:00:00+00:00",
+        "updated_at": "2026-04-21T00:00:00+00:00",
+        "chunk_count": 1,
+        "chars": 18,
+    }
+    updated_payload = {
+        **original_payload,
+        "title": "Updated",
+        "content": "fresh new content",
+        "updated_at": "2026-04-21T00:05:00+00:00",
+        "chars": 17,
+    }
+
+    manager._save_json(original_payload)
+    observed: dict[str, object] = {}
+    original_replace = mm_module.Path.replace
+
+    def wrapped_replace(self, target):
+        observed["final_before_replace"] = json.loads(json_path.read_text(encoding="utf-8"))
+        observed["temp_exists_before_replace"] = self.exists()
+        observed["temp_before_replace"] = json.loads(self.read_text(encoding="utf-8"))
+        return original_replace(self, target)
+
+    monkeypatch.setattr(mm_module.Path, "replace", wrapped_replace)
+
+    manager._save_json(updated_payload)
+
+    assert observed["temp_exists_before_replace"] is True
+    assert observed["final_before_replace"] == original_payload
+    assert observed["temp_before_replace"] == updated_payload
+    assert json.loads(json_path.read_text(encoding="utf-8")) == updated_payload
+    assert not json_path.with_suffix(f"{json_path.suffix}.tmp").exists()
+
+
+def test_save_json_require_existing_does_not_recreate_deleted_memory(isolated_storage):
+    mm_module = isolated_storage["mm"]
+    manager = mm_module.memory_manager
+    key = "overnight-last-access-delete-race"
+    json_path = mm_module._json_path(key)
+
+    payload = {
+        "key": key,
+        "title": "Race target",
+        "content": "stable content",
+        "tags": [],
+        "created_at": "2026-04-21T00:00:00+00:00",
+        "updated_at": "2026-04-21T00:00:00+00:00",
+        "chunk_count": 1,
+        "chars": 14,
+    }
+
+    manager._save_json(payload)
+    stale_reader_copy = manager._load_json(key)
+    assert stale_reader_copy is not None
+
+    json_path.unlink()
+    stale_reader_copy["last_accessed"] = "2026-04-21T00:05:00+00:00"
+
+    saved = manager._save_json(stale_reader_copy, require_existing=True)
+
+    assert saved is False
+    assert not json_path.exists()
+
+
 def test_old_memory_without_new_fields_is_still_listed(isolated_storage):
     json_dir = isolated_storage["json_dir"]
     mm_module = isolated_storage["mm"]

@@ -23,8 +23,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -610,12 +612,30 @@ class MemoryManager:
             print(f"[Engram] Failed to load JSON for key '{key}': {e}", file=sys.stderr)
             return None
 
-    def _save_json(self, data: dict):
+    def _save_json(self, data: dict, require_existing: bool = False) -> bool:
         path = _json_path(data["key"])
+        fd, temp_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f"{path.name}.",
+            suffix=".tmp",
+        )
+        temp_path = Path(temp_name)
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            if require_existing and not path.exists():
+                temp_path.unlink(missing_ok=True)
+                return False
+            temp_path.replace(path)
+            return True
         except Exception as e:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except OSError:
+                pass
             print(f"[Engram] Failed to save JSON for key '{data['key']}': {e}", file=sys.stderr)
             raise
 
@@ -736,7 +756,7 @@ class MemoryManager:
                     continue
                 data["last_accessed"] = now
                 try:
-                    self._save_json(data)
+                    self._save_json(data, require_existing=True)
                 except Exception as e:
                     print(f"[Engram] WARNING: last_accessed update failed for '{key}': {e}", file=sys.stderr)
         try:
