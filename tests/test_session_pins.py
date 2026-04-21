@@ -28,6 +28,17 @@ def test_session_pin_store_round_trip(tmp_path):
     assert reloaded.list_pins("session-a") == []
 
 
+def test_session_pin_store_tolerates_corrupt_json(tmp_path):
+    path = tmp_path / "session_pins.json"
+    path.write_text("{ not valid json", encoding="utf-8")
+
+    store = SessionPinStore(path)
+
+    assert store.list_pins("session-a") == []
+    assert store.pin("session-a", "memory-one") == ["memory-one"]
+    assert store.list_pins("session-a") == ["memory-one"]
+
+
 def test_structured_search_prioritizes_pinned_results(mm_module):
     mm_module.memory_manager.store_memory(
         key="alpha-unpinned",
@@ -127,3 +138,40 @@ def test_search_memories_v2_loads_session_pins_for_pinned_first(monkeypatch):
     }
     assert payload["error"] is None
     assert payload["results"][0]["pinned"] is True
+
+
+def test_pin_memory_normalizes_key_and_uses_async_existence_check(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_exists(key: str) -> bool:
+        observed["exists_key"] = key
+        return True
+
+    def fail_if_sync_called(key: str):
+        raise AssertionError("pin_memory should not use blocking retrieve_memory() in async MCP flow")
+
+    class FakePinStore:
+        def pin(self, session_id: str, key: str) -> list[str]:
+            observed["pin_session_id"] = session_id
+            observed["pin_key"] = key
+            return [key]
+
+    monkeypatch.setattr(server.memory_manager, "memory_exists_async", fake_exists)
+    monkeypatch.setattr(server.memory_manager, "retrieve_memory", fail_if_sync_called)
+    monkeypatch.setattr(server, "session_pin_store", FakePinStore())
+
+    payload = asyncio.run(server.pin_memory("session-a", "  padded-key  "))
+
+    assert observed == {
+        "exists_key": "padded-key",
+        "pin_session_id": "session-a",
+        "pin_key": "padded-key",
+    }
+    assert payload == {
+        "session_id": "session-a",
+        "count": 1,
+        "pins": ["padded-key"],
+        "pinned": True,
+        "error": None,
+    }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class SearchErrorPayload(TypedDict):
@@ -15,6 +15,13 @@ class SearchResultPayload(TypedDict):
     score: float
     snippet: str
     tags: list[str]
+    pinned: NotRequired[bool]
+    explanation: NotRequired[str]
+    project: NotRequired[str | None]
+    domain: NotRequired[str | None]
+    status: NotRequired[str]
+    canonical: NotRequired[bool]
+    stale_type: NotRequired[str | None]
 
 
 class SearchPayload(TypedDict):

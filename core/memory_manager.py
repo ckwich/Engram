@@ -1350,6 +1350,14 @@ class MemoryManager:
             asyncio.create_task(self._update_last_accessed_async([key]))
         return result
 
+    def memory_exists(self, key: str) -> bool:
+        """Check whether a memory exists without mutating access metadata."""
+        return self._load_json(key) is not None
+
+    async def memory_exists_async(self, key: str) -> bool:
+        """Async existence check that does not update last_accessed."""
+        return await _run_blocking(self.memory_exists, key)
+
     async def retrieve_chunks_async(self, requests: list[dict]) -> list[dict]:
         """Retrieve multiple chunks (async — non-blocking for MCP)."""
         results = await _run_chroma(self.retrieve_chunks, requests)

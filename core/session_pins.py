@@ -87,8 +87,11 @@ class SessionPinStore:
         if not self.path.exists():
             return {}
 
-        with open(self.path, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
+        try:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return {}
 
         if not isinstance(payload, dict):
             return {}

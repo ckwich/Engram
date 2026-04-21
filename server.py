@@ -55,6 +55,13 @@ def _normalize_session_id(session_id: str | None) -> str | None:
     return normalized or None
 
 
+def _normalize_memory_key(key: str) -> str:
+    normalized = str(key).strip()
+    if not normalized:
+        raise ValueError("key is required")
+    return normalized
+
+
 def _pin_payload(session_id: str, pins: list[str], **extra: Any) -> dict[str, Any]:
     payload = {
         "session_id": session_id,
@@ -220,7 +227,18 @@ async def pin_memory(session_id: str, key: str) -> dict[str, Any]:
             pinned=False,
         )
 
-    if memory_manager.retrieve_memory(key) is None:
+    try:
+        normalized_key = _normalize_memory_key(key)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+            pinned=False,
+        )
+
+    if not await memory_manager.memory_exists_async(normalized_key):
         return {
             "session_id": normalized_session_id,
             "count": 0,
@@ -228,12 +246,12 @@ async def pin_memory(session_id: str, key: str) -> dict[str, Any]:
             "pinned": False,
             "error": {
                 "code": "not_found",
-                "message": f"❌ Memory not found: '{key}'",
+                "message": f"❌ Memory not found: '{normalized_key}'",
             },
         }
 
     try:
-        pins = session_pin_store.pin(normalized_session_id, key)
+        pins = session_pin_store.pin(normalized_session_id, normalized_key)
     except ValueError as e:
         return _runtime_error_payload(
             f"❌ {e}",
