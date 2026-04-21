@@ -100,6 +100,36 @@ def test_update_memory_metadata_reindexes_existing_content_json_first(
     assert doc["metadata"]["related_to"] == "deployment-runbook"
 
 
+def test_update_memory_metadata_keeps_json_update_if_chunk_cleanup_fails(
+    mm_module,
+    fake_chroma_collection,
+):
+    manager = mm_module.memory_manager
+    manager.store_memory(
+        key="cleanup-failure-note",
+        content="# Cleanup Failure\n\nExisting note body.",
+        tags=["ops"],
+        title="Cleanup Failure",
+        status="active",
+    )
+
+    fake_chroma_collection.fail_delete = True
+
+    updated = manager.update_memory_metadata(
+        "cleanup-failure-note",
+        status="historical",
+        canonical=True,
+    )
+
+    stored = manager.retrieve_memory("cleanup-failure-note")
+
+    assert updated["status"] == "historical"
+    assert updated["canonical"] is True
+    assert stored["status"] == "historical"
+    assert stored["canonical"] is True
+    assert fake_chroma_collection.operations[-2:] == ["delete", "upsert"]
+
+
 def test_check_duplicate_tool_returns_structured_payload(monkeypatch):
     server = load_server_module()
 

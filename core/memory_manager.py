@@ -895,12 +895,8 @@ class MemoryManager:
 
         try:
             self._delete_chunks_from_chroma(key)
-        except Exception as e:
-            print(
-                f"[Engram] WARNING: Failed to delete old chunks for '{key}': {e}. "
-                f"Stale chunks may remain until next rebuild_index.",
-                file=sys.stderr,
-            )
+        except Exception:
+            pass
 
         return data, chunks
 
