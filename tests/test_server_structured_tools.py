@@ -10,6 +10,12 @@ def load_server_module():
     return importlib.reload(server)
 
 
+def load_memory_manager_module():
+    import core.memory_manager as memory_manager_module
+
+    return importlib.reload(memory_manager_module)
+
+
 def test_search_memories_v2_returns_structured_payload(monkeypatch):
     server = load_server_module()
     observed: dict[str, object] = {}
@@ -301,6 +307,196 @@ def test_retrieve_chunks_v2_returns_structured_batch_payload(monkeypatch):
     }
 
 
+def test_memory_manager_retrieve_chunks_preserves_order_and_duplicates(monkeypatch):
+    memory_manager_module = load_memory_manager_module()
+    manager = memory_manager_module.MemoryManager()
+
+    class FakeCollection:
+        def __init__(self):
+            self.observed_ids = None
+            self.observed_include = None
+
+        def get(self, ids, include):
+            self.observed_ids = ids
+            self.observed_include = include
+            return {
+                "ids": ids,
+                "documents": ["Alpha chunk", "Beta chunk"],
+                "metadatas": [
+                    {
+                        "title": "Alpha note",
+                        "section_title": "Overview",
+                        "heading_path": "Alpha > Overview",
+                        "chunk_kind": "section",
+                    },
+                    {
+                        "title": "Beta note",
+                        "section_title": "Details",
+                        "heading_path": "Beta > Details",
+                        "chunk_kind": "section",
+                    },
+                ],
+            }
+
+    fake_collection = FakeCollection()
+    monkeypatch.setattr(manager, "_get_collection", lambda: fake_collection)
+
+    requests = [
+        {"key": "alpha-note", "chunk_id": 0},
+        {"key": "alpha-note", "chunk_id": 0},
+        {"key": "beta-note", "chunk_id": 2},
+    ]
+
+    results = manager.retrieve_chunks(requests)
+
+    assert fake_collection.observed_ids == [
+        memory_manager_module._chunk_doc_id("alpha-note", 0),
+        memory_manager_module._chunk_doc_id("beta-note", 2),
+    ]
+    assert fake_collection.observed_include == ["documents", "metadatas"]
+    assert results == [
+        {
+            "key": "alpha-note",
+            "chunk_id": 0,
+            "found": True,
+            "title": "Alpha note",
+            "text": "Alpha chunk",
+            "section_title": "Overview",
+            "heading_path": ["Alpha", "Overview"],
+            "chunk_kind": "section",
+        },
+        {
+            "key": "alpha-note",
+            "chunk_id": 0,
+            "found": True,
+            "title": "Alpha note",
+            "text": "Alpha chunk",
+            "section_title": "Overview",
+            "heading_path": ["Alpha", "Overview"],
+            "chunk_kind": "section",
+        },
+        {
+            "key": "beta-note",
+            "chunk_id": 2,
+            "found": True,
+            "title": "Beta note",
+            "text": "Beta chunk",
+            "section_title": "Details",
+            "heading_path": ["Beta", "Details"],
+            "chunk_kind": "section",
+        },
+    ]
+
+
+def test_memory_manager_retrieve_chunks_reports_per_item_validation_errors(monkeypatch):
+    memory_manager_module = load_memory_manager_module()
+    manager = memory_manager_module.MemoryManager()
+
+    class FakeCollection:
+        def __init__(self):
+            self.observed_ids = None
+
+        def get(self, ids, include):
+            self.observed_ids = ids
+            return {
+                "ids": ids,
+                "documents": ["Gamma chunk"],
+                "metadatas": [
+                    {
+                        "title": "Gamma note",
+                        "section_title": "Summary",
+                        "heading_path": "Gamma > Summary",
+                        "chunk_kind": "section",
+                    }
+                ],
+            }
+
+    fake_collection = FakeCollection()
+    monkeypatch.setattr(manager, "_get_collection", lambda: fake_collection)
+
+    requests = [
+        {"key": "alpha-note", "chunk_id": True},
+        {"key": "beta-note", "chunk_id": 1.9},
+        {"key": "", "chunk_id": 1},
+        "not-a-dict",
+        {"key": "gamma-note", "chunk_id": 2},
+    ]
+
+    results = manager.retrieve_chunks(requests)
+
+    assert fake_collection.observed_ids == [
+        memory_manager_module._chunk_doc_id("gamma-note", 2)
+    ]
+    assert results == [
+        {
+            "key": "alpha-note",
+            "chunk_id": True,
+            "found": False,
+            "title": "alpha-note",
+            "text": None,
+            "section_title": None,
+            "heading_path": [],
+            "chunk_kind": None,
+            "error": {
+                "code": "invalid_request",
+                "message": "chunk_id must be an integer",
+            },
+        },
+        {
+            "key": "beta-note",
+            "chunk_id": 1.9,
+            "found": False,
+            "title": "beta-note",
+            "text": None,
+            "section_title": None,
+            "heading_path": [],
+            "chunk_kind": None,
+            "error": {
+                "code": "invalid_request",
+                "message": "chunk_id must be an integer",
+            },
+        },
+        {
+            "key": "",
+            "chunk_id": -1,
+            "found": False,
+            "title": "",
+            "text": None,
+            "section_title": None,
+            "heading_path": [],
+            "chunk_kind": None,
+            "error": {
+                "code": "invalid_request",
+                "message": "key is required",
+            },
+        },
+        {
+            "key": "",
+            "chunk_id": -1,
+            "found": False,
+            "title": "",
+            "text": None,
+            "section_title": None,
+            "heading_path": [],
+            "chunk_kind": None,
+            "error": {
+                "code": "invalid_request",
+                "message": "request must be an object with key and chunk_id",
+            },
+        },
+        {
+            "key": "gamma-note",
+            "chunk_id": 2,
+            "found": True,
+            "title": "Gamma note",
+            "text": "Gamma chunk",
+            "section_title": "Summary",
+            "heading_path": ["Gamma", "Summary"],
+            "chunk_kind": "section",
+        },
+    ]
+
+
 def test_retrieve_memory_v2_returns_structured_memory_payload(monkeypatch):
     server = load_server_module()
 
@@ -374,5 +570,45 @@ def test_retrieve_chunk_v2_not_found_returns_found_false(monkeypatch):
         "chunk_id": 9,
         "found": False,
         "chunk": None,
+        "error": None,
+    }
+
+
+def test_retrieve_chunks_v2_preserves_per_item_error_objects(monkeypatch):
+    server = load_server_module()
+
+    async def fake_retrieve_chunks(batch_requests: list[dict]):
+        assert batch_requests == [{"key": "alpha-note", "chunk_id": True}]
+        return [
+            {
+                "key": "alpha-note",
+                "chunk_id": True,
+                "found": False,
+                "error": {
+                    "code": "invalid_request",
+                    "message": "chunk_id must be an integer",
+                },
+            }
+        ]
+
+    monkeypatch.setattr(server.memory_manager, "retrieve_chunks_async", fake_retrieve_chunks)
+
+    payload = asyncio.run(server.retrieve_chunks_v2([{"key": "alpha-note", "chunk_id": True}]))
+
+    assert payload == {
+        "requested_count": 1,
+        "found_count": 0,
+        "results": [
+            {
+                "key": "alpha-note",
+                "chunk_id": True,
+                "found": False,
+                "chunk": None,
+                "error": {
+                    "code": "invalid_request",
+                    "message": "chunk_id must be an integer",
+                },
+            }
+        ],
         "error": None,
     }

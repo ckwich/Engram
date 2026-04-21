@@ -810,11 +810,11 @@ class MemoryManager:
         cls,
         *,
         key: str,
-        chunk_id: int,
+        chunk_id: Any,
         text: Optional[str] = None,
         meta: Optional[dict] = None,
         found: bool = False,
-        error: Optional[str] = None,
+        error: Optional[dict] = None,
     ) -> dict:
         """Build a stable structured chunk payload for retrieval tools."""
         payload = {
@@ -841,13 +841,24 @@ class MemoryManager:
         return payload
 
     @staticmethod
+    def _chunk_error(code: str, message: str) -> dict:
+        """Build a structured per-item error payload for batch retrieval."""
+        return {
+            "code": code,
+            "message": message,
+        }
+
+    @staticmethod
     def _normalize_chunk_request(request: Any) -> dict:
         """Normalize a single chunk retrieval request for batch retrieval."""
         if not isinstance(request, dict):
             return {
                 "key": "",
                 "chunk_id": -1,
-                "error": "request must be an object with key and chunk_id",
+                "error": MemoryManager._chunk_error(
+                    "invalid_request",
+                    "request must be an object with key and chunk_id",
+                ),
             }
 
         key = str(request.get("key", "")).strip()
@@ -855,22 +866,23 @@ class MemoryManager:
             return {
                 "key": "",
                 "chunk_id": -1,
-                "error": "key is required",
+                "error": MemoryManager._chunk_error("invalid_request", "key is required"),
             }
 
         raw_chunk_id = request.get("chunk_id")
-        try:
-            chunk_id = int(raw_chunk_id)
-        except (TypeError, ValueError):
+        if isinstance(raw_chunk_id, bool) or not isinstance(raw_chunk_id, int):
             return {
                 "key": key,
                 "chunk_id": raw_chunk_id,
-                "error": "chunk_id must be an integer",
+                "error": MemoryManager._chunk_error(
+                    "invalid_request",
+                    "chunk_id must be an integer",
+                ),
             }
 
         return {
             "key": key,
-            "chunk_id": chunk_id,
+            "chunk_id": raw_chunk_id,
             "error": None,
         }
 
@@ -976,7 +988,10 @@ class MemoryManager:
                                 key=key,
                                 chunk_id=chunk_id,
                                 found=False,
-                                error="batch retrieval failed",
+                                error=self._chunk_error(
+                                    "runtime_error",
+                                    "batch retrieval failed",
+                                ),
                             )
 
         return [result for result in results if result is not None]
