@@ -392,6 +392,9 @@ Full-featured web UI at `http://localhost:5000`:
 python webui.py
 ```
 
+The dashboard binds to `127.0.0.1` by default. To expose it intentionally, set
+`ENGRAM_WEBUI_HOST` and optionally `ENGRAM_WEBUI_PORT` before starting it.
+
 - **Grid and List views** with metadata cards
 - **Semantic search** with relevance scores and three-tier expansion
 - **Full CRUD** from the browser with dedup warnings

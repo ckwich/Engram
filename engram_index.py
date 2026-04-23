@@ -29,6 +29,7 @@ ENGRAM_ROOT = Path(__file__).parent  # C:/Dev/Engram/
 DEFAULT_MODEL = "sonnet"
 DEFAULT_MAX_FILE_SIZE_KB = 100
 DEFAULT_PLANNING_PATHS = ["PROJECT.md", "ROADMAP.md", "AGENTS.md"]
+HOOK_FILE_MODE = 0o700
 DEFAULT_QUESTIONS = [
     "What is the architecture of this domain?",
     "What key decisions were made and why?",
@@ -725,7 +726,8 @@ def run_install_hook(project_root: Path) -> None:
     hook_content = "\n".join(lines)
 
     hook_path.write_text(hook_content, encoding="utf-8")
-    os.chmod(hook_path, 0o755)
+    # Git hooks must be executable; 0o700 keeps access owner-only.
+    os.chmod(hook_path, HOOK_FILE_MODE)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
 
     print(f"Hook installed: {hook_path}")
     print(f"  Python: {venv_python_bash}")

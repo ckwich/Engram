@@ -5,10 +5,25 @@ All business logic goes through memory_manager only.
 No direct file or ChromaDB access here.
 """
 from flask import Flask, render_template, request, jsonify
+import os
 
 from core.memory_manager import memory_manager, DuplicateMemoryError, _now, _json_path
 
 app = Flask(__name__)
+
+DEFAULT_WEBUI_HOST = "127.0.0.1"
+DEFAULT_WEBUI_PORT = 5000
+
+
+def resolve_webui_bind() -> tuple[str, int]:
+    """Resolve the dashboard bind address. Public exposure must be explicit."""
+    host = os.environ.get("ENGRAM_WEBUI_HOST", DEFAULT_WEBUI_HOST).strip() or DEFAULT_WEBUI_HOST
+    raw_port = os.environ.get("ENGRAM_WEBUI_PORT", str(DEFAULT_WEBUI_PORT)).strip()
+    try:
+        port = int(raw_port)
+    except ValueError:
+        port = DEFAULT_WEBUI_PORT
+    return host, port
 
 
 # ── Pages ────────────────────────────────────────────────────────────────────
@@ -192,4 +207,5 @@ def health():
 if __name__ == "__main__":
     from core.embedder import embedder
     embedder._load()
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    host, port = resolve_webui_bind()
+    app.run(host=host, port=port, debug=False)
