@@ -624,6 +624,44 @@ def test_memory_manager_audits_and_repairs_metadata_drift(mm_module):
     assert stored["chunk_count"] == 1
 
 
+def test_memory_manager_repair_decodes_encoded_tag_list_fragments(mm_module):
+    key = "encoded-tag-drift"
+    mm_module._json_path(key).write_text(
+        json.dumps(
+            {
+                "key": key,
+                "title": "Encoded Tag Drift",
+                "content": "# Encoded Tag Drift\n\nBody",
+                "tags": ['["engram"', '"cli"', '"architecture"]'],
+                "related_to": [],
+                "status": "active",
+                "canonical": False,
+                "created_at": "2026-04-20T00:00:00+00:00",
+                "updated_at": "2026-04-20T00:00:00+00:00",
+                "chars": len("# Encoded Tag Drift\n\nBody"),
+                "lines": 3,
+                "chunk_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    audit = mm_module.memory_manager.audit_memory_metadata()
+    issue_codes = {
+        issue["code"]
+        for memory in audit["memories"]
+        if memory["key"] == key
+        for issue in memory["issues"]
+    }
+    assert "encoded_tag" in issue_codes
+
+    repaired = mm_module.memory_manager.repair_memory_metadata([key], dry_run=False)
+    stored = mm_module.memory_manager.retrieve_memory(key)
+
+    assert repaired["repaired_count"] == 1
+    assert stored["tags"] == ["engram", "cli", "architecture"]
+
+
 def test_audit_and_repair_metadata_tools_return_structured_payloads(monkeypatch):
     server = load_server_module()
 

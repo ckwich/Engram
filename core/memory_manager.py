@@ -183,6 +183,9 @@ def _split_delimited_string_list(value: Any) -> list[str]:
     """Split legacy string/list fields while preserving duplicates for audits."""
     if value is None:
         return []
+    decoded = _decode_encoded_string_list(value)
+    if decoded is not None:
+        return decoded
     if isinstance(value, str):
         raw_items = value.split(",")
     elif isinstance(value, (list, tuple, set)):
@@ -192,6 +195,27 @@ def _split_delimited_string_list(value: Any) -> list[str]:
     else:
         raw_items = [value]
     return [str(item).strip() for item in raw_items if str(item).strip()]
+
+
+def _decode_encoded_string_list(value: Any) -> Optional[list[str]]:
+    """Decode legacy JSON-list strings or fragmented JSON-list tag values."""
+    candidates: list[str] = []
+    if isinstance(value, str):
+        candidates.append(value)
+    elif isinstance(value, list) and value:
+        candidates.append(",".join(str(item) for item in value))
+
+    for candidate in candidates:
+        text = candidate.strip()
+        if not (text.startswith("[") and text.endswith("]")):
+            continue
+        try:
+            decoded = json.loads(text)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if isinstance(decoded, list):
+            return [str(item).strip() for item in decoded if str(item).strip()]
+    return None
 
 
 def _normalize_delimited_string_list(value: Any) -> list[str]:
@@ -1056,6 +1080,8 @@ class MemoryManager:
         normalized_tags = _normalize_delimited_string_list(data.get("tags"))
         if len(normalized_tags) != len(raw_tags):
             issues.append({"code": "duplicate_tags", "field": "tags", "message": "Tags contain duplicates."})
+        if _decode_encoded_string_list(data.get("tags")) is not None:
+            issues.append({"code": "encoded_tag", "field": "tags", "message": "Tags contain encoded list data."})
         for tag in normalized_tags:
             if tag.startswith("[") or tag.endswith("]"):
                 issues.append({"code": "encoded_tag", "field": "tags", "message": "Tag appears to contain encoded list data."})
