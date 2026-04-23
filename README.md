@@ -8,6 +8,8 @@
 
 Engram is a local-first MCP memory server that gives AI agents genuinely useful long-term memory. It uses real semantic embeddings for search, provides three-tier retrieval to keep token costs proportional to need, and includes an intelligent layer that prevents duplicates, tracks access patterns, surfaces stale memories, indexes codebases automatically, and captures session outcomes for human approval.
 
+Codex and GPT-5.5 use Engram through the same structured MCP tools as every other agent. There is no model-specific server mode; the important contract is the retrieval ladder: search first, retrieve chunks second, and read full memories only when the smaller context is not enough.
+
 ---
 
 ## Features
@@ -29,14 +31,14 @@ Engram is a local-first MCP memory server that gives AI agents genuinely useful 
 - **Staleness detection** — surfaces time-stale (not accessed in N days) and code-stale memories via WebUI tab and MCP tool
 
 ### Codebase Indexer
-- **Architectural synthesis** — `engram_index.py` uses Claude Code CLI to synthesize "Model B" understanding (why, decisions, patterns, watch-outs) from any codebase
+- **Architectural synthesis** — `engram_index.py` uses the Claude Code CLI to synthesize "Model B" understanding (why, decisions, patterns, watch-outs) from any codebase
 - **Three modes** — bootstrap (full synthesis), evolve (incremental hash-diff), full (re-index everything)
 - **Per-project config** — `.engram/config.json` with custom domains, file globs, and synthesis questions
 - **Auto-generated skills** — thin skill files that trigger Engram retrieval when editing domain files
 - **Git hook** — post-commit hook runs evolve mode automatically in the background
 
 ### Session Evaluator
-- **Stop hook** — evaluates every Claude Code session after it ends against configurable criteria
+- **Stop hook** — evaluates Claude Code sessions after they end against configurable criteria
 - **Approval gate** — worthy sessions produce a memory draft saved to `.engram/pending_memories/`
 - **Next-session surfacing** — `engram-pending` skill auto-loads and presents drafts for approval
 - **Dedup-protected** — deduplication gate runs automatically before any draft is stored
@@ -153,7 +155,8 @@ under explicit compatibility names.
 ### Prerequisites
 - Python 3.10+
 - Git
-- Claude Code CLI (for codebase indexer and session evaluator)
+- Codex CLI (recommended for automatic Codex MCP registration)
+- Claude Code CLI (optional; used by the codebase indexer and session evaluator)
 
 ### Quick Start
 
@@ -163,7 +166,26 @@ cd Engram
 python install.py
 ```
 
-The installer creates a virtual environment, installs dependencies, pre-downloads the embedding model, and generates your MCP config.
+The installer creates a virtual environment, installs dependencies, pre-downloads the embedding model, generates your MCP config, and registers Engram with Codex automatically when the `codex` CLI is available.
+
+### Connect to Codex
+
+The Codex CLI stores MCP server registrations in `~/.codex/config.toml`.
+
+```powershell
+codex mcp add engram -- `
+  "C:\path\to\engram\venv\Scripts\python.exe" `
+  "C:\path\to\engram\server.py"
+```
+
+**macOS / Linux:**
+```bash
+codex mcp add engram -- \
+  /path/to/engram/venv/bin/python \
+  /path/to/engram/server.py
+```
+
+Open a fresh Codex thread, or restart Codex, after changing MCP registration. Existing threads do not always hot-load newly added MCP servers.
 
 ### Connect to Claude Code
 
@@ -205,7 +227,7 @@ python server.py --transport sse --port 5100
 
 ## Skills
 
-Engram installs two Claude Code skills at `~/.claude/skills/`:
+Engram ships optional Claude Code skills at `~/.claude/skills/`. Codex uses the MCP registration directly.
 
 ### /engramize
 
@@ -215,7 +237,7 @@ Create memories naturally mid-session:
 /engramize the billing webhook race condition fix we just figured out
 ```
 
-Claude looks back at the session context, drafts a properly formatted memory (key, title, tags, content), shows it for approval, then stores. Enforces naming conventions (snake_case keys, em-dash titles, three-tag standard).
+The skill looks back at the session context, drafts a properly formatted memory (key, title, tags, content), shows it for approval, then stores. It enforces naming conventions (snake_case keys, em-dash titles, three-tag standard).
 
 ### engram-pending
 
@@ -282,7 +304,7 @@ Create `.engram/config.json` in your project root (or use `--init`):
 ### How It Works
 
 1. **Bootstrap** reads planning artifacts + source files per domain
-2. **Sends context** to Claude Code CLI (`claude -p`) for synthesis — uses your Max plan, zero extra cost
+2. **Sends context** to the Claude Code CLI (`claude -p`) for synthesis — uses your Max plan, zero extra cost
 3. **Stores memories** in the `codebase_{project}_{domain}_architecture` namespace
 4. **Generates thin skill files** at `~/.claude/skills/{project}-{domain}-context/` that trigger Engram retrieval when editing matching files
 5. **Tracks file hashes** in `.engram/index.json` for incremental re-indexing
@@ -310,7 +332,7 @@ Register the Stop hook in Claude Code settings (one-time):
 ### How It Works
 
 1. **After every session**, the Stop hook fires and spawns a detached evaluator subprocess (never blocks)
-2. **Evaluator reads** `last_assistant_message` from the session and calls Claude CLI with configured criteria
+2. **Evaluator reads** `last_assistant_message` from the session and calls the Claude CLI with configured criteria
 3. **If criteria are met** (bug resolved, new capability, architectural decision, milestone), a memory draft is written to `.engram/pending_memories/`
 4. **Dedup gate runs** before writing — if a near-duplicate exists, it's noted in the draft
 5. **Next session**, the `engram-pending` skill surfaces drafts for approval
@@ -400,7 +422,7 @@ python server.py --import-file engram_export_2026-03-16.json
 python server.py --health
 python server.py --self-test
 
-# Generate MCP client config
+# Generate MCP client config using the active Python interpreter
 python server.py --generate-config
 ```
 
@@ -442,7 +464,7 @@ engram/
 | `chromadb` | ~1.5.5 | Persistent vector store |
 | `flask` | ~3.1.3 | Web dashboard |
 
-No additional dependencies for the codebase indexer or session evaluator — both use the Claude Code CLI (`claude -p`) which runs under your existing subscription.
+The core MCP server has no Codex- or Claude-specific runtime dependency. The optional codebase indexer and session evaluator use the Claude Code CLI (`claude -p`), which runs under your existing subscription.
 
 ### Design Decisions
 
@@ -454,7 +476,7 @@ No additional dependencies for the codebase indexer or session evaluator — bot
 
 **Fire-and-forget access tracking.** `last_accessed` updates run in background tasks — retrieval is never slowed down by tracking writes.
 
-**CLI-based synthesis.** The codebase indexer and session evaluator use `claude -p` subprocess calls instead of the Anthropic API. This uses your existing Claude Code subscription with zero marginal cost.
+**CLI-based synthesis.** The optional codebase indexer and session evaluator use `claude -p` subprocess calls instead of the Anthropic API. This uses your existing Claude Code subscription with zero marginal cost.
 
 **Non-blocking hooks.** The Stop hook spawns the evaluator as a detached subprocess and exits immediately. Sessions are never blocked by evaluation.
 

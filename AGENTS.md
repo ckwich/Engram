@@ -1,7 +1,7 @@
 # Engram — AGENTS.md
 
 ## Purpose
-This file governs how AI agents (Claude Code, etc.) interact with the Engram codebase. Read this before making any changes.
+This file governs how AI agents (Codex, Claude Code, etc.) interact with the Engram codebase. Read this before making any changes.
 
 ## Project Overview
 Engram is a local-first MCP memory server with semantic search. Core stack: sentence-transformers + ChromaDB + FastMCP + Flask.
@@ -40,6 +40,7 @@ Before marking any task done:
 2. `python -c "from core.memory_manager import memory_manager; print('ok')"` succeeds
 3. Store, search, retrieve, delete cycle works end-to-end
 4. No print() statements in server.py or memory_manager.py production paths
+5. If MCP registration or installer behavior changed, `codex mcp get engram` succeeds when the Codex CLI is available
 
 ## Development Environment
 - Python 3.10+

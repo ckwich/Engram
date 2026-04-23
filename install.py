@@ -2,7 +2,8 @@
 """
 Engram install.py — Setup wizard.
 Creates a virtual environment, installs dependencies, pre-downloads the embedding model,
-installs Claude Code skills, registers the session evaluator hook, and generates MCP config.
+installs Claude Code skills, registers the session evaluator hook, registers Codex MCP when
+available, and generates MCP config for manual client setup.
 """
 import json
 import os
@@ -12,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).resolve().parent
 VENV_DIR = PROJECT_ROOT / "venv"
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -44,6 +45,53 @@ def install_skill(skill_name: str, source_dir: Path, dest_dir: Path):
     skill_dest.mkdir(parents=True, exist_ok=True)
     shutil.copy2(skill_src, skill_dest / "SKILL.md")
     print(f"  [ok] {skill_name} -> {skill_dest / 'SKILL.md'}")
+    return True
+
+
+def register_codex_mcp(python_path: Path):
+    """Register Engram with Codex when the CLI is available."""
+    codex_path = shutil.which("codex")
+    if not codex_path:
+        print("  [info] Codex CLI not found — skipping Codex MCP registration")
+        return False
+
+    server_name = "engram"
+    server_path = PROJECT_ROOT / "server.py"
+
+    existing = subprocess.run(
+        [codex_path, "mcp", "get", server_name],
+        capture_output=True,
+        text=True,
+    )
+    if existing.returncode == 0:
+        output = existing.stdout
+        if str(python_path) in output and str(server_path) in output:
+            print("  [ok] Codex MCP server already registered")
+            return True
+
+        remove_result = subprocess.run(
+            [codex_path, "mcp", "remove", server_name],
+            capture_output=True,
+            text=True,
+        )
+        if remove_result.returncode != 0:
+            print("  [warn] Could not replace existing Codex MCP server entry")
+            return False
+        print("  [info] Replaced existing Codex MCP server entry")
+
+    add_result = subprocess.run(
+        [codex_path, "mcp", "add", server_name, "--", str(python_path), str(server_path)],
+        capture_output=True,
+        text=True,
+    )
+    if add_result.returncode != 0:
+        print("  [warn] Codex MCP registration failed")
+        stderr = (add_result.stderr or "").strip()
+        if stderr:
+            print(f"         {stderr}")
+        return False
+
+    print("  [ok] Codex MCP server registered")
     return True
 
 
@@ -189,8 +237,10 @@ def main():
     print("\n[6/7] Setting up configuration...")
     create_default_config()
 
-    # ── Generate MCP config ────────────────────────────────────────────────
-    print("\n[7/7] Generating MCP config...")
+    # ── Register MCP clients / emit config ─────────────────────────────────
+    print("\n[7/7] Registering MCP clients...")
+    register_codex_mcp(python)
+
     mcp_config = {
         "mcpServers": {
             "engram": {
@@ -209,14 +259,18 @@ def main():
     # ── Done ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     print("Engram is ready!\n")
-    print("1. Add the MCP server to Claude Code:")
+    print("1. Codex registration:")
+    print("   If the Codex CLI was installed, Engram was registered automatically.")
+    print("   Manual fallback:")
+    print(f"   codex mcp add engram -- \\\n     {python} \\\n     {PROJECT_ROOT / 'server.py'}\n")
+    print("2. Claude Code manual registration:")
     print(f"   claude mcp add engram --scope user \\\n     {python} \\\n     {PROJECT_ROOT / 'server.py'}\n")
-    print("2. Start the web dashboard:")
+    print("3. Start the web dashboard:")
     print(f"   {python} {PROJECT_ROOT / 'webui.py'}\n")
-    print("3. Index a codebase:")
+    print("4. Index a codebase:")
     print(f"   {python} {PROJECT_ROOT / 'engram_index.py'} --project /path/to/project --init\n")
-    print("4. Skills installed: /engramize, /engram-index, engram-pending")
-    print("5. Session evaluator hook registered (evaluates sessions automatically)")
+    print("5. Skills installed: /engramize, /engram-index, engram-pending")
+    print("6. Session evaluator hook registered (evaluates sessions automatically)")
     print("=" * 60)
 
 

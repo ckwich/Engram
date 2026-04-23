@@ -1300,7 +1300,7 @@ if __name__ == "__main__":
         config = {
             "mcpServers": {
                 "engram": {
-                    "command": "python",
+                    "command": sys.executable,
                     "args": [os.path.abspath(__file__)],
                 }
             }
