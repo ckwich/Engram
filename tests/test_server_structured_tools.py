@@ -119,6 +119,10 @@ def test_list_memories_returns_structured_payload(monkeypatch):
 
     assert payload == {
         "count": 1,
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+        "has_more": False,
         "memories": expected_memories,
         "error": None,
     }
@@ -285,9 +289,14 @@ def test_search_memories_text_renders_structured_runtime_error(monkeypatch):
 def test_list_all_memories_renders_payload_from_structured_list(monkeypatch):
     server = load_server_module()
 
-    async def fake_list():
+    async def fake_list(limit: int = 50, **kwargs):
+        assert limit == 0
         return {
             "count": 1,
+            "total": 1,
+            "limit": 0,
+            "offset": 0,
+            "has_more": False,
             "memories": [
                 {
                     "key": "alpha-note",
@@ -320,9 +329,14 @@ def test_list_all_memories_renders_payload_from_structured_list(monkeypatch):
 def test_list_all_memories_renders_structured_runtime_error(monkeypatch):
     server = load_server_module()
 
-    async def fake_list():
+    async def fake_list(limit: int = 50, **kwargs):
+        assert limit == 0
         return {
             "count": 0,
+            "total": 0,
+            "limit": 0,
+            "offset": 0,
+            "has_more": False,
             "memories": [],
             "error": {
                 "code": "runtime_error",

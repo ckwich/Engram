@@ -41,6 +41,44 @@ def _clamp_search_limit(limit: int) -> int:
     return min(max(limit, 1), 20)
 
 
+def _normalize_string_list(value: Any) -> list[str]:
+    """Accept comma-separated strings or list-like values as a de-duped string list."""
+    if value is None:
+        return []
+
+    raw_items: list[str] = []
+    if isinstance(value, str):
+        raw_items = value.split(",")
+    else:
+        for item in value:
+            raw_items.extend(str(item).split(","))
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _clamp_list_limit(limit: int | None) -> int:
+    if limit is None:
+        return 50
+    normalized = int(limit)
+    if normalized <= 0:
+        return 0
+    return min(max(normalized, 1), 500)
+
+
+def _normalize_offset(offset: int | None) -> int:
+    if offset is None:
+        return 0
+    return max(int(offset), 0)
+
+
 def _validate_search_query(query: str) -> str | None:
     if not query or not query.strip():
         return "❌ Query cannot be empty."
@@ -163,11 +201,74 @@ def _render_retrieve_memory_payload(payload: dict[str, Any]) -> str:
 
 
 @mcp.tool()
+async def memory_protocol() -> dict[str, Any]:
+    """
+    Describe the agent-facing Engram tool contract.
+
+    Call this when a client needs to discover the intended retrieval ladder,
+    canonical tool names, compatibility aliases, or token-safety rules.
+    """
+    return {
+        "name": "Engram memory protocol",
+        "version": 1,
+        "retrieval_ladder": [
+            {
+                "step": 1,
+                "tool": "search_memories",
+                "purpose": "Find scored snippets and capture key + chunk_id references.",
+            },
+            {
+                "step": 2,
+                "tool": "retrieve_chunk",
+                "purpose": "Read one relevant chunk by key + chunk_id; usually sufficient.",
+            },
+            {
+                "step": 3,
+                "tool": "retrieve_memory",
+                "purpose": "Read the full memory only when chunks are insufficient.",
+            },
+        ],
+        "canonical_tools": {
+            "search_memories": "Structured semantic search with optional project/domain/tag/staleness filters.",
+            "context_pack": "Search, dedupe, and retrieve a bounded set of chunks in one call.",
+            "list_memories": "Paginated structured directory metadata; no content.",
+            "retrieve_chunk": "Structured single-chunk retrieval.",
+            "retrieve_chunks": "Structured batch chunk retrieval.",
+            "retrieve_memory": "Structured full-memory retrieval; token-expensive.",
+            "store_memory": "Write or update a memory.",
+            "prepare_memory": "Draft key/metadata/validation before storing.",
+        },
+        "aliases": {
+            "find_memories": "search_memories",
+            "read_chunk": "retrieve_chunk",
+            "read_memory": "retrieve_chunk or retrieve_memory, depending on arguments",
+            "write_memory": "store_memory",
+        },
+        "examples": [
+            "search_memories(query='scheduler bug', limit=5)",
+            "retrieve_chunk(key='sylvara_scheduler', chunk_id=3)",
+            "context_pack(query='agent memory protocol', project='engram', max_chunks=5)",
+            "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
+        ],
+        "warnings": [
+            "Do not call retrieve_memory before search_memories or retrieve_chunk unless the key is already known and full content is explicitly required.",
+            "Prefer context_pack when you need a compact working set rather than whole memories.",
+            "Use list_memories for browsing metadata, not topic lookup.",
+        ],
+    }
+
+
+@mcp.tool()
 async def search_memories(
     query: str,
     limit: int = 5,
     session_id: str | None = None,
     pinned_first: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    include_stale: bool = True,
+    canonical_only: bool = False,
 ) -> SearchPayload:
     """
     Semantic search across all stored memories. Returns structured scored snippets only — NOT full content.
@@ -182,6 +283,11 @@ async def search_memories(
         limit: Max results to return (default 5, max 20).
         session_id: Optional session identifier used to load session-scoped pinned keys.
         pinned_first: When true, pinned results for the session sort ahead of unpinned results.
+        project: Optional exact project filter.
+        domain: Optional exact domain filter.
+        tags: Optional comma-separated string or list of required tags.
+        include_stale: When false, exclude time/code-stale memories.
+        canonical_only: When true, return only canonical memories.
 
     Returns:
         Structured payload: {query, count, results, error}. Each result includes key,
@@ -200,12 +306,35 @@ async def search_memories(
             if normalized_session_id is not None
             else []
         )
-        if pinned_keys:
+        normalized_tags = _normalize_string_list(tags)
+        filters_supplied = any(
+            [
+                project is not None,
+                domain is not None,
+                bool(normalized_tags),
+                include_stale is False,
+                canonical_only,
+            ]
+        )
+        if pinned_keys or filters_supplied:
+            structured_kwargs: dict[str, Any] = {
+                "pinned_keys": pinned_keys,
+                "pinned_first": pinned_first,
+            }
+            if filters_supplied:
+                structured_kwargs.update(
+                    {
+                        "project": project,
+                        "domain": domain,
+                        "tags": normalized_tags,
+                        "include_stale": include_stale,
+                        "canonical_only": canonical_only,
+                    }
+                )
             payload = await memory_manager.search_memories_structured_async(
                 query.strip(),
                 limit=_clamp_search_limit(limit),
-                pinned_keys=pinned_keys,
-                pinned_first=pinned_first,
+                **structured_kwargs,
             )
             payload["error"] = None
             return payload
@@ -409,14 +538,30 @@ async def clear_pins(session_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def list_memories() -> MemoryListPayload:
+async def list_memories(
+    limit: int = 50,
+    offset: int = 0,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    recent_first: bool = True,
+) -> MemoryListPayload:
     """
-    List all stored memories as structured metadata only — keys, titles, tags, timestamps, chunk counts.
+    List stored memories as structured metadata only — keys, titles, tags, timestamps, chunk counts.
     No content is returned. Use this when you need to browse what exists, not search by topic.
 
+    Args:
+        limit: Max metadata rows to return (default 50, max 500). Use 0 for all.
+        offset: Zero-based pagination offset.
+        project: Optional exact project filter.
+        domain: Optional exact domain filter.
+        tags: Optional comma-separated string or list of required tags.
+        recent_first: Sort by updated_at descending when true; otherwise by key.
+
     Returns:
-        Structured payload: {count, memories, error}. Each memory includes key, title,
-        tags, updated_at, created_at, chars, and chunk_count. On runtime failure,
+        Structured payload: {count, total, limit, offset, has_more, memories, error}.
+        Each memory includes key, title, tags, project/domain/status/canonical when
+        available, updated_at, created_at, chars, and chunk_count. On runtime failure,
         memories is empty and error is {code, message}.
 
     For topic-based lookup, prefer search_memories() or search_memories_text() instead.
@@ -425,7 +570,41 @@ async def list_memories() -> MemoryListPayload:
         memories = await memory_manager.list_memories_async()
     except Exception as e:
         return build_list_error_payload("runtime_error", f"❌ Engram error: {e}")
-    return build_list_payload(memories)
+
+    required_tags = _normalize_string_list(tags)
+
+    def keep(memory: dict[str, Any]) -> bool:
+        if project is not None and memory.get("project") != project:
+            return False
+        if domain is not None and memory.get("domain") != domain:
+            return False
+        if required_tags and not all(tag in (memory.get("tags") or []) for tag in required_tags):
+            return False
+        return True
+
+    filtered = [memory for memory in memories if keep(memory)]
+    if recent_first:
+        filtered.sort(key=lambda memory: str(memory.get("updated_at", "")), reverse=True)
+    else:
+        filtered.sort(key=lambda memory: str(memory.get("key", "")))
+
+    normalized_limit = _clamp_list_limit(limit)
+    normalized_offset = _normalize_offset(offset)
+    if normalized_limit == 0:
+        page = filtered[normalized_offset:]
+        has_more = False
+    else:
+        end = normalized_offset + normalized_limit
+        page = filtered[normalized_offset:end]
+        has_more = end < len(filtered)
+
+    return build_list_payload(
+        page,
+        total=len(filtered),
+        limit=normalized_limit,
+        offset=normalized_offset,
+        has_more=has_more,
+    )
 
 
 @mcp.tool()
@@ -436,7 +615,7 @@ async def list_all_memories() -> str:
 
     For topic-based lookup, prefer search_memories() instead.
     """
-    payload = await list_memories()
+    payload = await list_memories(limit=0)
     return render_list_payload(payload)
 
 
@@ -536,6 +715,162 @@ async def retrieve_chunks(requests: list[dict]) -> dict[str, Any]:
         "requested_count": len(requests),
         "found_count": sum(1 for result in results if result["found"]),
         "results": results,
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def context_pack(
+    query: str,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    max_chunks: int = 5,
+    budget_chars: int = 6000,
+    include_stale: bool = False,
+    canonical_only: bool = False,
+) -> dict[str, Any]:
+    """
+    Build a compact working set by searching, deduping, and retrieving chunks.
+
+    This is the fastest agent-friendly path when snippets are too small but full
+    memories would be wasteful. It follows the three-tier retrieval ladder on the
+    caller's behalf and returns bounded chunk text.
+
+    Args:
+        query: Natural language search query.
+        project: Optional exact project filter.
+        domain: Optional exact domain filter.
+        tags: Optional comma-separated string or list of required tags.
+        max_chunks: Max unique chunks to retrieve (default 5, max 20).
+        budget_chars: Approximate maximum chunk text characters returned.
+        include_stale: When false, exclude time/code-stale memories.
+        canonical_only: When true, return only canonical memories.
+
+    Returns:
+        Structured payload: {query, count, chunks, omitted, used_chars, error}.
+    """
+    validation_error = _validate_search_query(query)
+    if validation_error:
+        return {
+            "query": query,
+            "count": 0,
+            "chunks": [],
+            "omitted": [],
+            "budget_chars": budget_chars,
+            "used_chars": 0,
+            "error": {
+                "code": "invalid_query",
+                "message": validation_error,
+            },
+        }
+
+    normalized_max_chunks = _clamp_search_limit(max_chunks)
+    normalized_budget = max(int(budget_chars), 1)
+
+    search_payload = await search_memories(
+        query,
+        limit=normalized_max_chunks,
+        project=project,
+        domain=domain,
+        tags=tags,
+        include_stale=include_stale,
+        canonical_only=canonical_only,
+    )
+    if search_payload.get("error") is not None:
+        return {
+            "query": query,
+            "count": 0,
+            "chunks": [],
+            "omitted": [],
+            "budget_chars": normalized_budget,
+            "used_chars": 0,
+            "error": search_payload["error"],
+        }
+
+    requests: list[dict[str, Any]] = []
+    result_by_ref: dict[tuple[str, int], dict[str, Any]] = {}
+    for result in search_payload.get("results", []):
+        ref = (result["key"], int(result["chunk_id"]))
+        if ref in result_by_ref:
+            continue
+        result_by_ref[ref] = result
+        requests.append({"key": ref[0], "chunk_id": ref[1]})
+        if len(requests) >= normalized_max_chunks:
+            break
+
+    if not requests:
+        return {
+            "query": query,
+            "count": 0,
+            "chunks": [],
+            "omitted": [],
+            "budget_chars": normalized_budget,
+            "used_chars": 0,
+            "error": None,
+        }
+
+    chunk_payload = await retrieve_chunks(requests)
+    if chunk_payload.get("error") is not None:
+        return {
+            "query": query,
+            "count": 0,
+            "chunks": [],
+            "omitted": requests,
+            "budget_chars": normalized_budget,
+            "used_chars": 0,
+            "error": chunk_payload["error"],
+        }
+
+    chunks: list[dict[str, Any]] = []
+    omitted: list[dict[str, Any]] = []
+    used_chars = 0
+    for result in chunk_payload.get("results", []):
+        ref = (result.get("key", ""), int(result.get("chunk_id", -1)))
+        search_result = result_by_ref.get(ref, {})
+        if not result.get("found"):
+            omitted.append(
+                {
+                    "key": ref[0],
+                    "chunk_id": ref[1],
+                    "reason": "not_found",
+                    "error": result.get("error"),
+                }
+            )
+            continue
+
+        chunk = result.get("chunk") or {}
+        text = chunk.get("text") or ""
+        remaining = normalized_budget - used_chars
+        if remaining <= 0:
+            omitted.append({"key": ref[0], "chunk_id": ref[1], "reason": "budget_exhausted"})
+            continue
+
+        returned_text = text[:remaining]
+        used_chars += len(returned_text)
+        chunks.append(
+            {
+                "key": ref[0],
+                "chunk_id": ref[1],
+                "title": chunk.get("title") or search_result.get("title") or ref[0],
+                "score": search_result.get("score"),
+                "snippet": search_result.get("snippet"),
+                "explanation": search_result.get("explanation"),
+                "section_title": chunk.get("section_title"),
+                "heading_path": chunk.get("heading_path", []),
+                "chunk_kind": chunk.get("chunk_kind"),
+                "text": returned_text,
+                "truncated": len(returned_text) < len(text),
+            }
+        )
+
+    return {
+        "query": query,
+        "count": len(chunks),
+        "chunks": chunks,
+        "omitted": omitted,
+        "budget_chars": normalized_budget,
+        "used_chars": used_chars,
         "error": None,
     }
 
@@ -647,6 +982,132 @@ async def store_memory(
         return f"❌ Engram error: {e}"
     except Exception as e:
         return f"❌ Failed to store '{key}': {e}"
+
+
+@mcp.tool()
+async def find_memories(
+    query: str,
+    limit: int = 5,
+    session_id: str | None = None,
+    pinned_first: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    include_stale: bool = True,
+    canonical_only: bool = False,
+) -> SearchPayload:
+    """
+    Alias for search_memories().
+
+    Some agents naturally look for a "find" verb. This wrapper keeps that path
+    discoverable while preserving the canonical search_memories contract.
+    """
+    kwargs: dict[str, Any] = {}
+    if limit != 5:
+        kwargs["limit"] = limit
+    if session_id is not None:
+        kwargs["session_id"] = session_id
+    if pinned_first:
+        kwargs["pinned_first"] = pinned_first
+    if project is not None:
+        kwargs["project"] = project
+    if domain is not None:
+        kwargs["domain"] = domain
+    if tags is not None:
+        kwargs["tags"] = tags
+    if include_stale is not True:
+        kwargs["include_stale"] = include_stale
+    if canonical_only:
+        kwargs["canonical_only"] = canonical_only
+    return await search_memories(query, **kwargs)
+
+
+@mcp.tool()
+async def read_chunk(key: str, chunk_id: int) -> dict[str, Any]:
+    """
+    Alias for retrieve_chunk().
+
+    Prefer this/read_chunk after search_memories or context_pack identifies a
+    specific key + chunk_id.
+    """
+    return await retrieve_chunk(key, chunk_id)
+
+
+@mcp.tool()
+async def read_memory(
+    key: str,
+    chunk_id: int | None = None,
+    full: bool = False,
+) -> dict[str, Any]:
+    """
+    Tier-aware read helper.
+
+    With chunk_id, this returns a chunk via retrieve_chunk(). With full=True, it
+    returns retrieve_memory(). With only key, it returns metadata without content
+    plus guidance to use chunk reads before full reads.
+    """
+    if chunk_id is not None:
+        return {
+            "mode": "chunk",
+            "result": await retrieve_chunk(key, chunk_id),
+            "error": None,
+        }
+
+    if full:
+        return {
+            "mode": "full",
+            "result": await retrieve_memory(key),
+            "error": None,
+        }
+
+    payload = await retrieve_memory(key)
+    if payload.get("error") is not None or not payload.get("found"):
+        return {
+            "mode": "metadata",
+            "key": key,
+            "found": payload.get("found", False),
+            "memory": None,
+            "guidance": "Use read_chunk(key, chunk_id) after search_memories; pass full=True only when the full memory is required.",
+            "error": payload.get("error"),
+        }
+
+    memory = dict(payload.get("memory") or {})
+    memory.pop("content", None)
+    return {
+        "mode": "metadata",
+        "key": key,
+        "found": True,
+        "memory": memory,
+        "guidance": "Use read_chunk(key, chunk_id) after search_memories; pass full=True only when the full memory is required.",
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def write_memory(
+    key: str,
+    content: str,
+    title: str = "",
+    tags: str = "",
+    related_to: str = "",
+    force: bool = False,
+) -> str:
+    """
+    Alias for store_memory().
+
+    This exists for agents that search for a write verb; store_memory remains
+    the canonical write tool.
+    """
+    kwargs: dict[str, Any] = {}
+    if title:
+        kwargs["title"] = title
+    if tags:
+        kwargs["tags"] = tags
+    if related_to:
+        kwargs["related_to"] = related_to
+    if force:
+        kwargs["force"] = force
+    return await store_memory(key, content, **kwargs)
 
 
 @mcp.tool()

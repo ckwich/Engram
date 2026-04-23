@@ -39,12 +39,20 @@ class MemoryListItemPayload(TypedDict):
     created_at: str
     chars: int
     chunk_count: int | str
+    project: NotRequired[str | None]
+    domain: NotRequired[str | None]
+    status: NotRequired[str]
+    canonical: NotRequired[bool]
 
 
 class MemoryListPayload(TypedDict):
     count: int
     memories: list[MemoryListItemPayload]
     error: SearchErrorPayload | None
+    total: NotRequired[int]
+    limit: NotRequired[int]
+    offset: NotRequired[int]
+    has_more: NotRequired[bool]
 
 
 def build_search_payload(query: str, results: list[SearchResultPayload]) -> SearchPayload:
@@ -89,12 +97,28 @@ def render_search_payload(payload: SearchPayload) -> str:
     return "\n".join(lines)
 
 
-def build_list_payload(memories: list[MemoryListItemPayload]) -> MemoryListPayload:
-    return {
+def build_list_payload(
+    memories: list[MemoryListItemPayload],
+    *,
+    total: int | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+    has_more: bool | None = None,
+) -> MemoryListPayload:
+    payload: MemoryListPayload = {
         "count": len(memories),
         "memories": memories,
         "error": None,
     }
+    if total is not None:
+        payload["total"] = total
+    if limit is not None:
+        payload["limit"] = limit
+    if offset is not None:
+        payload["offset"] = offset
+    if has_more is not None:
+        payload["has_more"] = has_more
+    return payload
 
 
 def build_list_error_payload(code: str, message: str) -> MemoryListPayload:
@@ -117,7 +141,13 @@ def render_list_payload(payload: MemoryListPayload) -> str:
     if not memories:
         return "📭 No memories stored yet."
 
-    lines = [f"📚 Engram Memory Directory — {payload['count']} memories\n{'=' * 50}\n"]
+    total = payload.get("total")
+    if total is not None and total != payload["count"]:
+        heading_count = f"{payload['count']} of {total} memories"
+    else:
+        heading_count = f"{payload['count']} memories"
+
+    lines = [f"📚 Engram Memory Directory — {heading_count}\n{'=' * 50}\n"]
     for memory in memories:
         tags = ", ".join(memory["tags"]) if memory["tags"] else "none"
         lines.append(
