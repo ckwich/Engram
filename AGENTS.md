@@ -34,6 +34,13 @@ Chunk IDs use `{md5(key)}_{chunk_index}` format. Agents store these references. 
 ### Tool docstrings are agent contracts
 The docstrings on MCP tools in `server.py` are read by AI agents to understand tool behavior. Keep them accurate, complete, and explicit about the three-tier retrieval pattern.
 
+## Agent-Friendly Tool Surface
+- `memory_protocol()` is the discoverability entry point for agents that need the current retrieval ladder, aliases, and token-safety rules.
+- `context_pack(query, ...)` is the preferred compact working-set helper when snippets are too small but full memories would be wasteful.
+- `find_memories`, `read_chunk`, `read_memory`, and `write_memory` are aliases/helpers for agent verb discovery; keep them behaviorally aligned with the canonical tools.
+- `prepare_memory()` should remain a no-write draft gate that combines metadata suggestion, validation, and duplicate checking before `store_memory()` / `write_memory()`.
+- `audit_memory_metadata()` is read-only. `repair_memory_metadata()` must remain dry-run by default and must preserve JSON-first, Chroma-second ordering when writes are requested.
+
 ## Completion Gate
 Before marking any task done:
 1. `python server.py --help` runs without error
@@ -57,6 +64,9 @@ Step 1: search_memories(query, limit=5)
 
 Step 2 (if needed): retrieve_chunk(key, chunk_id)
    → Returns one chunk. Usually sufficient.
+
+Optional shortcut: context_pack(query, max_chunks=5)
+   → Search + dedupe + retrieve bounded chunks in one call.
 
 Step 3 (if needed): retrieve_memory(key)
    → Returns full memory. Use sparingly.

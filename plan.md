@@ -49,11 +49,16 @@ Agents should always start at tier 1 and escalate only when needed.
 
 | Tool | Signature | Returns | Token Cost |
 |---|---|---|---|
-| `search_memories` | `(query, limit=5)` | Scored snippet per chunk match | Low |
-| `list_all_memories` | `()` | Keys, titles, tags, timestamps | Very low |
+| `memory_protocol` | `()` | Current retrieval ladder, aliases, and warnings | Very low |
+| `search_memories` | `(query, limit=5, project=None, domain=None, tags=None, ...)` | Scored snippet per chunk match | Low |
+| `context_pack` | `(query, max_chunks=5, budget_chars=6000, ...)` | Bounded retrieved chunks after search/dedupe | Medium |
+| `list_memories` | `(limit=50, offset=0, project=None, domain=None, tags=None)` | Paginated metadata directory | Very low |
 | `retrieve_chunk` | `(key, chunk_id)` | Full text of one chunk | Medium |
-| `retrieve_memory` | `(key, full=False)` | Full memory or metadata | High (intentional) |
-| `store_memory` | `(key, content, tags, title)` | Confirmation | — |
+| `retrieve_memory` | `(key)` | Full memory and metadata | High (intentional) |
+| `store_memory` / `write_memory` | `(key, content, tags, title, project=None, domain=None, status=None, canonical=None)` | Confirmation | — |
+| `prepare_memory` | `(content, key='', title='', tags='', ...)` | Draft metadata, validation, duplicate check | — |
+| `audit_memory_metadata` | `(limit=100, offset=0, project=None)` | Metadata drift report | Very low |
+| `repair_memory_metadata` | `(keys, dry_run=True)` | Dry-run or selected repair results | — |
 | `delete_memory` | `(key)` | Confirmation | — |
 
 ## Chunking Strategy
@@ -105,6 +110,15 @@ Agents should always start at tier 1 and escalate only when needed.
       run against a live server instance (python server.py --self-test)
 - [x] Add health check endpoint: GET /health returns server status, model
       load state, memory count, chunk count (webui.py + server.py --health)
+
+## v0.5 — Agent-Native Tool Surface
+
+- [x] Add `memory_protocol` discovery tool for the retrieval ladder, aliases, and warnings.
+- [x] Add filtered `search_memories`, paginated `list_memories`, and `context_pack` for compact working sets.
+- [x] Add verb-friendly aliases: `find_memories`, `read_chunk`, `read_memory`, and `write_memory`.
+- [x] Add `prepare_memory` no-write draft gate before storing.
+- [x] Add `audit_memory_metadata` and dry-run-first `repair_memory_metadata` for JSON metadata hygiene.
+- [x] Preserve compatibility text wrappers while keeping structured tools canonical.
 
 ## Key Decisions
 - **ChromaDB over SQLite FTS:** Real cosine similarity, not substring matching

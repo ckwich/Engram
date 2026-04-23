@@ -18,6 +18,7 @@ Codex and GPT-5.5 use Engram through the same structured MCP tools as every othe
 - **Semantic search** via sentence-transformers (all-MiniLM-L6-v2) — local, offline, zero cost
 - **Three-tier retrieval** — snippets, chunks, or full content based on what's actually needed
 - **Agent-first structured MCP tools** — canonical structured payloads for search, listing, retrieval, relationships, and staleness
+- **Protocol discovery + context packs** — agents can call `memory_protocol` to learn the contract or `context_pack` to fetch a bounded working set
 - **Compatibility wrappers** — legacy text-returning tools still work for existing MCP clients
 - **Session pins** — promote a temporary working set in search without mutating stored memory metadata
 - **Markdown-aware chunking** — splits on headers first, then paragraphs, max 800 chars per chunk
@@ -29,6 +30,7 @@ Codex and GPT-5.5 use Engram through the same structured MCP tools as every othe
 - **Access tracking** — `last_accessed` timestamp on every retrieval (fire-and-forget, non-blocking)
 - **Relationship links** — `related_to` field with bidirectional `get_related_memories` queries
 - **Staleness detection** — surfaces time-stale (not accessed in N days) and code-stale memories via WebUI tab and MCP tool
+- **Metadata hygiene tools** — `prepare_memory`, `audit_memory_metadata`, and dry-run-first `repair_memory_metadata`
 
 ### Codebase Indexer
 - **Architectural synthesis** — `engram_index.py` uses the Claude Code CLI to synthesize "Model B" understanding (why, decisions, patterns, watch-outs) from any codebase
@@ -63,6 +65,9 @@ Tier 2 — retrieve_chunk("sylvara_scheduler", chunk_id=3)
 
 Tier 2b — retrieve_chunks([{key, chunk_id}, ...])
           -> fetch several known chunks in one round-trip
+
+Shortcut — context_pack("dispatch calendar", project="sylvara")
+           -> search + dedupe + retrieve bounded chunks in one call
 
 Tier 3 — retrieve_memory("sylvara_scheduler")
          -> full content, intentional and explicit
@@ -112,20 +117,29 @@ under explicit compatibility names.
 
 | Tool | Signature | Purpose |
 |---|---|---|
-| `search_memories` | `(query, limit=5, session_id=None, pinned_first=False)` | Semantic search with structured snippets and optional session-aware ranking |
-| `list_memories` | `()` | Structured memory directory metadata |
+| `memory_protocol` | `()` | Describe the retrieval ladder, canonical tools, aliases, and token-safety warnings |
+| `search_memories` | `(query, limit=5, session_id=None, pinned_first=False, project=None, domain=None, tags=None, include_stale=True, canonical_only=False)` | Semantic search with structured snippets, session pins, and metadata filters |
+| `context_pack` | `(query, project=None, domain=None, tags=None, max_chunks=5, budget_chars=6000, include_stale=False, canonical_only=False)` | Search, dedupe, and retrieve a bounded chunk working set |
+| `find_memories` | same as `search_memories` | Alias for agents that look for a find verb |
+| `list_memories` | `(limit=50, offset=0, project=None, domain=None, tags=None, recent_first=True)` | Paginated structured memory directory metadata |
 | `retrieve_chunk` | `(key, chunk_id)` | Structured single-chunk retrieval |
 | `retrieve_chunks` | `(requests)` | Structured batch chunk retrieval |
 | `retrieve_memory` | `(key)` | Structured full-memory retrieval |
+| `read_chunk` | `(key, chunk_id)` | Alias for `retrieve_chunk` |
+| `read_memory` | `(key, chunk_id=None, full=False)` | Tier-aware helper: chunk if chunk_id is provided, metadata by default, full only with `full=True` |
 | `pin_memory` | `(session_id, key)` | Pin a memory key into a temporary session working set |
 | `unpin_memory` | `(session_id, key)` | Remove one key from a session working set |
 | `list_pins` | `(session_id)` | List pinned keys for a session |
 | `clear_pins` | `(session_id)` | Clear all pinned keys for a session |
-| `store_memory` | `(key, content, title='', tags='', related_to='', force=False)` | Create or update a memory |
+| `store_memory` | `(key, content, title='', tags='', related_to='', force=False, project=None, domain=None, status=None, canonical=None)` | Create or update a memory |
+| `write_memory` | same as `store_memory` | Alias for agents that look for a write verb |
+| `prepare_memory` | `(content, key='', title='', tags='', related_to='', project=None, domain=None, status=None, canonical=None)` | Draft key/metadata, validate, and check duplicates without writing |
 | `check_duplicate` | `(key, content)` | Preview deduplication matches before storing |
 | `suggest_memory_metadata` | `(content)` | Suggest normalized metadata from draft content |
 | `validate_memory` | `(content, title=None, tags=None, related_to=None, status=None, project=None, domain=None, canonical=None)` | Validate a memory payload before storing |
 | `update_memory_metadata` | `(key, title=None, tags=None, related_to=None, project=None, domain=None, status=None, canonical=None)` | Update metadata fields without rewriting content |
+| `audit_memory_metadata` | `(limit=100, offset=0, project=None)` | Read-only metadata drift audit |
+| `repair_memory_metadata` | `(keys, dry_run=True)` | Repair selected metadata drift; writes JSON first, then reindexes when `dry_run=False` |
 | `get_related_memories` | `(key)` | Structured forward and reverse relationship traversal |
 | `get_stale_memories` | `(days=90, type='all')` | Structured stale-memory surfacing |
 | `delete_memory` | `(key)` | Permanently delete a memory |
@@ -145,6 +159,8 @@ under explicit compatibility names.
 
 - Session pins are working-state only. They do not mutate memory JSON, tags, or long-term metadata.
 - Use `pin_memory` and `search_memories(..., session_id=..., pinned_first=True)` when you want pinned memories to sort ahead of unpinned results.
+- Use `prepare_memory` before writes when key/metadata quality or duplicate risk is uncertain.
+- Use `audit_memory_metadata` first, then `repair_memory_metadata(..., dry_run=False)` only for selected keys after reviewing the dry-run output.
 - Structured reads now live on the unsuffixed tool names. The compatibility text wrappers moved to explicit `*_text` names, with `list_all_memories` retained for legacy browsing.
 - Compatibility wrappers render from the canonical structured payloads so the old and new surfaces stay behaviorally aligned.
 
