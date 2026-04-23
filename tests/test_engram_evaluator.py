@@ -10,7 +10,7 @@ import pytest
 
 # Import the module under test
 import sys
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "hooks"))
 from engram_evaluator import load_evaluator_config, build_evaluation_prompt, write_pending_file
 
 

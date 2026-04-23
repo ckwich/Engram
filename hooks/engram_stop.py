@@ -7,7 +7,8 @@ then spawns engram_evaluator.py as a detached subprocess. Exits in < 10 seconds.
 Never blocks session end -- always exits 0.
 """
 import json
-import subprocess
+# The hook spawns the trusted local evaluator with shell=False.
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -43,12 +44,13 @@ def main() -> None:
             popen_kwargs["creationflags"] = CREATE_NO_WINDOW
         with open(log_file, "a", encoding="utf-8") as log:
             popen_kwargs["stdout"] = log
-            subprocess.Popen(
+            # Fixed venv Python and evaluator argv, invoked with shell=False.
+            subprocess.Popen(  # nosec B603
                 [VENV_PYTHON, str(evaluator), json.dumps(payload)],
                 **popen_kwargs,
             )
-    except Exception:
-        pass  # fail-open: never block session end (D-04)
+    except Exception as e:
+        print(f"[Engram] Stop hook spawn skipped: {e}", file=sys.stderr)
 
     sys.exit(0)
 

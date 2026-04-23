@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 MODEL_NAME = "all-MiniLM-L6-v2"
+MODEL_NOT_LOADED_MESSAGE = "Model not loaded - call _load() at startup before embedding"
 
 _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -42,19 +43,24 @@ class Embedder:
 
             print(f"[Engram] Model loaded.", file=sys.stderr)
 
+    def _require_model(self):
+        if self._model is None:
+            raise RuntimeError(MODEL_NOT_LOADED_MESSAGE)
+        return self._model
+
     def embed(self, text: str) -> list[float]:
         """Embed a single string. Returns a list of floats."""
-        assert self._model is not None, "Model not loaded — call _load() at startup before embedding"
-        return self._model.encode(text, convert_to_numpy=True).tolist()
+        model = self._require_model()
+        return model.encode(text, convert_to_numpy=True).tolist()
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of strings. Processes in chunks of 8 to avoid CPU hangs."""
-        assert self._model is not None, "Model not loaded — call _load() at startup before embedding"
+        model = self._require_model()
         BATCH_SIZE = 8
         results = []
         for i in range(0, len(texts), BATCH_SIZE):
             batch = texts[i:i + BATCH_SIZE]
-            results.extend(self._model.encode(batch, convert_to_numpy=True).tolist())
+            results.extend(model.encode(batch, convert_to_numpy=True).tolist())
         return results
 
     async def embed_async(self, text: str) -> list[float]:

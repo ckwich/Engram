@@ -461,8 +461,8 @@ engram/
 │   └── memory_manager.py    # storage engine (JSON + ChromaDB, dedup, relationships, staleness)
 ├── hooks/
 │   ├── engram_stop.py       # Claude Code Stop hook entry point
-│   ├── engram_evaluator.py  # detached session evaluator
-│   └── test_engram_evaluator.py
+│   └── engram_evaluator.py  # detached session evaluator
+├── tests/                   # pytest suite
 ├── data/
 │   ├── memories/            # JSON flat files — source of truth
 │   └── chroma/              # ChromaDB vector index
@@ -475,7 +475,9 @@ engram/
 ├── engram_index.py          # codebase indexer CLI
 ├── config.json              # runtime config (dedup threshold, stale days, evaluator criteria)
 ├── install.py               # setup wizard
-└── requirements.txt         # pinned dependencies
+├── requirements.txt         # runtime dependencies
+├── requirements-dev.txt     # audit/dev tooling
+└── bandit.yaml              # Bandit scan configuration
 ```
 
 ### Dependencies

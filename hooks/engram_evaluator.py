@@ -12,7 +12,8 @@ Dedup gate runs before any storage or pending file write.
 """
 import json
 import logging
-import subprocess
+# The evaluator invokes trusted local CLIs with shell=False.
+import subprocess  # nosec B404
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -83,8 +84,8 @@ def load_evaluator_config(cwd: str) -> dict:
             raw = json.load(f)
         eval_section = raw.get("session_evaluator", {})
         defaults.update(eval_section)
-    except Exception:
-        pass  # malformed JSON or read error -- use defaults silently
+    except (OSError, json.JSONDecodeError, TypeError) as e:
+        print(f"[evaluator] Config load skipped: {e}", file=sys.stderr)
 
     return defaults
 
@@ -175,7 +176,8 @@ def call_evaluator_claude(prompt: str) -> dict:
         import shutil
         claude_cmd = shutil.which("claude.cmd") or shutil.which("claude") or "claude.cmd"
 
-        result = subprocess.run(
+        # claude executable is resolved locally and invoked with shell=False.
+        result = subprocess.run(  # nosec B603
             [
                 claude_cmd, "-p",
                 "--tools", "",

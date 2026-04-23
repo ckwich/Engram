@@ -9,7 +9,8 @@ import json
 import os
 import platform
 import shutil
-import subprocess
+# The installer invokes trusted local setup CLIs with shell=False.
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -19,7 +20,8 @@ IS_WINDOWS = platform.system() == "Windows"
 
 
 def run(cmd: list, **kwargs):
-    result = subprocess.run(cmd, **kwargs)
+    # Setup helper receives trusted installer argv and keeps shell=False.
+    result = subprocess.run(cmd, **kwargs)  # nosec B603
     if result.returncode != 0:
         print(f"  FAILED: {' '.join(str(c) for c in cmd)}")
         sys.exit(1)
@@ -58,7 +60,8 @@ def register_codex_mcp(python_path: Path):
     server_name = "engram"
     server_path = PROJECT_ROOT / "server.py"
 
-    existing = subprocess.run(
+    # codex path is resolved locally and invoked with shell=False.
+    existing = subprocess.run(  # nosec B603
         [codex_path, "mcp", "get", server_name],
         capture_output=True,
         text=True,
@@ -69,7 +72,8 @@ def register_codex_mcp(python_path: Path):
             print("  [ok] Codex MCP server already registered")
             return True
 
-        remove_result = subprocess.run(
+        # codex path is resolved locally and invoked with shell=False.
+        remove_result = subprocess.run(  # nosec B603
             [codex_path, "mcp", "remove", server_name],
             capture_output=True,
             text=True,
@@ -79,7 +83,8 @@ def register_codex_mcp(python_path: Path):
             return False
         print("  [info] Replaced existing Codex MCP server entry")
 
-    add_result = subprocess.run(
+    # codex path is resolved locally and invoked with shell=False.
+    add_result = subprocess.run(  # nosec B603
         [codex_path, "mcp", "add", server_name, "--", str(python_path), str(server_path)],
         capture_output=True,
         text=True,

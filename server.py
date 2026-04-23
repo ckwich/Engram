@@ -1957,8 +1957,8 @@ if __name__ == "__main__":
                       "_test_dedup_forced", "_test_relm_a", "_test_relm_b"]:
                 try:
                     await memory_manager.delete_memory_async(k)
-                except Exception:
-                    pass  # already gone or never created
+                except Exception as e:
+                    print(f"  cleanup skip {k}: {e}", file=sys.stderr)
 
             all_ok = (found and chunk and deleted and verify is None
                       and tracking_ok and dedup_blocked and force_ok and self_update_ok

@@ -106,8 +106,18 @@ def _strip_audit_log(content: str) -> str:
 _init_lock = threading.Lock()
 
 
+def _warn_skipped_memory_file(path: Path, operation: str, error: Exception) -> None:
+    print(
+        f"[Engram] WARNING: Skipping memory file during {operation}: "
+        f"{path.name}: {type(error).__name__}: {error}",
+        file=sys.stderr,
+    )
+
+
 def _key_hash(key: str) -> str:
-    return hashlib.md5(key.encode()).hexdigest()
+    # Stable storage IDs are not a security boundary; preserve the historic
+    # md5 format while making that intent explicit for security scanners.
+    return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()
 
 
 def _chunk_doc_id(key: str, chunk_id: int) -> str:
@@ -463,8 +473,9 @@ class MemoryManager:
                 delta = now_dt - accessed_dt
                 days_since = delta.days
                 is_time_stale = days_since >= threshold_days
-            except Exception:
-                pass
+            except (TypeError, ValueError):
+                is_time_stale = False
+                days_since = 0
 
         is_code_stale = bool(data.get("potentially_stale", False))
         stale_reason = _normalize_optional_text(data.get("stale_reason")) or ""
@@ -1869,7 +1880,8 @@ class MemoryManager:
                     "chars": data.get("chars", 0),
                     "chunk_count": data.get("chunk_count", "?"),
                 })
-            except Exception:
+            except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+                _warn_skipped_memory_file(path, "list_memories", e)
                 continue
 
         return sorted(memories, key=lambda x: x["updated_at"], reverse=True)
@@ -1937,7 +1949,8 @@ class MemoryManager:
                     continue  # skip self
                 if key in data.get("related_to", []):
                     reverse_keys.append(data["key"])
-            except Exception:
+            except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+                _warn_skipped_memory_file(path, "get_related_memories", e)
                 continue
 
         def _resolve(keys: list[str]) -> list[dict]:
@@ -1986,7 +1999,8 @@ class MemoryManager:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = self._normalize_memory_record(json.load(f))
-            except Exception:
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+                _warn_skipped_memory_file(path, "get_stale_memories", e)
                 continue
 
             stale_info = self._memory_stale_state(data, threshold_days)

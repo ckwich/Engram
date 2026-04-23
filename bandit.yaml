@@ -1,0 +1,9 @@
+exclude_dirs:
+  - .claude
+  - .engram
+  - .git
+  - .pytest_cache
+  - data
+  - docs
+  - tests
+  - venv
