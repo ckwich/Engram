@@ -179,6 +179,35 @@ def _normalize_related_to(related_to: Any) -> list[str]:
     return normalized
 
 
+def _split_delimited_string_list(value: Any) -> list[str]:
+    """Split legacy string/list fields while preserving duplicates for audits."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = []
+        for item in value:
+            raw_items.extend(str(item).split(","))
+    else:
+        raw_items = [value]
+    return [str(item).strip() for item in raw_items if str(item).strip()]
+
+
+def _normalize_delimited_string_list(value: Any) -> list[str]:
+    """Normalize legacy string/list fields, splitting comma-delimited values."""
+    raw_items = _split_delimited_string_list(value)
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        if item in seen:
+            continue
+        seen.add(item)
+        normalized.append(item)
+    return normalized
+
+
 def _normalize_bool(value: Any, default: bool = False) -> bool:
     """Normalize permissive bool-like inputs without treating every string as true."""
     if value is None:
@@ -1007,6 +1036,225 @@ class MemoryManager:
         if cleanup_warning:
             result["index_cleanup_warning"] = cleanup_warning
         return result
+
+    def _metadata_audit_issues(self, data: dict) -> list[dict[str, Any]]:
+        """Return repair-oriented metadata issues for one raw JSON record."""
+        issues: list[dict[str, Any]] = []
+        key = str(data.get("key") or "")
+        content = data.get("content")
+
+        if not key.strip():
+            issues.append({"code": "missing_key", "field": "key", "message": "Memory key is missing."})
+        if not data.get("title"):
+            issues.append({"code": "missing_title", "field": "title", "message": "Title is missing."})
+        if not isinstance(data.get("tags", []), list):
+            issues.append({"code": "tags_not_list", "field": "tags", "message": "Tags should be a list."})
+        if not isinstance(data.get("related_to", []), list):
+            issues.append({"code": "related_to_not_list", "field": "related_to", "message": "related_to should be a list."})
+
+        raw_tags = _split_delimited_string_list(data.get("tags"))
+        normalized_tags = _normalize_delimited_string_list(data.get("tags"))
+        if len(normalized_tags) != len(raw_tags):
+            issues.append({"code": "duplicate_tags", "field": "tags", "message": "Tags contain duplicates."})
+        for tag in normalized_tags:
+            if tag.startswith("[") or tag.endswith("]"):
+                issues.append({"code": "encoded_tag", "field": "tags", "message": "Tag appears to contain encoded list data."})
+                break
+
+        normalized_status = _normalize_status(data.get("status"))
+        if normalized_status and normalized_status not in ALLOWED_MEMORY_STATUSES:
+            issues.append(
+                {
+                    "code": "invalid_status",
+                    "field": "status",
+                    "message": f"Status '{data.get('status')}' is not allowed.",
+                }
+            )
+        if "canonical" in data and not isinstance(data.get("canonical"), bool):
+            issues.append({"code": "canonical_not_bool", "field": "canonical", "message": "canonical should be boolean."})
+
+        if not isinstance(content, str):
+            issues.append({"code": "missing_content", "field": "content", "message": "Content is missing or not text."})
+            return issues
+
+        if data.get("chars") != len(content):
+            issues.append({"code": "chars_mismatch", "field": "chars", "message": "chars does not match content length."})
+        if data.get("lines") != len(content.splitlines()):
+            issues.append({"code": "lines_mismatch", "field": "lines", "message": "lines does not match content line count."})
+
+        expected_chunk_count = len(chunk_content_with_metadata(content))
+        if data.get("chunk_count") != expected_chunk_count:
+            issues.append(
+                {
+                    "code": "chunk_count_mismatch",
+                    "field": "chunk_count",
+                    "message": "chunk_count does not match current chunker output.",
+                }
+            )
+        return issues
+
+    def _repair_memory_record(self, key: str, data: dict) -> tuple[dict, list[dict]]:
+        """Build a normalized JSON record and chunks for metadata repair."""
+        content = data.get("content")
+        if not isinstance(content, str):
+            raise ValueError("Content is missing or not text.")
+
+        repaired = dict(data)
+        repaired["key"] = key
+        repaired["title"] = _normalize_optional_text(data.get("title")) or key
+        repaired["content"] = content
+        repaired["tags"] = _normalize_delimited_string_list(data.get("tags"))
+        repaired["related_to"] = _normalize_delimited_string_list(data.get("related_to"))
+        repaired["project"] = _normalize_optional_text(data.get("project"))
+        repaired["domain"] = _normalize_optional_text(data.get("domain"))
+        repaired["status"] = _coerce_allowed_status(data.get("status"))
+        repaired["canonical"] = _normalize_bool(data.get("canonical"), default=False)
+        repaired["created_at"] = data.get("created_at") or _now()
+        repaired["updated_at"] = data.get("updated_at") or _now()
+        repaired["last_accessed"] = data.get("last_accessed")
+        repaired["chars"] = len(content)
+        repaired["lines"] = len(content.splitlines())
+        chunks = chunk_content_with_metadata(content)
+        repaired["chunk_count"] = len(chunks)
+        return self._normalize_memory_record(repaired), chunks
+
+    def audit_memory_metadata(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        project: str = None,
+    ) -> dict:
+        """Audit stored memory JSON metadata for drift and repairable hygiene issues."""
+        normalized_limit = max(int(limit), 0)
+        normalized_offset = max(int(offset), 0)
+        normalized_project = _normalize_optional_text(project)
+
+        issue_entries: list[dict[str, Any]] = []
+        scanned_count = 0
+        for path in sorted(JSON_DIR.glob("*.json")):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+            except Exception as e:
+                issue_entries.append(
+                    {
+                        "key": path.stem,
+                        "title": path.name,
+                        "issues": [
+                            {
+                                "code": "malformed_json",
+                                "field": "file",
+                                "message": f"Could not read memory JSON: {e}",
+                            }
+                        ],
+                        "repairable": False,
+                    }
+                )
+                continue
+
+            scanned_count += 1
+            normalized = self._normalize_memory_record(raw)
+            if normalized_project and normalized.get("project") != normalized_project:
+                continue
+
+            issues = self._metadata_audit_issues(raw)
+            if not issues:
+                continue
+
+            issue_entries.append(
+                {
+                    "key": normalized.get("key") or raw.get("key") or path.stem,
+                    "title": normalized.get("title") or raw.get("title") or raw.get("key") or path.name,
+                    "project": normalized.get("project"),
+                    "domain": normalized.get("domain"),
+                    "status": normalized.get("status"),
+                    "canonical": normalized.get("canonical"),
+                    "issues": issues,
+                    "repairable": all(issue["code"] != "missing_content" for issue in issues),
+                }
+            )
+
+        total = len(issue_entries)
+        page = issue_entries[normalized_offset:] if normalized_limit == 0 else issue_entries[normalized_offset: normalized_offset + normalized_limit]
+        return {
+            "count": len(page),
+            "total": total,
+            "scanned_count": scanned_count,
+            "issue_count": sum(len(entry["issues"]) for entry in issue_entries),
+            "repairable_count": sum(1 for entry in issue_entries if entry["repairable"]),
+            "limit": normalized_limit,
+            "offset": normalized_offset,
+            "has_more": normalized_offset + len(page) < total,
+            "memories": page,
+        }
+
+    async def audit_memory_metadata_async(self, **kwargs) -> dict:
+        """Async wrapper for metadata audit."""
+        return await _run_blocking(self.audit_memory_metadata, **kwargs)
+
+    def repair_memory_metadata(self, keys: Any, dry_run: bool = True) -> dict:
+        """Repair selected memory metadata. Defaults to dry-run and preserves JSON-first ordering."""
+        normalized_keys = _normalize_delimited_string_list(keys)
+        repairs: list[dict[str, Any]] = []
+        repaired_count = 0
+
+        for key in normalized_keys:
+            path = _json_path(key)
+            if not path.exists():
+                repairs.append(
+                    {
+                        "key": key,
+                        "found": False,
+                        "would_change": False,
+                        "repaired": False,
+                        "issues": [{"code": "not_found", "field": "key", "message": "Memory JSON not found."}],
+                    }
+                )
+                continue
+
+            with self._locked_json_key(key):
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+
+                issues = self._metadata_audit_issues(raw)
+                repaired, chunks = self._repair_memory_record(key, raw)
+                would_change = raw != repaired
+                entry: dict[str, Any] = {
+                    "key": key,
+                    "found": True,
+                    "would_change": would_change,
+                    "repaired": False,
+                    "dry_run": dry_run,
+                    "issues": issues,
+                }
+
+                if dry_run or not would_change:
+                    repairs.append(entry)
+                    continue
+
+                self._save_json(repaired, require_existing=True)
+                cleanup_warning = None
+                try:
+                    self._delete_chunks_from_chroma(key)
+                except Exception as e:
+                    cleanup_warning = f"Failed to delete old indexed chunks for '{key}' before repair reindex: {e}"
+                self._index_chunks(key, chunks, repaired)
+                entry["repaired"] = True
+                if cleanup_warning:
+                    entry["index_cleanup_warning"] = cleanup_warning
+                repaired_count += 1
+                repairs.append(entry)
+
+        return {
+            "requested_count": len(normalized_keys),
+            "repaired_count": repaired_count,
+            "dry_run": dry_run,
+            "repairs": repairs,
+        }
+
+    async def repair_memory_metadata_async(self, keys: Any, dry_run: bool = True) -> dict:
+        """Async wrapper for metadata repair."""
+        return await _run_blocking(self.repair_memory_metadata, keys, dry_run)
 
     def _prepare_store(
         self,

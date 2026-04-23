@@ -15,6 +15,7 @@ Three-tier retrieval pattern (agents should follow this):
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Any
 
@@ -62,6 +63,12 @@ def _normalize_string_list(value: Any) -> list[str]:
         seen.add(text)
         normalized.append(text)
     return normalized
+
+
+def _slugify_memory_key(value: str) -> str:
+    """Create a conservative snake_case key from a title or heading."""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower()).strip("_")
+    return slug or "untitled_memory"
 
 
 def _clamp_list_limit(limit: int | None) -> int:
@@ -927,9 +934,13 @@ async def store_memory(
     key: str,
     content: str,
     title: str = "",
-    tags: str = "",
-    related_to: str = "",
+    tags: str | list[str] = "",
+    related_to: str | list[str] = "",
     force: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
 ) -> str:
     """
     Store a new memory or update an existing one.
@@ -945,20 +956,33 @@ async def store_memory(
                  For larger documents, split into multiple memories with specific keys
                  (e.g. 'lumen_adr_018', 'lumen_adr_019').
         title: Human-readable title (optional, defaults to key).
-        tags: Comma-separated tags for browsing (e.g. 'sylvara,decision,architecture').
-        related_to: Comma-separated keys of related memories to link to (optional).
+        tags: Comma-separated tags or tag list for browsing (e.g. 'sylvara,decision,architecture').
+        related_to: Comma-separated keys or key list of related memories to link to (optional).
                     Maximum 10 keys. Links are bidirectional at query time.
         force: Pass True to store even if a near-duplicate already exists (default False).
                When False, a duplicate warning is returned instead of storing.
+        project: Optional project label for scoped search/listing.
+        domain: Optional domain label for scoped search/listing.
+        status: Optional lifecycle status: active, draft, historical, superseded, archived.
+        canonical: Optional canonical-memory flag.
 
     Returns:
         Confirmation with chunk count, or duplicate warning if near-duplicate detected.
     """
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-    related_list = [k.strip() for k in related_to.split(",") if k.strip()] if related_to else []
+    tag_list = _normalize_string_list(tags)
+    related_list = _normalize_string_list(related_to)
     try:
         result = await memory_manager.store_memory_async(
-            key, content, tag_list, title or None, related_list, force
+            key=key,
+            content=content,
+            tags=tag_list,
+            title=title or None,
+            related_to=related_list,
+            force=force,
+            project=project,
+            domain=domain,
+            status=status,
+            canonical=canonical,
         )
         return (
             f"✅ Stored: '{result['title']}'\n"
@@ -1088,9 +1112,13 @@ async def write_memory(
     key: str,
     content: str,
     title: str = "",
-    tags: str = "",
-    related_to: str = "",
+    tags: str | list[str] = "",
+    related_to: str | list[str] = "",
     force: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
 ) -> str:
     """
     Alias for store_memory().
@@ -1107,6 +1135,14 @@ async def write_memory(
         kwargs["related_to"] = related_to
     if force:
         kwargs["force"] = force
+    if project is not None:
+        kwargs["project"] = project
+    if domain is not None:
+        kwargs["domain"] = domain
+    if status is not None:
+        kwargs["status"] = status
+    if canonical is not None:
+        kwargs["canonical"] = canonical
     return await store_memory(key, content, **kwargs)
 
 
@@ -1166,6 +1202,99 @@ async def suggest_memory_metadata(content: str) -> dict[str, Any]:
 
     return {
         "suggestion": suggestion,
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def prepare_memory(
+    content: str,
+    key: str = "",
+    title: str = "",
+    tags: str | list[str] = "",
+    related_to: str | list[str] = "",
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a memory draft before writing.
+
+    This combines metadata suggestions, key generation, validation, and duplicate
+    checking without storing anything. Use it when an agent has content but wants
+    a safe, inspectable draft for store_memory/write_memory.
+
+    Args:
+        content: Proposed memory body.
+        key: Optional explicit key. When omitted, a snake_case key is derived from title.
+        title: Optional title. When omitted, Engram suggests one from content.
+        tags: Optional comma-separated tags or tag list.
+        related_to: Optional comma-separated related keys or key list.
+        project: Optional project label.
+        domain: Optional domain label.
+        status: Optional lifecycle status.
+        canonical: Optional canonical-memory flag.
+
+    Returns:
+        Structured payload: {ready, draft, validation, duplicate, suggestion, guidance, error}.
+        ready is true only when validation passes and no duplicate is detected.
+    """
+    try:
+        suggestion = await memory_manager.suggest_memory_metadata_async(content)
+        resolved_title = title.strip() if title and title.strip() else suggestion.get("title") or "Untitled memory"
+        resolved_key = key.strip() if key and key.strip() else _slugify_memory_key(resolved_title)
+        resolved_tags = _normalize_string_list(tags) or suggestion.get("tags", [])
+        resolved_related_to = _normalize_string_list(related_to) or suggestion.get("related_to", [])
+        resolved_project = project if project is not None else suggestion.get("project")
+        resolved_domain = domain if domain is not None else suggestion.get("domain")
+        resolved_status = status if status is not None else suggestion.get("status")
+        resolved_canonical = canonical if canonical is not None else suggestion.get("canonical")
+
+        validation = await memory_manager.validate_memory_async(
+            content=content,
+            title=resolved_title,
+            tags=resolved_tags,
+            related_to=resolved_related_to,
+            project=resolved_project,
+            domain=resolved_domain,
+            status=resolved_status,
+            canonical=resolved_canonical,
+        )
+        duplicate = await memory_manager.check_duplicate_async(resolved_key, content)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            ready=False,
+            draft=None,
+            validation=None,
+            duplicate=None,
+            suggestion=None,
+            guidance="Fix the reported error, then retry prepare_memory before storing.",
+        )
+
+    draft = {
+        "key": resolved_key,
+        "content": content,
+        "title": resolved_title,
+        "tags": validation["normalized"]["tags"],
+        "related_to": validation["normalized"]["related_to"],
+        "project": validation["normalized"]["project"],
+        "domain": validation["normalized"]["domain"],
+        "status": validation["normalized"]["status"],
+        "canonical": validation["normalized"]["canonical"],
+    }
+    ready = bool(validation["valid"] and not duplicate["duplicate"])
+    return {
+        "ready": ready,
+        "draft": draft,
+        "validation": validation,
+        "duplicate": duplicate,
+        "suggestion": suggestion,
+        "guidance": (
+            "Call store_memory/write_memory with draft fields. "
+            "Use force=True only when duplicate.duplicate is true and the overlap is intentional."
+        ),
         "error": None,
     }
 
@@ -1306,6 +1435,94 @@ async def update_memory_metadata(
         "memory": memory,
         "error": None,
     }
+
+
+@mcp.tool()
+async def audit_memory_metadata(
+    limit: int = 100,
+    offset: int = 0,
+    project: str | None = None,
+) -> dict[str, Any]:
+    """
+    Audit stored memory JSON metadata for repairable drift.
+
+    This is a read-only hygiene tool. It does not modify memory JSON or ChromaDB.
+
+    Args:
+        limit: Max issue rows to return (default 100). Use 0 for all.
+        offset: Zero-based pagination offset across memories with issues.
+        project: Optional exact project filter.
+
+    Returns:
+        Structured payload with counts and per-memory issue lists.
+    """
+    try:
+        payload = await memory_manager.audit_memory_metadata_async(
+            limit=limit,
+            offset=offset,
+            project=project,
+        )
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            count=0,
+            total=0,
+            issue_count=0,
+            repairable_count=0,
+            memories=[],
+        )
+
+    payload["error"] = None
+    return payload
+
+
+@mcp.tool()
+async def repair_memory_metadata(
+    keys: str | list[str],
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """
+    Repair selected memory metadata drift.
+
+    Defaults to dry_run=True. When dry_run=False, Engram writes normalized JSON
+    first, then reindexes chunks so JSON and Chroma stay aligned.
+
+    Args:
+        keys: Memory key or comma-separated/list of memory keys to repair.
+        dry_run: Preview changes without writing when true.
+
+    Returns:
+        Structured payload with one repair result per requested key.
+    """
+    normalized_keys = _normalize_string_list(keys)
+    if not normalized_keys:
+        return {
+            "requested_count": 0,
+            "repaired_count": 0,
+            "dry_run": dry_run,
+            "repairs": [],
+            "error": {
+                "code": "invalid_keys",
+                "message": "❌ keys must include at least one memory key.",
+            },
+        }
+
+    try:
+        payload = await memory_manager.repair_memory_metadata_async(
+            normalized_keys,
+            dry_run=dry_run,
+        )
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            requested_count=len(normalized_keys),
+            repaired_count=0,
+            dry_run=dry_run,
+            repairs=[],
+        )
+
+    payload["error"] = None
+    return payload
 
 
 @mcp.tool()

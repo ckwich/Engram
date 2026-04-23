@@ -441,3 +441,222 @@ def test_update_memory_metadata_tool_returns_structured_success(monkeypatch):
         },
         "error": None,
     }
+
+
+def test_store_memory_tool_forwards_extended_metadata(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_store_memory_async(**kwargs):
+        observed.update(kwargs)
+        return {
+            "title": kwargs["title"],
+            "chars": len(kwargs["content"]),
+            "chunk_count": 1,
+        }
+
+    monkeypatch.setattr(server.memory_manager, "store_memory_async", fake_store_memory_async)
+
+    rendered = asyncio.run(
+        server.store_memory(
+            key="agent-protocol",
+            content="# Agent Protocol\n\nBody",
+            title="Agent Protocol",
+            tags="agent,protocol",
+            related_to="engram-core",
+            project="engram",
+            domain="memory",
+            status="active",
+            canonical=True,
+        )
+    )
+
+    assert observed == {
+        "key": "agent-protocol",
+        "content": "# Agent Protocol\n\nBody",
+        "tags": ["agent", "protocol"],
+        "title": "Agent Protocol",
+        "related_to": ["engram-core"],
+        "force": False,
+        "project": "engram",
+        "domain": "memory",
+        "status": "active",
+        "canonical": True,
+    }
+    assert "Stored: 'Agent Protocol'" in rendered
+
+
+def test_prepare_memory_tool_builds_ready_draft(monkeypatch):
+    server = load_server_module()
+
+    async def fake_suggest(content: str):
+        assert content == "# Agent Protocol\n\nBody"
+        return {
+            "title": "Suggested Title",
+            "tags": ["suggested", "agent"],
+            "project": None,
+            "domain": None,
+            "status": "draft",
+            "canonical": False,
+            "related_to": [],
+        }
+
+    async def fake_validate(**kwargs):
+        assert kwargs == {
+            "content": "# Agent Protocol\n\nBody",
+            "title": "Agent Protocol",
+            "tags": ["agent", "protocol"],
+            "related_to": ["engram-core"],
+            "project": "engram",
+            "domain": "memory",
+            "status": "active",
+            "canonical": True,
+        }
+        return {
+            "valid": True,
+            "errors": [],
+            "normalized": {
+                "title": "Agent Protocol",
+                "tags": ["agent", "protocol"],
+                "related_to": ["engram-core"],
+                "project": "engram",
+                "domain": "memory",
+                "status": "active",
+                "canonical": True,
+                "content_chars": 23,
+            },
+        }
+
+    async def fake_check_duplicate(key: str, content: str):
+        assert key == "agent_protocol"
+        assert content == "# Agent Protocol\n\nBody"
+        return {"key": key, "duplicate": False, "match": None}
+
+    monkeypatch.setattr(server.memory_manager, "suggest_memory_metadata_async", fake_suggest)
+    monkeypatch.setattr(server.memory_manager, "validate_memory_async", fake_validate)
+    monkeypatch.setattr(server.memory_manager, "check_duplicate_async", fake_check_duplicate)
+
+    payload = asyncio.run(
+        server.prepare_memory(
+            content="# Agent Protocol\n\nBody",
+            title="Agent Protocol",
+            tags="agent,protocol",
+            related_to="engram-core",
+            project="engram",
+            domain="memory",
+            status="active",
+            canonical=True,
+        )
+    )
+
+    assert payload["ready"] is True
+    assert payload["draft"] == {
+        "key": "agent_protocol",
+        "content": "# Agent Protocol\n\nBody",
+        "title": "Agent Protocol",
+        "tags": ["agent", "protocol"],
+        "related_to": ["engram-core"],
+        "project": "engram",
+        "domain": "memory",
+        "status": "active",
+        "canonical": True,
+    }
+    assert payload["duplicate"]["duplicate"] is False
+    assert payload["validation"]["valid"] is True
+    assert payload["error"] is None
+
+
+def test_memory_manager_audits_and_repairs_metadata_drift(mm_module):
+    key = "legacy-drift"
+    mm_module._json_path(key).write_text(
+        json.dumps(
+            {
+                "key": key,
+                "title": "",
+                "content": "# Legacy Drift\n\nBody",
+                "tags": "alpha,beta,alpha",
+                "related_to": "one,two",
+                "status": "retired",
+                "canonical": "yes",
+                "project": "engram",
+                "domain": "memory",
+                "created_at": "2026-04-20T00:00:00+00:00",
+                "updated_at": "2026-04-20T00:00:00+00:00",
+                "chars": 1,
+                "lines": 99,
+                "chunk_count": 99,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    audit = mm_module.memory_manager.audit_memory_metadata()
+
+    assert audit["total"] == 1
+    assert audit["issue_count"] >= 1
+    issue_codes = {issue["code"] for issue in audit["memories"][0]["issues"]}
+    assert {
+        "missing_title",
+        "tags_not_list",
+        "duplicate_tags",
+        "related_to_not_list",
+        "invalid_status",
+        "chars_mismatch",
+        "lines_mismatch",
+        "chunk_count_mismatch",
+    }.issubset(issue_codes)
+
+    dry_run = mm_module.memory_manager.repair_memory_metadata([key], dry_run=True)
+    assert dry_run["repaired_count"] == 0
+    assert dry_run["repairs"][0]["would_change"] is True
+
+    repaired = mm_module.memory_manager.repair_memory_metadata([key], dry_run=False)
+    stored = mm_module.memory_manager.retrieve_memory(key)
+
+    assert repaired["repaired_count"] == 1
+    assert stored["title"] == key
+    assert stored["tags"] == ["alpha", "beta"]
+    assert stored["related_to"] == ["one", "two"]
+    assert stored["status"] == "active"
+    assert stored["canonical"] is True
+    assert stored["chars"] == len(stored["content"])
+    assert stored["lines"] == len(stored["content"].splitlines())
+    assert stored["chunk_count"] == 1
+
+
+def test_audit_and_repair_metadata_tools_return_structured_payloads(monkeypatch):
+    server = load_server_module()
+
+    async def fake_audit_memory_metadata(**kwargs):
+        assert kwargs == {"limit": 25, "offset": 5, "project": "engram"}
+        return {
+            "count": 1,
+            "total": 1,
+            "issue_count": 2,
+            "repairable_count": 1,
+            "memories": [{"key": "legacy-drift", "issues": []}],
+        }
+
+    async def fake_repair_memory_metadata(keys, dry_run=True):
+        assert keys == ["legacy-drift"]
+        assert dry_run is False
+        return {
+            "requested_count": 1,
+            "repaired_count": 1,
+            "repairs": [{"key": "legacy-drift", "repaired": True}],
+        }
+
+    monkeypatch.setattr(server.memory_manager, "audit_memory_metadata_async", fake_audit_memory_metadata)
+    monkeypatch.setattr(server.memory_manager, "repair_memory_metadata_async", fake_repair_memory_metadata)
+
+    audit_payload = asyncio.run(
+        server.audit_memory_metadata(limit=25, offset=5, project="engram")
+    )
+    repair_payload = asyncio.run(
+        server.repair_memory_metadata(keys="legacy-drift", dry_run=False)
+    )
+
+    assert audit_payload["issue_count"] == 2
+    assert audit_payload["error"] is None
+    assert repair_payload["repaired_count"] == 1
+    assert repair_payload["error"] is None
