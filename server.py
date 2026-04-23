@@ -36,6 +36,7 @@ from core.tool_payloads import (
 
 mcp = FastMCP("engram")
 session_pin_store = SessionPinStore()
+DEFAULT_SSE_HOST = "127.0.0.1"
 
 
 def _clamp_search_limit(limit: int) -> int:
@@ -1721,7 +1722,7 @@ if __name__ == "__main__":
         default="stdio",
         help="Transport protocol (default: stdio)",
     )
-    parser.add_argument("--host", default="0.0.0.0", help="SSE host (default: 0.0.0.0)")
+    parser.add_argument("--host", default=DEFAULT_SSE_HOST, help=f"SSE host (default: {DEFAULT_SSE_HOST})")
     parser.add_argument("--port", type=int, default=5100, help="SSE port (default: 5100)")
     parser.add_argument(
         "--rebuild-index",

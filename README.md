@@ -239,6 +239,10 @@ Add to your `claude_desktop_config.json`:
 python server.py --transport sse --port 5100
 ```
 
+SSE binds to `127.0.0.1` by default. For remote access, pass an explicit host,
+for example `python server.py --transport sse --host 0.0.0.0 --port 5100`,
+and put it behind your normal network controls.
+
 ---
 
 ## Skills
