@@ -5,52 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Engram — Memory Dashboard</title>
   <link rel="stylesheet" href="/static/style.css">
-  <style>
-    /* Stale tab styles */
-    .stale-row {
-      background: var(--surface, #1a1a1a);
-      border: 1px solid var(--border, #2a2a2a);
-      border-radius: 6px;
-      padding: 0.75rem 1rem;
-      margin-bottom: 0.5rem;
-    }
-    .stale-row-header {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-bottom: 0.25rem;
-    }
-    .stale-title { flex: 1; font-weight: 600; }
-    .stale-row-meta {
-      display: flex;
-      gap: 1rem;
-      font-size: 0.8rem;
-      margin-bottom: 0.25rem;
-    }
-    .stale-detail { color: var(--muted, #888); }
-    .stale-badge {
-      font-size: 0.7rem;
-      font-weight: 700;
-      padding: 0.15rem 0.4rem;
-      border-radius: 3px;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      white-space: nowrap;
-    }
-    .stale-time  { background: #3d2a00; color: #ffb347; }
-    .stale-code  { background: #1a2d3d; color: #4fc3f7; }
-    .stale-both  { background: #2d1a2d; color: #ce93d8; }
-    .stale-reviewed-btn { margin-left: auto; }
-  </style>
 </head>
 <body>
 
 <!-- ── Header ────────────────────────────────────────────────────────────── -->
-<header>
-  <div class="logo">ENGRAM <span>memory dashboard</span></div>
-  <div class="stats">
-    <div><span class="num" id="stat-memories">{{ stats.total_memories }}</span> memories</div>
-    <div><span class="num" id="stat-chunks">{{ stats.total_chunks }}</span> chunks</div>
+<header class="app-header">
+  <div class="brand">
+    <div class="brand-mark">E</div>
+    <div>
+      <div class="logo">ENGRAM</div>
+      <div class="logo-subtitle">local memory console</div>
+    </div>
+  </div>
+  <div class="stats" aria-label="Memory statistics">
+    <div class="stat-pill">
+      <span class="num" id="stat-memories">{{ stats.total_memories }}</span>
+      <span>memories</span>
+    </div>
+    <div class="stat-pill">
+      <span class="num" id="stat-chunks">{{ stats.total_chunks }}</span>
+      <span>chunks</span>
+    </div>
   </div>
 </header>
 
@@ -59,29 +34,53 @@
 
   <!-- Sidebar: Tag Filtering -->
   <aside class="sidebar">
-    <h3>Tags</h3>
-    <ul class="tag-list" id="tag-list">
-      <li class="active" data-tag="">All</li>
-      {% for tag in all_tags %}
-      <li data-tag="{{ tag }}">{{ tag }}</li>
-      {% endfor %}
-    </ul>
+    <section class="sidebar-card library-card">
+      <p class="eyebrow">Library</p>
+      <h2>Browse the memory store</h2>
+      <p class="sidebar-copy">Use semantic search first. Tags are here when you already know the shelf.</p>
+    </section>
+
+    <section class="sidebar-card tags-panel">
+      <div class="section-heading">
+        <h3>Tags</h3>
+        <span>{{ all_tags|length }}</span>
+      </div>
+      <div class="tag-filter">
+        <input type="text" id="tag-search-input" placeholder="Filter tags..." autocomplete="off">
+      </div>
+      <ul class="tag-list" id="tag-list">
+        <li class="active" data-tag=""><span>All memories</span></li>
+        {% for tag in all_tags %}
+        <li data-tag="{{ tag }}"><span>{{ tag }}</span></li>
+        {% endfor %}
+      </ul>
+    </section>
   </aside>
 
   <!-- Main Content -->
   <div class="main">
+    <section class="hero-panel">
+      <div>
+        <p class="eyebrow">Memory operations</p>
+        <h1>Find the right context without digging through the whole archive.</h1>
+        <p>Search semantically, narrow with tags, and review stale memories from one calmer workspace.</p>
+      </div>
+      <button class="btn btn-cyan hero-action" onclick="openCreateModal()">New Memory</button>
+    </section>
 
     <!-- Toolbar -->
-    <div class="toolbar">
+    <div class="toolbar command-bar">
       <div class="search-box">
         <input type="text" id="search-input" placeholder="Semantic search across memories..." autocomplete="off">
       </div>
-      <div class="view-toggle">
-        <button class="btn active" data-view="grid" title="Grid view">Grid</button>
-        <button class="btn" data-view="list" title="List view">List</button>
+      <div class="toolbar-actions">
+        <div class="view-toggle" aria-label="View mode">
+          <button class="btn active" data-view="grid" title="Grid view">Grid</button>
+          <button class="btn" data-view="list" title="List view">List</button>
+        </div>
+        <button class="btn" id="btn-stale-tab" onclick="toggleStaleTab()">Review stale</button>
+        <button class="btn btn-cyan compact-new" onclick="openCreateModal()">New</button>
       </div>
-      <button class="btn" id="btn-stale-tab" onclick="toggleStaleTab()">Stale</button>
-      <button class="btn btn-cyan" onclick="openCreateModal()">+ New</button>
     </div>
 
     <!-- Search Results (hidden by default) -->
@@ -91,20 +90,27 @@
     <div id="memory-container" class="memory-grid">
       {% if memories %}
         {% for m in memories %}
-        <div class="memory-card" data-key="{{ m.key }}" data-tags="{{ m.tags | join(',') }}">
-          <div class="title">{{ m.title }}</div>
-          <div class="key">{{ m.key }}</div>
+        <article class="memory-card" data-key="{{ m.key }}" data-tags="{{ m.tags | join(',') }}">
+          <div class="card-topline">
+            <div>
+              <div class="title">{{ m.title }}</div>
+              <div class="key">{{ m.key }}</div>
+            </div>
+            <div class="updated-date">{{ m.updated_at[:10] if m.updated_at else '' }}</div>
+          </div>
           <div class="meta">
-            <span>{{ m.chunk_count }} chunks</span>
-            <span>{{ m.chars }} chars</span>
-            <span>{{ m.updated_at[:10] if m.updated_at else '' }}</span>
+            <span><strong>{{ m.chunk_count }}</strong> chunks</span>
+            <span><strong>{{ m.chars }}</strong> chars</span>
           </div>
           <div class="tags">
-            {% for t in m.tags %}
+            {% for t in m.tags[:6] %}
             <span class="tag-chip">{{ t }}</span>
             {% endfor %}
+            {% if m.tags|length > 6 %}
+            <span class="tag-chip tag-chip-muted">+{{ m.tags|length - 6 }}</span>
+            {% endif %}
           </div>
-        </div>
+        </article>
         {% endfor %}
       {% else %}
         <div class="empty-state">
@@ -115,17 +121,21 @@
     </div>
 
     <!-- Stale Memories Panel (hidden by default) -->
-    <div id="stale-panel" class="hidden">
-      <div class="toolbar" style="margin-bottom:1rem;">
-        <span class="text-muted" style="font-size:0.9rem;">Memories not accessed in 90+ days or flagged by indexer. Mark Reviewed to clear — no deletions.</span>
-        <select id="stale-type-filter" onchange="loadStaleTab()" style="margin-left:auto; background:var(--surface,#1a1a1a); color:var(--text,#e0e0e0); border:1px solid var(--border,#2a2a2a); border-radius:4px; padding:0.25rem 0.5rem;">
+    <section id="stale-panel" class="review-panel hidden">
+      <div class="review-header">
+        <div>
+          <p class="eyebrow">Review queue</p>
+          <h2>Stale memories</h2>
+          <p>Memories not accessed in 90+ days or flagged by the indexer. Marking reviewed clears flags only; it never deletes content.</p>
+        </div>
+        <select id="stale-type-filter" class="select-control" onchange="loadStaleTab()">
           <option value="all">All stale</option>
           <option value="time">Time stale only</option>
           <option value="code">Code changed only</option>
         </select>
       </div>
       <div id="stale-list"></div>
-    </div>
+    </section>
 
   </div>
 </div>
@@ -136,7 +146,7 @@
     <h2 id="modal-create-title">New Memory</h2>
     <div class="form-group">
       <label>Template</label>
-      <div style="display:flex; gap:0.5rem;">
+      <div class="template-actions">
         <button class="btn btn-sm" onclick="applyTemplate('project')">Project</button>
         <button class="btn btn-sm" onclick="applyTemplate('decision')">Decision</button>
         <button class="btn btn-sm" onclick="applyTemplate('reference')">Reference</button>
@@ -170,11 +180,11 @@
 <div class="modal-overlay" id="modal-view">
   <div class="modal">
     <h2 id="view-title">Memory</h2>
-    <div class="meta text-muted" id="view-meta" style="font-size:0.8rem; margin-bottom:0.75rem;"></div>
-    <div class="tags" id="view-tags" style="margin-bottom:0.75rem;"></div>
-    <pre id="view-content" style="max-height:400px; overflow-y:auto;">Loading...</pre>
-    <div id="view-related" style="display:none; margin-top:1rem; border-top: 1px solid var(--border, #2a2a2a); padding-top:0.75rem;">
-      <h4 style="font-size:0.85rem; color:var(--muted, #888); margin-bottom:0.5rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Related Memories</h4>
+    <div class="modal-meta text-muted" id="view-meta"></div>
+    <div class="tags modal-tags" id="view-tags"></div>
+    <pre id="view-content" class="memory-content">Loading...</pre>
+    <div id="view-related" class="related-panel">
+      <h4>Related Memories</h4>
       <div id="view-related-content"></div>
     </div>
     <div class="modal-actions">
@@ -193,6 +203,7 @@ let currentViewKey = null;
 let searchTimeout = null;
 let editMode = false;
 let staleTabActive = false;
+const tagSearchInput = document.getElementById('tag-search-input');
 
 // ── Memory Card Click (via data attribute, not inline onclick) ──────────────
 document.getElementById('memory-container').addEventListener('click', e => {
@@ -221,6 +232,14 @@ document.getElementById('tag-list').addEventListener('click', e => {
   filterByTag();
 });
 
+tagSearchInput.addEventListener('input', () => {
+  const q = tagSearchInput.value.trim().toLowerCase();
+  document.querySelectorAll('#tag-list li').forEach(li => {
+    if (!li.dataset.tag) { li.classList.remove('hidden'); return; }
+    li.classList.toggle('hidden', !li.dataset.tag.toLowerCase().includes(q));
+  });
+});
+
 function filterByTag() {
   document.querySelectorAll('.memory-card').forEach(card => {
     if (!activeTag) { card.classList.remove('hidden'); return; }
@@ -240,12 +259,14 @@ function toggleStaleTab() {
   if (staleTabActive) {
     btn.classList.add('active');
     stalePanel.classList.remove('hidden');
+    stalePanel.classList.add('active');
     memoryContainer.classList.add('hidden');
     searchResults.classList.add('hidden');
     loadStaleTab();
   } else {
     btn.classList.remove('active');
     stalePanel.classList.add('hidden');
+    stalePanel.classList.remove('active');
     memoryContainer.classList.remove('hidden');
   }
 }
@@ -253,7 +274,7 @@ function toggleStaleTab() {
 async function loadStaleTab() {
   const listEl = document.getElementById('stale-list');
   const filterType = document.getElementById('stale-type-filter').value;
-  listEl.innerHTML = '<div class="text-muted" style="padding:1rem;">Loading stale memories...</div>';
+  listEl.innerHTML = '<div class="loading-row">Loading stale memories...</div>';
 
   try {
     const res = await fetch(`/api/stale?type=${filterType}`);
@@ -279,7 +300,7 @@ async function loadStaleTab() {
             <button class="btn btn-sm stale-reviewed-btn" onclick="markReviewed('${esc(m.key)}', '${esc(m.stale_type)}', this)">Mark Reviewed</button>
           </div>
           <div class="stale-row-meta">
-            <span class="text-muted" style="font-size:0.8rem;">${esc(m.key)}</span>
+            <span class="stale-key">${esc(m.key)}</span>
             <span class="stale-detail">${esc(m.stale_detail)}</span>
           </div>
           <div class="tags">${tags}</div>
@@ -287,7 +308,7 @@ async function loadStaleTab() {
       `;
     }).join('');
   } catch (err) {
-    listEl.innerHTML = `<div class="text-muted" style="padding:1rem;">Error loading stale memories: ${esc(err.message)}</div>`;
+    listEl.innerHTML = `<div class="loading-row">Error loading stale memories: ${esc(err.message)}</div>`;
   }
 }
 
@@ -508,7 +529,7 @@ async function openViewModal(key) {
   document.getElementById('view-tags').innerHTML = '';
   document.getElementById('view-content').textContent = 'Loading...';
   document.getElementById('modal-view').classList.add('active');
-  document.getElementById('view-related').style.display = 'none';
+  document.getElementById('view-related').classList.add('hidden');
   document.getElementById('view-related-content').innerHTML = '';
 
   try {
@@ -535,17 +556,17 @@ async function loadRelatedMemories(key) {
     const all = [...(data.forward || []), ...(data.reverse || [])];
     const container = document.getElementById('view-related-content');
     const section = document.getElementById('view-related');
-    if (!all.length) { section.style.display = 'none'; return; }
-    section.style.display = 'block';
+    if (!all.length) { section.classList.add('hidden'); return; }
+    section.classList.remove('hidden');
     container.innerHTML = all.map(m =>
-      `<div style="margin-bottom:0.35rem;">
+      `<div class="related-link">
         <a href="#" onclick="openViewModal(${JSON.stringify(m.key)}); return false;"
-           style="color:var(--cyan, #00bcd4); text-decoration:none; font-size:0.875rem;">${esc(m.title)}</a>
-        <span style="color:var(--muted, #888); font-size:0.75rem;"> — ${esc(m.key)}</span>
+           >${esc(m.title)}</a>
+        <span>${esc(m.key)}</span>
        </div>`
     ).join('');
   } catch (e) {
-    document.getElementById('view-related').style.display = 'none';
+    document.getElementById('view-related').classList.add('hidden');
   }
 }
 
