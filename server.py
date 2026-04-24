@@ -1824,6 +1824,11 @@ if __name__ == "__main__":
         print(f"  Model:      {embedder._model is not None and 'loaded' or 'NOT LOADED'}", file=sys.stderr)
         print(f"  Memories:   {stats['total_memories']}", file=sys.stderr)
         print(f"  Chunks:     {stats['total_chunks']}", file=sys.stderr)
+        print(
+            f"  Brain size: {stats['storage_size']} "
+            f"(JSON {stats['json_size']}, Chroma {stats['chroma_size']})",
+            file=sys.stderr,
+        )
         print(f"  JSON path:  {stats['json_path']}", file=sys.stderr)
         print(f"  Chroma path:{stats['chroma_path']}", file=sys.stderr)
         print(f"Status: OK", file=sys.stderr)

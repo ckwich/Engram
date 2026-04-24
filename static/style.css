@@ -138,6 +138,10 @@ body::before {
   text-transform: none;
 }
 
+.stat-pill-storage .num {
+  color: var(--amber);
+}
+
 /* Layout */
 .layout {
   display: grid;

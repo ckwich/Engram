@@ -84,6 +84,34 @@ def test_store_keeps_json_if_chroma_upsert_fails(fake_chroma_collection, mm_modu
     assert stored["key"] == key
 
 
+def test_get_stats_reports_json_and_chroma_disk_usage(isolated_storage):
+    mm_module = isolated_storage["mm"]
+    manager = mm_module.memory_manager
+    json_dir = isolated_storage["json_dir"]
+    chroma_dir = isolated_storage["chroma_dir"]
+
+    manager.store_memory(
+        key="overnight-storage-size",
+        content="short note for disk usage accounting",
+        tags=["dashboard"],
+        title="Storage Size",
+    )
+    (chroma_dir / "index.bin").write_bytes(b"vector-index")
+
+    expected_json_bytes = sum(
+        path.stat().st_size for path in json_dir.rglob("*") if path.is_file()
+    )
+
+    stats = manager.get_stats()
+
+    assert stats["json_bytes"] == expected_json_bytes
+    assert stats["chroma_bytes"] == len(b"vector-index")
+    assert stats["storage_bytes"] == stats["json_bytes"] + stats["chroma_bytes"]
+    assert stats["json_size"].endswith((" B", " KB", " MB", " GB", " TB"))
+    assert stats["chroma_size"].endswith((" B", " KB", " MB", " GB", " TB"))
+    assert stats["storage_size"].endswith((" B", " KB", " MB", " GB", " TB"))
+
+
 def test_save_json_replace_is_atomic_for_concurrent_readers(monkeypatch, isolated_storage):
     mm_module = isolated_storage["mm"]
     manager = mm_module.memory_manager

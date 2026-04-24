@@ -199,6 +199,8 @@ def health():
         "model_loaded": embedder._model is not None,
         "total_memories": stats["total_memories"],
         "total_chunks": stats["total_chunks"],
+        "storage_bytes": stats["storage_bytes"],
+        "storage_size": stats["storage_size"],
     })
 
 

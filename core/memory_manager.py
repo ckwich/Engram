@@ -63,6 +63,43 @@ CHROMA_DIR = PROJECT_ROOT / "data" / "chroma"
 JSON_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def _directory_size_bytes(path: Path) -> int:
+    """Return the best-effort byte size for a file or directory tree."""
+    try:
+        if path.is_file():
+            return path.stat().st_size
+        if not path.exists():
+            return 0
+    except OSError:
+        return 0
+
+    total = 0
+    try:
+        for entry in path.rglob("*"):
+            try:
+                if entry.is_file():
+                    total += entry.stat().st_size
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return total
+
+
+def _format_storage_size(num_bytes: int) -> str:
+    """Format a byte count for dashboard and health output."""
+    value = float(max(num_bytes, 0))
+    units = ("B", "KB", "MB", "GB", "TB")
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{int(value)} B"
+
+
 # ── Config ─────────────────────────────────────────────────────────────────
 _CONFIG_PATH = PROJECT_ROOT / "config.json"
 
@@ -2072,10 +2109,19 @@ class MemoryManager:
     def get_stats(self) -> dict:
         memories = self.list_memories()
         col = self._get_collection()
+        json_bytes = _directory_size_bytes(JSON_DIR)
+        chroma_bytes = _directory_size_bytes(CHROMA_DIR)
+        storage_bytes = json_bytes + chroma_bytes
         return {
             "total_memories": len(memories),
             "total_chars": sum(m["chars"] for m in memories),
             "total_chunks": col.count(),
+            "storage_bytes": storage_bytes,
+            "storage_size": _format_storage_size(storage_bytes),
+            "json_bytes": json_bytes,
+            "json_size": _format_storage_size(json_bytes),
+            "chroma_bytes": chroma_bytes,
+            "chroma_size": _format_storage_size(chroma_bytes),
             "json_path": str(JSON_DIR),
             "chroma_path": str(CHROMA_DIR),
         }
