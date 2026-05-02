@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Engram - Unlock Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-card">
+      <div class="brand login-brand">
+        <div class="brand-mark">E</div>
+        <div>
+          <div class="logo">ENGRAM</div>
+          <div class="logo-subtitle">protected memory console</div>
+        </div>
+      </div>
+      <p class="eyebrow">Read access</p>
+      <h1>Unlock the dashboard</h1>
+      <p class="login-copy">
+        This WebUI is bound beyond loopback, so reads require the local access token.
+        The token is exchanged for a browser session and is not rendered into the page.
+      </p>
+      {% if error %}
+      <div class="login-error">{{ error }}</div>
+      {% endif %}
+      <form method="post" class="login-form">
+        <label for="access-token">Access token</label>
+        <input id="access-token" name="access_token" type="password" autocomplete="current-password" autofocus>
+        <button class="btn btn-cyan" type="submit">Unlock Engram</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

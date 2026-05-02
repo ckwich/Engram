@@ -1,0 +1,795 @@
+#!/usr/bin/env python
+"""
+engram_index.py - Codebase mapping helper for Engram.
+
+Prepares agent-native codebase mapping jobs. Engram scans files, tracks
+manifests, and stores agent-authored results; the connected MCP agent performs
+the architectural synthesis.
+
+Usage:
+  python engram_index.py --project C:/Dev/MyProject --mode bootstrap
+  python engram_index.py --project C:/Dev/MyProject --mode evolve
+  python engram_index.py --project C:/Dev/MyProject --mode full --force
+  python engram_index.py --project C:/Dev/MyProject --init
+  python engram_index.py --project C:/Dev/MyProject --install-hook
+"""
+import argparse
+import hashlib
+import json
+import os
+# The generated git hook invokes this trusted local helper with shell=False.
+import subprocess  # nosec B404
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+# ── Constants ────────────────────────────────────────────────────────────────
+
+ENGRAM_ROOT = Path(__file__).parent  # C:/Dev/Engram/
+DEFAULT_MAX_FILE_SIZE_KB = 100
+DEFAULT_PLANNING_PATHS = ["PROJECT.md", "ROADMAP.md", "AGENTS.md"]
+HOOK_FILE_MODE = 0o700
+DEFAULT_EXCLUDED_DIR_NAMES = {
+    ".git",
+    ".engram",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".turbo",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "env",
+    "node_modules",
+    "venv",
+}
+DEFAULT_SECRET_FILE_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.production",
+    ".env.test",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_rsa",
+}
+DEFAULT_SECRET_FILE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
+DEFAULT_QUESTIONS = [
+    "What is the architecture of this domain?",
+    "What key decisions were made and why?",
+    "What patterns are established and reused?",
+    "What should a developer watch out for?",
+]
+
+# Git hook template. Filled at install time with absolute paths.
+# Shebang: forward slashes, /c/ prefix (not C:/) — required for Git Bash on Windows.
+HOOK_TEMPLATE = """\
+#!/c/Dev/Engram/venv/Scripts/python.exe
+\"\"\"Engram post-commit hook: run evolve mode in background after each commit.\"\"\"
+import subprocess, sys
+from pathlib import Path
+
+VENV_PYTHON = r"{venv_python}"
+ENGRAM_INDEX = r"{engram_index}"
+PROJECT_ROOT = r"{project_root}"
+ENGRAM_DIR = Path(PROJECT_ROOT) / ".engram"
+ENGRAM_DIR.mkdir(exist_ok=True)
+LOG_FILE = str(ENGRAM_DIR / "last_evolve.log")
+
+CREATE_NO_WINDOW = 0x08000000
+
+try:
+    popen_kwargs = dict(stderr=subprocess.STDOUT, close_fds=True)
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = CREATE_NO_WINDOW
+    with open(LOG_FILE, "a", encoding="utf-8") as log:
+        popen_kwargs["stdout"] = log
+        proc = subprocess.Popen(
+            [VENV_PYTHON, ENGRAM_INDEX, "--mode", "evolve", "--project", PROJECT_ROOT],
+            **popen_kwargs,
+        )
+    sys.exit(0)
+except Exception as e:
+    with open(LOG_FILE, "a", encoding="utf-8") as log:
+        log.write(f"Hook spawn error: {{e}}\\n")
+    sys.exit(0)
+"""
+
+
+# ── Config functions ─────────────────────────────────────────────────────────
+
+def load_project_config(project_root: Path) -> Optional[dict]:
+    """Load per-project .engram/config.json. Returns None if missing."""
+    config_path = project_root / ".engram" / "config.json"
+    if not config_path.exists():
+        return None
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading config: {e}", file=sys.stderr)
+        return None
+
+
+def save_project_config(project_root: Path, config: dict) -> None:
+    """Write per-project .engram/config.json. Creates .engram/ dir if needed."""
+    engram_dir = project_root / ".engram"
+    engram_dir.mkdir(parents=True, exist_ok=True)
+    with open(engram_dir / "config.json", "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+
+
+# ── Manifest functions ───────────────────────────────────────────────────────
+
+def sha256_file(path: Path) -> str:
+    """Compute SHA256 hash of file contents. Uses 64KB chunks for memory efficiency."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_manifest(engram_dir: Path) -> dict:
+    """Load .engram/index.json or return empty manifest."""
+    manifest_path = engram_dir / "index.json"
+    if manifest_path.exists():
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"files": {}, "last_run": None, "memories": {}}
+
+
+def save_manifest(engram_dir: Path, manifest: dict) -> None:
+    """Save .engram/index.json with updated last_run timestamp."""
+    manifest["last_run"] = datetime.now().astimezone().isoformat()
+    engram_dir.mkdir(parents=True, exist_ok=True)
+    with open(engram_dir / "index.json", "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
+
+# ── File collection ──────────────────────────────────────────────────────────
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _should_skip_index_path(path: Path, project_root: Path) -> bool:
+    try:
+        relative_path = path.relative_to(project_root)
+    except ValueError:
+        return True
+
+    if any(part in DEFAULT_EXCLUDED_DIR_NAMES for part in relative_path.parts[:-1]):
+        return True
+
+    name = path.name.lower()
+    if name in DEFAULT_SECRET_FILE_NAMES or name.startswith(".env."):
+        return True
+    return path.suffix.lower() in DEFAULT_SECRET_FILE_SUFFIXES
+
+
+def collect_domain_files(project_root: Path, domain_config: dict, max_file_size_kb: int) -> list[Path]:
+    """Collect files matching domain globs, skip oversized files with a warning."""
+    files_by_relative_path = {}
+    project_root = project_root.resolve()
+    for pattern in domain_config.get("file_globs", []):
+        for path in sorted(project_root.glob(pattern)):
+            if not path.is_file():
+                continue
+            try:
+                resolved_path = path.resolve(strict=True)
+            except OSError:
+                continue
+            if not _is_relative_to(resolved_path, project_root):
+                print(f"  [skip] {path.name} (resolves outside project root)")
+                continue
+            if _should_skip_index_path(path, project_root):
+                continue
+            size_kb = path.stat().st_size / 1024
+            if size_kb > max_file_size_kb:
+                print(f"  [skip] {path.relative_to(project_root)} ({size_kb:.0f}KB > {max_file_size_kb}KB limit)")
+                continue
+            relative = path.relative_to(project_root).as_posix()
+            files_by_relative_path.setdefault(relative, path)
+    return [files_by_relative_path[key] for key in sorted(files_by_relative_path)]
+
+
+# ── Context assembly ─────────────────────────────────────────────────────────
+
+def assemble_context(project_root: Path, config: dict, domain_name: str, domain_config: dict) -> str:
+    """Assemble synthesis prompt from planning artifacts + domain source files."""
+    parts = []
+
+    # Planning artifacts
+    for rel_path in config.get("planning_paths", DEFAULT_PLANNING_PATHS):
+        p = Path(rel_path) if Path(rel_path).is_absolute() else project_root / rel_path
+        if p.exists() and p.is_file():
+            parts.append(f"=== {rel_path} ===\n{p.read_text(encoding='utf-8', errors='replace')}")
+        elif p.exists() and p.is_dir():
+            # Directory: read all .md files inside
+            for md_file in sorted(p.glob("**/*.md")):
+                parts.append(f"=== {md_file.name} ===\n{md_file.read_text(encoding='utf-8', errors='replace')}")
+
+    # Domain source files
+    max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
+    domain_files = collect_domain_files(project_root, domain_config, max_kb)
+    for f in domain_files:
+        rel = f.relative_to(project_root)
+        parts.append(f"=== {rel} ===\n{f.read_text(encoding='utf-8', errors='replace')}")
+
+    questions = domain_config.get("questions", DEFAULT_QUESTIONS)
+    question_block = "\n".join(f"- {q}" for q in questions)
+
+    prompt = (
+        f"You are analyzing the '{domain_name}' domain of the "
+        f"'{config.get('project_name', project_root.name)}' project.\n\n"
+        f"Below is the project context (planning artifacts and source files).\n\n"
+        f"{''.join(chr(10) + p for p in parts)}\n\n"
+        f"---\n\n"
+        f"Based on this context, answer these questions:\n{question_block}\n\n"
+        f"Format your response as structured markdown with these sections "
+        f"(include only those that apply):\n\n"
+        f"## Architecture\n"
+        f"The structural design: how components are organized, why they're organized that way.\n\n"
+        f"## Key Decisions\n"
+        f"Important choices made during development and the reasoning behind them.\n\n"
+        f"## Patterns\n"
+        f"Reusable approaches, conventions, and techniques used in this domain.\n\n"
+        f"## Watch Out For\n"
+        f"Edge cases, pitfalls, gotchas, and non-obvious behaviors to be aware of.\n\n"
+        f"Write for a developer reading this cold, with no prior context. Explain WHY, not just WHAT."
+    )
+    return prompt
+
+
+# ── Agent-native mapping jobs ────────────────────────────────────────────────
+
+def print_mapping_job_summary(payload: dict) -> None:
+    """Print a compact operator summary for an agent-native mapping job."""
+    if payload.get("error"):
+        error = payload["error"]
+        print(f"  [error] {error.get('code')}: {error.get('message')}")
+        return
+
+    job = payload["job"]
+    print(f"Prepared mapping job: {job['job_id']}")
+    print(f"  Project: {job['project_name']} ({job['project_root']})")
+    print(f"  Mode:    {job['mode']}")
+    print(f"  Domains: {len(job['domains'])}")
+    if job.get("status") == "no_changes":
+        print("  No changed domains were found. Existing architecture memories were left untouched.")
+        return
+    for domain in job["domains"]:
+        print(
+            f"  - {domain['domain']}: {domain['file_count']} files, "
+            f"{domain['context_part_count']} context part(s), key={domain['memory_key']}"
+        )
+    print("\nNext MCP steps for the connected agent:")
+    print("  1. read_codebase_mapping_context(job_id, domain, part_index=0..n)")
+    print("  2. synthesize architecture markdown in the active agent")
+    print("  3. store_codebase_mapping_result(job_id, domain, content)")
+
+
+# ── Init flow ────────────────────────────────────────────────────────────────
+
+def run_init(project_root: Path) -> dict:
+    """Interactive domain setup via Python input() prompts. Writes .engram/config.json."""
+    print(f"\n=== Engram Indexer Setup for {project_root.name} ===\n")
+
+    project_name = input(f"Project name [{project_root.name}]: ").strip() or project_root.name
+
+    # Auto-detect candidate domains from top-level directories
+    candidates = [
+        d.name for d in sorted(project_root.iterdir())
+        if d.is_dir()
+        and not d.name.startswith(".")
+        and d.name not in ("node_modules", "__pycache__", "venv", ".git", "dist", "build")
+    ]
+    if candidates:
+        print(f"\nDetected potential domains: {', '.join(candidates)}")
+
+    print("\nDefine domains to index. Enter one domain per prompt. Press Enter with empty name to finish.")
+
+    domains = {}
+    while True:
+        name = input("\nDomain name (or Enter to finish): ").strip().lower()
+        if not name:
+            break
+        default_globs = f"{name}/**/*.py" if (project_root / name).is_dir() else "**/*.py"
+        globs_input = input(f"  File globs (comma-separated) [{default_globs}]: ").strip()
+        globs = [g.strip() for g in globs_input.split(",")] if globs_input else [default_globs]
+        print(f"  Using default synthesis questions. Add custom questions? (leave blank to use defaults)")
+        custom_q = input("  Custom questions (semicolon-separated, or blank): ").strip()
+        questions = [q.strip() for q in custom_q.split(";")] if custom_q else DEFAULT_QUESTIONS
+        domains[name] = {"file_globs": globs, "questions": questions}
+
+    if not domains:
+        print("No domains defined. Add at least one domain to use the indexer.")
+        sys.exit(1)
+
+    planning_rel = input(f"Planning paths (comma-separated) [{', '.join(DEFAULT_PLANNING_PATHS)}]: ").strip()
+    planning_paths = [p.strip() for p in planning_rel.split(",")] if planning_rel else DEFAULT_PLANNING_PATHS
+
+    config = {
+        "project_name": project_name,
+        "max_file_size_kb": DEFAULT_MAX_FILE_SIZE_KB,
+        "planning_paths": planning_paths,
+        "domains": domains,
+    }
+
+    save_project_config(project_root, config)
+    print(f"\nConfig written to {project_root / '.engram' / 'config.json'}")
+    return config
+
+
+# ── Memory key helper ────────────────────────────────────────────────────────
+
+def memory_key(project_name: str, domain_name: str) -> str:
+    """Per D-20: use underscores. codebase_{project}_{domain}_architecture"""
+    safe_project = project_name.lower().replace("-", "_").replace(" ", "_")
+    safe_domain = domain_name.lower().replace("-", "_").replace(" ", "_")
+    return f"codebase_{safe_project}_{safe_domain}_architecture"
+
+
+# ── Edit protection ──────────────────────────────────────────────────────────
+
+def is_manually_edited(key: str, last_run: Optional[str]) -> bool:
+    """
+    Returns True if the memory was manually edited after the last index run.
+    Per D-19: compare memory's updated_at against manifest last_run.
+    If last_run is None (first run), treat all memories as not manually edited.
+    """
+    if last_run is None:
+        return False
+    from core.memory_manager import memory_manager
+    existing = memory_manager.retrieve_memory(key)
+    if existing is None:
+        return False
+    return existing.get("updated_at", "") > last_run
+
+
+# ── Skill file generation ───────────────────────────────────────────────────
+
+
+def generate_skill_file(
+    project_name: str,
+    domain_name: str,
+    domain_config: dict,
+    memory_key_value: str,
+) -> Path:
+    """
+    Write an agent-neutral context guide under ~/.engram/agent_guides.
+
+    These are auto-generated pointers, not content. The body calls Engram tools
+    and never embeds architecture content directly.
+    """
+    skill_name = f"{project_name.lower()}-{domain_name.lower()}-context"
+    skills_root = Path.home() / ".engram" / "agent_guides" / skill_name
+    skills_root.mkdir(parents=True, exist_ok=True)
+
+    # Build paths glob — forward slashes only, even on Windows (PITFALLS.md Pitfall 14)
+    raw_globs = domain_config.get("file_globs", ["**/*.py"])
+    paths_value = ", ".join(g.replace("\\", "/") for g in raw_globs)
+
+    # Description under 200 chars to avoid truncation
+    description = (
+        f"{project_name} {domain_name} architectural context. "
+        f"Use when editing {domain_name} files to get current architecture, decisions, and patterns."
+    )[:200]
+
+    frontmatter = (
+        f"---\n"
+        f"name: {skill_name}\n"
+        f"description: \"{description}\"\n"
+        f"paths: {paths_value}\n"
+        f"allowed-tools: mcp__engram__search_memories, mcp__engram__retrieve_chunk, mcp__engram__retrieve_memory\n"
+        f"---\n"
+    )
+
+    body = (
+        f"When working with {domain_name} files in the {project_name} project, "
+        f"search Engram for architectural context:\n\n"
+        f"1. Call mcp__engram__search_memories with query "
+        f"\"{domain_name} architecture patterns decisions\" to find relevant memories\n"
+        f"2. Prefer mcp__engram__retrieve_chunk for specific chunks; only call "
+        f"mcp__engram__retrieve_memory(key=\"{memory_key_value}\") when full context is necessary\n"
+        f"3. Use this architectural context to inform your work — patterns, decisions, and known pitfalls\n\n"
+        f"The authoritative architecture memory for this domain is: `{memory_key_value}`\n"
+    )
+
+    skill_path = skills_root / "SKILL.md"
+    skill_path.write_text(frontmatter + "\n" + body, encoding="utf-8")
+    return skill_path
+
+
+# ── Dry-run statistics ──────────────────────────────────────────────────────
+
+
+def collect_dry_run_stats(project_root: Path, config: dict, domains: dict) -> list[dict]:
+    """
+    Collect dry-run statistics for a set of domains.
+    Returns list of dicts: {domain, files, size_kb, memory_key, existing, skip_reason}
+    Gracefully handles missing chromadb — reports 'unknown' status if memory_manager unavailable.
+    """
+    try:
+        from core.memory_manager import memory_manager
+        has_mm = True
+    except Exception:
+        has_mm = False
+
+    max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
+    project_name = config.get("project_name", project_root.name)
+
+    stats = []
+    for domain_name, domain_config in domains.items():
+        domain_files = collect_domain_files(project_root, domain_config, max_kb)
+        total_kb = sum(f.stat().st_size / 1024 for f in domain_files)
+        key = memory_key(project_name, domain_name)
+
+        existing = None
+        if has_mm:
+            existing = memory_manager.retrieve_memory(key)
+
+        if existing:
+            skip_reason = f"exists (updated {existing.get('updated_at', '?')[:10]})"
+        elif has_mm:
+            skip_reason = "new"
+        else:
+            skip_reason = "new (memory check unavailable)"
+
+        stats.append({
+            "domain": domain_name,
+            "files": len(domain_files),
+            "size_kb": total_kb,
+            "memory_key": key,
+            "existing": existing is not None,
+            "skip_reason": skip_reason,
+        })
+    return stats
+
+
+def print_dry_run_summary(stats: list[dict], mode: str) -> None:
+    """
+    Print a dry-run summary table showing what mapping jobs would be prepared.
+    Implements INDX-16: invocation count + context size visibility.
+    """
+    if not stats:
+        print("\n[dry-run] No domains to process.")
+        return
+
+    total_files = sum(s["files"] for s in stats)
+    total_kb = sum(s["size_kb"] for s in stats)
+    total_invocations = len(stats)
+
+    print(f"\n{'='*60}")
+    print(f"DRY-RUN SUMMARY — mode: {mode}")
+    print(f"{'='*60}")
+    print(f"{'Domain':<20} {'Files':>6} {'Context':>10} {'Status':<30}")
+    print(f"{'-'*20} {'-'*6} {'-'*10} {'-'*30}")
+    for s in stats:
+        status = s["skip_reason"]
+        print(f"{s['domain']:<20} {s['files']:>6} {s['size_kb']:>8.1f}KB {status:<30}")
+    print(f"{'-'*20} {'-'*6} {'-'*10} {'-'*30}")
+    print(f"{'TOTAL':<20} {total_files:>6} {total_kb:>8.1f}KB {total_invocations} agent synthesis task(s)")
+    print(f"{'='*60}")
+    print(f"\nTo proceed: remove --dry-run to prepare an MCP mapping job.")
+    print(f"To map only one domain: add --domain <name>")
+
+
+# ── Domain synthesis + storage ───────────────────────────────────────────────
+
+def index_domain(
+    project_root: Path,
+    config: dict,
+    domain_name: str,
+    domain_config: dict,
+    manifest: dict,
+    force: bool = False,
+    dry_run: bool = False,
+) -> bool:
+    """
+    Backward-compatible helper: prepare one domain for agent-authored mapping.
+
+    Storage now happens through store_codebase_mapping_result after the
+    connected agent synthesizes the architecture markdown.
+    """
+    project_name = config.get("project_name", project_root.name)
+    key = memory_key(project_name, domain_name)
+
+    if dry_run:
+        max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
+        domain_files = collect_domain_files(project_root, domain_config, max_kb)
+        total_kb = sum(f.stat().st_size / 1024 for f in domain_files)
+        print(f"  [dry-run] {domain_name}: {len(domain_files)} files, ~{total_kb:.1f}KB context")
+        return False
+
+    last_run = manifest.get("last_run")
+    if not force and is_manually_edited(key, last_run):
+        print(f"  [skip] {domain_name}: memory manually edited after last run (use --force to override)")
+        return False
+
+    from core.codebase_mapper import codebase_mapping_manager
+
+    payload = codebase_mapping_manager.prepare_mapping(
+        project_root=project_root,
+        mode="bootstrap",
+        domain=domain_name,
+    )
+    print_mapping_job_summary(payload)
+    return payload.get("error") is None
+
+
+# ── Changed-domain detection ─────────────────────────────────────────────────
+
+def find_changed_domains(project_root: Path, config: dict, manifest: dict) -> list[str]:
+    """
+    Compare current file hashes to manifest. Return domain names with any changed files.
+    Also updates manifest['files'] with current hashes for all domain files.
+    """
+    max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
+    changed_domains = []
+    stored_hashes = manifest.get("files", {})
+    new_hashes = {}
+
+    for domain_name, domain_config in config.get("domains", {}).items():
+        domain_changed = False
+        for f in collect_domain_files(project_root, domain_config, max_kb):
+            rel = str(f.relative_to(project_root)).replace("\\", "/")
+            current_hash = sha256_file(f)
+            new_hashes[rel] = current_hash
+            if stored_hashes.get(rel) != current_hash:
+                domain_changed = True
+        if domain_changed:
+            changed_domains.append(domain_name)
+
+    manifest["files"] = new_hashes
+    return changed_domains
+
+
+# ── Mode runners ─────────────────────────────────────────────────────────────
+
+def run_bootstrap(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
+    """Bootstrap: prepare all configured domains for agent-authored mapping."""
+    engram_dir = project_root / ".engram"
+    engram_dir.mkdir(parents=True, exist_ok=True)
+
+    domains = config.get("domains", {})
+    if domain_filter:
+        domains = {k: v for k, v in domains.items() if k == domain_filter}
+        if not domains:
+            print(f"Domain '{domain_filter}' not found in config.")
+            sys.exit(1)
+
+    if dry_run:
+        print(f"Bootstrap: {len(domains)} domain(s) in {project_root.name}")
+        stats = collect_dry_run_stats(project_root, config, domains)
+        print_dry_run_summary(stats, mode="bootstrap")
+        return
+
+    from core.codebase_mapper import codebase_mapping_manager
+
+    print(f"Bootstrap: preparing {len(domains)} domain(s) in {project_root.name}")
+    payload = codebase_mapping_manager.prepare_mapping(
+        project_root=project_root,
+        mode="bootstrap",
+        domain=domain_filter,
+    )
+    print_mapping_job_summary(payload)
+
+
+def flag_memory_stale(key: str, changed_file_count: int, domain_name: str) -> None:
+    """
+    Set potentially_stale=True on a memory's JSON before preparing a refresh.
+    Per D-06: flag first — if mapping stalls later, memory is still correctly flagged.
+    Silently skips if memory does not exist yet (bootstrap case).
+    """
+    try:
+        from core.memory_manager import memory_manager
+        reason = f"{changed_file_count} file{'s' if changed_file_count != 1 else ''} changed in {domain_name} domain"
+        memory_manager.mark_memory_potentially_stale(key, reason=reason)
+    except Exception as e:
+        print(f"  [warn] Could not flag {key} as potentially_stale: {e}", file=sys.stderr)
+
+
+def run_evolve(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
+    """Evolve: prepare only domains with changed files."""
+    engram_dir = project_root / ".engram"
+    engram_dir.mkdir(parents=True, exist_ok=True)
+    manifest = load_manifest(engram_dir)
+
+    changed = find_changed_domains(project_root, config, manifest)
+
+    if domain_filter:
+        changed = [d for d in changed if d == domain_filter]
+
+    if not changed:
+        print("Evolve: no changed domains detected.")
+        if not dry_run:
+            save_manifest(engram_dir, manifest)
+        return
+
+    if dry_run:
+        changed_domains_config = {d: config["domains"][d] for d in changed if d in config["domains"]}
+        stats = collect_dry_run_stats(project_root, config, changed_domains_config)
+        print_dry_run_summary(stats, mode="evolve")
+        return
+
+    print(f"Evolve: preparing {len(changed)} changed domain(s): {', '.join(changed)}")
+    project_name = config.get("project_name", project_root.name)
+    max_kb = config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB)
+    for domain_name in changed:
+        domain_config = config["domains"][domain_name]
+        key = memory_key(project_name, domain_name)
+
+        # Count changed files for stale_reason message
+        domain_files = collect_domain_files(project_root, domain_config, max_kb)
+        changed_count = len(domain_files)  # conservative upper bound
+
+        # D-06: Flag BEFORE synthesis — memory is stale regardless of synthesis outcome
+        flag_memory_stale(key, changed_count, domain_name)
+
+    from core.codebase_mapper import codebase_mapping_manager
+
+    payload = codebase_mapping_manager.prepare_mapping(
+        project_root=project_root,
+        mode="evolve",
+        domain=domain_filter,
+    )
+    print_mapping_job_summary(payload)
+
+
+def run_full(project_root: Path, config: dict, domain_filter: Optional[str], force: bool, dry_run: bool):
+    """Full re-index: prepare every domain for agent-authored mapping."""
+    engram_dir = project_root / ".engram"
+    engram_dir.mkdir(parents=True, exist_ok=True)
+    manifest = load_manifest(engram_dir)
+
+    domains = config.get("domains", {})
+    if domain_filter:
+        domains = {k: v for k, v in domains.items() if k == domain_filter}
+
+    if dry_run:
+        stats = collect_dry_run_stats(project_root, config, domains)
+        print_dry_run_summary(stats, mode="full")
+        return
+
+    from core.codebase_mapper import codebase_mapping_manager
+
+    print(f"Full re-index: preparing {len(domains)} domain(s) in {project_root.name}")
+    payload = codebase_mapping_manager.prepare_mapping(
+        project_root=project_root,
+        mode="full",
+        domain=domain_filter,
+    )
+    print_mapping_job_summary(payload)
+
+
+# ── Git hook installation ───────────────────────────────────────────────────
+
+
+def run_install_hook(project_root: Path) -> None:
+    """
+    Install git post-commit hook at {project_root}/.git/hooks/post-commit.
+    Hook spawns evolve mode as a detached background process after every commit.
+    Hook always exits 0 — commits are NEVER blocked (D-16).
+    Uses absolute venv Python path — no PATH dependency on Windows (D-17).
+    """
+    git_hooks_dir = project_root / ".git" / "hooks"
+    if not git_hooks_dir.exists():
+        print(f"Error: {project_root} does not appear to be a git repository (.git/hooks not found)")
+        sys.exit(1)
+
+    hook_path = git_hooks_dir / "post-commit"
+
+    # Detect venv Python — use absolute path
+    venv_python = Path(sys.executable).resolve()
+    engram_index = Path(__file__).resolve()
+
+    # Shebang requires /c/ path (forward slashes, Git Bash format)
+    # Windows path: C:/Dev/Engram/venv/Scripts/python.exe -> /c/Dev/Engram/venv/Scripts/python.exe
+    venv_python_str = str(venv_python).replace("\\", "/")
+    if len(venv_python_str) >= 2 and venv_python_str[1] == ":":
+        # Convert C:/... to /c/...
+        drive_letter = venv_python_str[0].lower()
+        venv_python_bash = f"/{drive_letter}/{venv_python_str[3:]}"
+    else:
+        venv_python_bash = venv_python_str
+
+    hook_content = HOOK_TEMPLATE.format(
+        venv_python=str(venv_python),      # raw Windows path for subprocess call inside hook
+        engram_index=str(engram_index),
+        project_root=str(project_root),
+    )
+
+    # Replace the shebang line with the bash-format path
+    lines = hook_content.split("\n")
+    lines[0] = f"#!{venv_python_bash}"
+    hook_content = "\n".join(lines)
+
+    hook_path.write_text(hook_content, encoding="utf-8")
+    # Git hooks must be executable; 0o700 keeps access owner-only.
+    os.chmod(hook_path, HOOK_FILE_MODE)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+
+    print(f"Hook installed: {hook_path}")
+    print(f"  Python: {venv_python_bash}")
+    print(f"  Engram: {engram_index}")
+    print(f"  Log: {project_root / '.engram' / 'last_evolve.log'}")
+    print(f"\nThe hook will run evolve mode in the background after each commit.")
+    print(f"Check {project_root / '.engram' / 'last_evolve.log'} to monitor.")
+
+
+# ── CLI argument parser ──────────────────────────────────────────────────────
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Engram Codebase Indexer")
+    p.add_argument("--project", required=True, help="Absolute path to project root")
+    p.add_argument("--mode", choices=["bootstrap", "evolve", "full"],
+                   help="Indexing mode (required unless --init or --install-hook)")
+    p.add_argument("--domain", help="Limit to a single domain name")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Show what mapping jobs would be prepared")
+    p.add_argument("--force", action="store_true",
+                   help="Override manual edit protection and dedup gate")
+    p.add_argument("--init", action="store_true",
+                   help="Run interactive domain setup only (no synthesis)")
+    p.add_argument("--install-hook", action="store_true",
+                   help="Install git post-commit hook in the project")
+    return p
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    project_root = Path(args.project).resolve()
+    if not project_root.exists():
+        print(f"Error: project path does not exist: {project_root}")
+        sys.exit(1)
+
+    # --init: run interactive setup only, then exit
+    if args.init:
+        run_init(project_root)
+        return
+
+    # --install-hook: install git post-commit hook, then exit
+    if args.install_hook:
+        run_install_hook(project_root)
+        return
+
+    # Load config (bootstrap auto-inits if missing per D-07)
+    config = load_project_config(project_root)
+    if config is None:
+        if args.mode == "bootstrap":
+            print("No .engram/config.json found. Running interactive setup first.\n")
+            config = run_init(project_root)
+        else:
+            print(f"Error: no .engram/config.json found in {project_root}. Run --init first.")
+            sys.exit(1)
+
+    if not args.mode:
+        print("Error: --mode is required (bootstrap, evolve, full). Or use --init or --install-hook.")
+        sys.exit(1)
+
+    if args.mode == "bootstrap":
+        run_bootstrap(project_root, config, args.domain, args.force, args.dry_run)
+    elif args.mode == "evolve":
+        run_evolve(project_root, config, args.domain, args.force, args.dry_run)
+    elif args.mode == "full":
+        run_full(project_root, config, args.domain, args.force, args.dry_run)
+
+
+if __name__ == "__main__":
+    main()
