@@ -59,6 +59,29 @@ def _normalize_source_text(source_text: str) -> str:
     return "\n".join(line.strip() for line in source_text.splitlines() if line.strip())
 
 
+def _require_non_blank_string(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} is required")
+    return value
+
+
+def _normalize_optional_string(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    return value
+
+
+def _normalize_budget_chars(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("budget_chars must be an integer")
+    try:
+        return max(100, min(int(value), 15000))
+    except (TypeError, ValueError):
+        raise ValueError("budget_chars must be an integer") from None
+
+
 def _section_key(prefix: str) -> str:
     normalized = prefix.strip().lower().replace("-", "_")
     if normalized == "note":
@@ -150,13 +173,15 @@ class SourceIntakeManager:
         budget_chars: int = 6000,
         pipeline: str = "generic",
     ) -> dict[str, Any]:
-        if not source_text or not source_text.strip():
-            raise ValueError("source_text is required")
-        if not source_type or not source_type.strip():
-            raise ValueError("source_type is required")
+        source_text = _require_non_blank_string(source_text, "source_text")
+        source_type = _require_non_blank_string(source_type, "source_type")
+        source_uri = _normalize_optional_string(source_uri, "source_uri")
+        project = _normalize_optional_string(project, "project")
+        domain = _normalize_optional_string(domain, "domain")
+        pipeline = _normalize_optional_string(pipeline, "pipeline")
 
         pipeline_config = resolve_ingestion_pipeline(pipeline)
-        normalized_budget = max(100, min(int(budget_chars), 15000))
+        normalized_budget = _normalize_budget_chars(budget_chars)
         normalized_source_text = _normalize_source_text(source_text)
         source_digest = _source_hash(source_text)
         draft_id = source_digest

@@ -847,6 +847,17 @@ async def prepare_source_memory(
         )
         _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
         return payload
+    except Exception as e:
+        message = f"Unexpected source intake failure: {e}"
+        payload = {"draft": None, "error": _tool_error("runtime_error", message)}
+        _record_operation_job(
+            operation_type="source_intake",
+            status="failed",
+            result={"source_type": source_type},
+            error=message,
+        )
+        _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
+        return payload
 
 
 @mcp.tool()

@@ -1183,6 +1183,31 @@ def test_prepare_source_memory_tool_returns_draft(monkeypatch):
     assert payload["error"] is None
 
 
+def test_prepare_source_memory_tool_catches_unexpected_intake_failure(monkeypatch):
+    server = load_server_module()
+
+    def fake_prepare_source_memory(**kwargs):
+        raise TypeError("bad source shape")
+
+    monkeypatch.setattr(server.source_intake_manager, "prepare_source_memory", fake_prepare_source_memory)
+
+    payload = asyncio.run(
+        server.prepare_source_memory(
+            source_text="Decision: Keep JSON first.",
+            source_type="transcript",
+            project="C:/Dev/Engram",
+        )
+    )
+
+    assert payload == {
+        "draft": None,
+        "error": {
+            "code": "runtime_error",
+            "message": "Unexpected source intake failure: bad source shape",
+        },
+    }
+
+
 def test_review_helper_tools_return_agent_facing_payloads(tmp_path):
     server = load_server_module()
     source = tmp_path / "note.md"

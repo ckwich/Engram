@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 def test_prepare_source_memory_creates_reviewable_draft(isolated_source_drafts):
     manager = isolated_source_drafts.source_intake_manager
@@ -54,6 +56,21 @@ def test_prepare_source_memory_uses_named_pipeline_sections(isolated_source_draf
     assert "## Insights" in content
     assert "Keep graph expansion opt-in" in content
     assert "transcript" in draft["proposed_memories"][0]["tags"]
+
+
+def test_prepare_source_memory_rejects_invalid_agent_argument_shapes(isolated_source_drafts):
+    manager = isolated_source_drafts.source_intake_manager
+
+    invalid_cases = [
+        {"source_text": {"bad": "shape"}, "source_type": "note"},
+        {"source_text": "Decision: Capture note.", "source_type": {"bad": "shape"}},
+        {"source_text": "Decision: Capture note.", "source_type": "note", "budget_chars": None},
+        {"source_text": "Decision: Capture note.", "source_type": "note", "pipeline": {"bad": "shape"}},
+    ]
+
+    for kwargs in invalid_cases:
+        with pytest.raises(ValueError):
+            manager.prepare_source_memory(**kwargs)
 
 
 def test_source_drafts_are_not_active_memories(isolated_source_drafts):
