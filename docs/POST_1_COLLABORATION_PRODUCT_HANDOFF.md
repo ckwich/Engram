@@ -12,6 +12,11 @@ The gap is that those seams are still described inside the Engram 1.0 operating-
 
 This document fills that gap. It is not an implementation plan. It is the boundary spec future work should start from.
 
+Follow-on planning docs:
+
+- `docs/ENGRAM_1_0_RELEASE_SPEC.md`
+- `docs/COLLABORATION_PRODUCT_PRD.md`
+
 ## Product Boundary Decision
 
 Engram remains a public, generic, local-first agent memory system.
