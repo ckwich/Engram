@@ -112,6 +112,130 @@ def test_get_stats_reports_json_and_chroma_disk_usage(isolated_storage):
     assert stats["storage_size"].endswith((" B", " KB", " MB", " GB", " TB"))
 
 
+def test_rebuild_index_clears_stale_chroma_docs_and_restores_json_chunks(
+    fake_chroma_collection,
+    isolated_storage,
+):
+    mm_module = isolated_storage["mm"]
+    manager = mm_module.memory_manager
+    key = "rebuild-json-source"
+
+    manager.store_memory(
+        key=key,
+        content="# Rebuild Source\n\nThe JSON file is the rebuild source.",
+        tags=["storage"],
+        title="Rebuild JSON Source",
+    )
+    json_path = mm_module._json_path(key)
+    assert json_path.exists()
+
+    fake_chroma_collection.docs.clear()
+    fake_chroma_collection.docs["stale-doc"] = {
+        "id": "stale-doc",
+        "embedding": [1.0, 1.0, 1.0],
+        "document": "stale vector row",
+        "metadata": {"parent_key": "deleted-memory"},
+    }
+
+    rebuilt = manager.rebuild_index()
+
+    assert rebuilt == 1
+    assert "stale-doc" not in fake_chroma_collection.docs
+    assert sorted(fake_chroma_collection.docs) == [mm_module._chunk_doc_id(key, 0)]
+    assert fake_chroma_collection.docs[mm_module._chunk_doc_id(key, 0)]["metadata"]["parent_key"] == key
+
+
+def test_export_import_round_trip_preserves_metadata_and_chunk_references(
+    fake_chroma_collection,
+    isolated_storage,
+):
+    mm_module = isolated_storage["mm"]
+    manager = mm_module.memory_manager
+    key = "round_trip_metadata"
+
+    manager.store_memory(
+        key=key,
+        content="# Round Trip\n\nMetadata should survive export and import.",
+        tags=["storage", "release"],
+        related_to=["upstream-memory"],
+        title="Round Trip Metadata",
+        project="Engram",
+        domain="storage",
+        status="active",
+        canonical=True,
+    )
+    before = manager.retrieve_memory(key)
+    before_doc_ids = sorted(fake_chroma_collection.docs)
+
+    bundle = manager.export_memory_bundle()
+
+    for path in isolated_storage["json_dir"].glob("*.json"):
+        path.unlink()
+    fake_chroma_collection.docs.clear()
+
+    result = manager.import_memory_bundle(bundle)
+    after = manager.retrieve_memory(key)
+
+    assert result["imported_count"] == 1
+    assert result["skipped_count"] == 0
+    assert after is not None
+    for field in [
+        "key",
+        "title",
+        "content",
+        "tags",
+        "related_to",
+        "project",
+        "domain",
+        "status",
+        "canonical",
+        "created_at",
+        "updated_at",
+        "chunk_count",
+    ]:
+        assert after[field] == before[field]
+    assert sorted(fake_chroma_collection.docs) == before_doc_ids
+
+
+def test_repair_memory_metadata_creates_backup_before_json_write(monkeypatch, isolated_storage):
+    mm_module = isolated_storage["mm"]
+    manager = mm_module.memory_manager
+    key = "repair-backup-source"
+    original = {
+        "key": key,
+        "title": "",
+        "content": "# Repair Backup\n\nBody",
+        "tags": "alpha,beta",
+        "related_to": "",
+        "status": "retired",
+        "canonical": "yes",
+        "created_at": "2026-04-20T00:00:00+00:00",
+        "updated_at": "2026-04-20T00:00:00+00:00",
+        "chars": 1,
+        "lines": 99,
+        "chunk_count": 99,
+    }
+    mm_module._json_path(key).write_text(json.dumps(original), encoding="utf-8")
+
+    backup_dir = isolated_storage["json_dir"].parent / "backups" / "metadata_repair"
+    observed: dict[str, object] = {}
+    original_save_json = manager._save_json
+
+    def wrapped_save_json(data, require_existing=False):
+        backups = sorted(backup_dir.glob("*.json"))
+        assert backups, "repair must create a backup before writing normalized JSON"
+        observed["backup_payload"] = json.loads(backups[0].read_text(encoding="utf-8"))
+        return original_save_json(data, require_existing=require_existing)
+
+    monkeypatch.setattr(manager, "_save_json", wrapped_save_json)
+
+    repaired = manager.repair_memory_metadata([key], dry_run=False)
+
+    assert repaired["repaired_count"] == 1
+    assert repaired["repairs"][0]["backup_path"].endswith(".json")
+    assert observed["backup_payload"] == original
+
+
 def test_save_json_replace_is_atomic_for_concurrent_readers(monkeypatch, isolated_storage):
     mm_module = isolated_storage["mm"]
     manager = mm_module.memory_manager

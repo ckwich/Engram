@@ -2981,12 +2981,7 @@ if __name__ == "__main__":
 
     if args.export:
         from datetime import date
-        memories = memory_manager.list_memories()
-        export_list = []
-        for m in memories:
-            full = memory_manager.retrieve_memory(m["key"])
-            if full:
-                export_list.append(full)
+        export_list = memory_manager.export_memory_bundle()
         filename = f"engram_export_{date.today().isoformat()}.json"
         with open(filename, "w", encoding="utf-8") as f:
             f.write(json.dumps(export_list, indent=2, ensure_ascii=False))
@@ -2997,16 +2992,10 @@ if __name__ == "__main__":
         embedder._load()
         with open(args.import_file, "r", encoding="utf-8") as f:
             bundle = json.load(f)
-        count = 0
-        for mem in bundle:
-            memory_manager.store_memory(
-                mem["key"],
-                mem.get("content", ""),
-                mem.get("tags", []),
-                mem.get("title"),
-            )
-            count += 1
-        print(f"Imported {count} memories from {args.import_file}", file=sys.stderr)
+        result = memory_manager.import_memory_bundle(bundle, overwrite=True)
+        print(f"Imported {result['imported_count']} memories from {args.import_file}", file=sys.stderr)
+        if result["skipped_count"]:
+            print(f"Skipped {result['skipped_count']} invalid memories during import.", file=sys.stderr)
         sys.exit(0)
 
     if args.migrate:

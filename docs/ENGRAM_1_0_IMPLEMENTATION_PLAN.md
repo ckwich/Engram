@@ -49,17 +49,17 @@
 
 **Files:**
 - Modify: `core/memory_manager.py`
-- Modify: `tests/test_memory_manager.py` or existing storage-focused tests
+- Modify: `tests/test_storage_invariants.py`, `tests/conftest.py`
 - Modify: `docs/ENGRAM_1_0_RELEASE_SPEC.md`
 - Create or modify: `docs/ENGRAM_1_0_RELEASE_CHECKLIST.md`
 
-- [ ] Trace every write path and confirm JSON is written before Chroma indexing.
-- [ ] Confirm Chroma rebuild from JSON restores searchable chunks.
-- [ ] Confirm import/export preserves required metadata and chunk references.
-- [ ] Confirm metadata repair is dry-run by default and backup-safe before writes.
-- [ ] Confirm graph audit detects malformed edges without loading neighbor memory bodies.
-- [ ] Document exact operator commands in the release checklist.
-- [ ] Run:
+- [x] Trace every write path and confirm JSON is written before Chroma indexing.
+- [x] Confirm Chroma rebuild from JSON restores searchable chunks.
+- [x] Confirm import/export preserves required metadata and chunk references.
+- [x] Confirm metadata repair is dry-run by default and backup-safe before writes.
+- [x] Confirm graph audit detects malformed edges without loading neighbor memory bodies.
+- [x] Document exact operator commands in the release checklist.
+- [x] Run:
 
 ```powershell
 .\venv\Scripts\python.exe server.py --self-test
@@ -67,7 +67,7 @@
 git diff --check
 ```
 
-- [ ] Commit with a message like `test: prove 1.0 storage repair gates`.
+- [x] Commit with a message like `test: prove 1.0 storage repair gates`.
 
 ## Task 3: Source Intake and Lifecycle Governance
 

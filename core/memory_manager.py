@@ -171,6 +171,10 @@ def _json_path(key: str) -> Path:
     return JSON_DIR / f"{_key_hash(key)}.json"
 
 
+def _metadata_repair_backup_dir() -> Path:
+    return JSON_DIR.parent / "backups" / "metadata_repair"
+
+
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
@@ -835,6 +839,33 @@ class MemoryManager:
             print(f"[Engram] Failed to save JSON for key '{data['key']}': {e}", file=sys.stderr)
             raise
 
+    def _write_metadata_repair_backup(self, key: str, raw: dict) -> Path:
+        """Write a best-effort point-in-time JSON backup before metadata repair."""
+        backup_dir = _metadata_repair_backup_dir()
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        backup_path = backup_dir / f"{_key_hash(key)}_{timestamp}.json"
+        fd, temp_name = tempfile.mkstemp(
+            dir=backup_dir,
+            prefix=f"{backup_path.name}.",
+            suffix=".tmp",
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(raw, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            temp_path.replace(backup_path)
+            return backup_path
+        except Exception:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except OSError:
+                pass
+            raise
+
     def _delete_chunks_from_chroma(self, key: str):
         """Remove all existing chunks for a key from ChromaDB.
         Raises on failure so callers can handle sync drift."""
@@ -1387,6 +1418,8 @@ class MemoryManager:
                     repairs.append(entry)
                     continue
 
+                backup_path = self._write_metadata_repair_backup(key, raw)
+                entry["backup_path"] = str(backup_path)
                 self._save_json(repaired, require_existing=True)
                 cleanup_warning = None
                 try:
@@ -1410,6 +1443,69 @@ class MemoryManager:
     async def repair_memory_metadata_async(self, keys: Any, dry_run: bool = True) -> dict:
         """Async wrapper for metadata repair."""
         return await _run_blocking(self.repair_memory_metadata, keys, dry_run)
+
+    def export_memory_bundle(self) -> list[dict]:
+        """Return normalized full-memory JSON records for portable backup/export."""
+        bundle: list[dict] = []
+        for memory in self.list_memories():
+            full = self.retrieve_memory(memory["key"])
+            if full is not None:
+                bundle.append(full)
+        return bundle
+
+    def import_memory_bundle(self, bundle: Any, overwrite: bool = True) -> dict:
+        """
+        Import full-memory JSON records without rewriting content through store_memory().
+
+        This preserves exported metadata and audit-log content while keeping the
+        same JSON-first, Chroma-second ordering as regular writes.
+        """
+        if not isinstance(bundle, list):
+            raise ValueError("import bundle must be a list of memory records")
+
+        imported: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+
+        for index, raw in enumerate(bundle):
+            if not isinstance(raw, dict):
+                skipped.append({"index": index, "reason": "invalid_record"})
+                continue
+
+            key = str(raw.get("key", "")).strip()
+            if not key:
+                skipped.append({"index": index, "reason": "missing_key"})
+                continue
+
+            path = _json_path(key)
+            with self._locked_json_key(key):
+                if path.exists() and not overwrite:
+                    skipped.append({"index": index, "key": key, "reason": "exists"})
+                    continue
+
+                try:
+                    data, chunks = self._repair_memory_record(key, raw)
+                except Exception as e:
+                    skipped.append({"index": index, "key": key, "reason": "invalid_record", "message": str(e)})
+                    continue
+
+                self._save_json(data)
+                try:
+                    self._delete_chunks_from_chroma(key)
+                except Exception as e:
+                    print(
+                        f"[Engram] WARNING: Failed to delete old chunks for imported '{key}': {e}. "
+                        f"Stale chunks may remain until next rebuild_index.",
+                        file=sys.stderr,
+                    )
+                self._index_chunks(key, chunks, data)
+                imported.append({"index": index, "key": key, "chunk_count": len(chunks)})
+
+        return {
+            "imported_count": len(imported),
+            "skipped_count": len(skipped),
+            "imported": imported,
+            "skipped": skipped,
+        }
 
     def _prepare_store(
         self,

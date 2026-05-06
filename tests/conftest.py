@@ -56,6 +56,12 @@ class FakeChromaCollection:
 
         if where is not None:
             parent_key = where.get("parent_key")
+            if isinstance(parent_key, dict) and "$ne" in parent_key:
+                return [
+                    doc
+                    for doc in self.docs.values()
+                    if doc["metadata"].get("parent_key") != parent_key["$ne"]
+                ]
             return [
                 doc
                 for doc in self.docs.values()

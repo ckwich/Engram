@@ -106,13 +106,15 @@ Acceptance gates:
 
 Purpose: prove local data can survive index drift, import/export, repair, and release upgrades.
 
+Status: implemented in Track 2 branch on 2026-05-06. Release operator commands live in `docs/ENGRAM_1_0_RELEASE_CHECKLIST.md`.
+
 Required outcomes:
 
 - Audit JSON-first/Chroma-second storage paths and tests.
-- Add or confirm backup-before-repair behavior for destructive or schema-affecting operations.
-- Confirm import/export round trips preserve required memory metadata.
-- Confirm Chroma rebuild from JSON restores searchable chunks.
-- Confirm graph audits can detect malformed edges without loading full memory bodies.
+- Add or confirm backup-before-repair behavior for destructive or schema-affecting operations. Metadata repair now writes a pre-repair backup before normalized JSON is saved.
+- Confirm import/export round trips preserve required memory metadata. Import now preserves full exported JSON records instead of rewriting through `store_memory()`.
+- Confirm Chroma rebuild from JSON restores searchable chunks and clears stale vector rows.
+- Confirm graph audits can detect malformed edges without loading full memory bodies; graph audit remains edge-record-only.
 - Confirm metadata repair stays dry-run by default and preserves JSON-first ordering when applied.
 
 Acceptance gates:
