@@ -105,13 +105,13 @@ Agents should always start at tier 1 and escalate only when needed.
 - [x] Export/import (JSON bundle)
 - [x] Stats endpoint (total memories, total chunks, index size)
 
-## v0.4 — Polish and Reliability
+## v0.4 — Polish and Reliability (complete)
 
 ### Webui Fixes
-- [ ] Fix JSON serialization bug in dashboard edit/create form — special
+- [x] Fix JSON serialization bug in dashboard edit/create form — special
       characters (backticks, dashes, angle brackets) in content field break
       JSON.parse on submit. Properly escape content before POST.
-- [ ] Remove hardcoded character limit on content textarea in the dashboard
+- [x] Remove hardcoded character limit on content textarea in the dashboard
       form — the 15K limit is enforced server-side, the UI shouldn't
       silently truncate or error before submission.
 
@@ -158,11 +158,37 @@ Agents should always start at tier 1 and escalate only when needed.
 - [x] Add MCP/WebUI retrieval eval surfaces backed by the deterministic reliability harness.
 - [x] Add static workflow templates for common agent flows such as repo resume, source decision extraction, brownfield mapping, and retrieval quality review.
 
+## Engram 1.0 — Finish Line
+
+Engram 1.0 is the public, generic, local-first memory substrate release. The separate collaboration product should build on Engram through stable adapters, not inside this repository.
+
+Tracked planning docs:
+
+- `docs/ENGRAM_1_0_RELEASE_SPEC.md` — binding Engram 1.0 scope, invariants, release tracks, and validation gate.
+- `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md` — execution plan for finishing 1.0 in small, validated commits.
+- `docs/ENGRAM_1_0_TRACK_0_AUDIT.md` — repo/branch hygiene audit and evidence.
+- `docs/POST_1_COLLABORATION_PRODUCT_HANDOFF.md` — boundary handoff for the separate collaboration product.
+- `docs/COLLABORATION_PRODUCT_PRD.md` — draft PRD for that separate product.
+
+Current release tracks:
+
+- [x] Track 0: repo and branch hygiene audit; local `main` has been fast-forwarded to the planning/audit branch.
+- [ ] Track 1: freeze MCP/tool/data contracts, version identity, docstrings, README tables, and alias behavior.
+- [ ] Track 2: prove storage rebuild, import/export, backup/repair, JSON-first/Chroma-second ordering, and graph audit readiness.
+- [ ] Track 3: harden source intake, lifecycle metadata, stale exclusion, and explicit draft promotion.
+- [ ] Track 4: finish WebUI 1.0 review/operations surfaces without turning the dashboard into the collaboration app.
+- [ ] Track 5: expand agent reliability evaluation coverage for source intake, graph-aware context, stale exclusion, hybrid lookup, and codebase mapping.
+- [ ] Track 6: publish release docs, checklist, migration notes, AGENTS.md updates, and public README 1.0 framing.
+
+1.0 does not include multi-user workspaces, permissions, comments, assignments, mentions, or rich collaboration pages. Those belong to the separate collaboration product.
+
 ## Key Decisions
 - **ChromaDB over SQLite FTS:** Real cosine similarity, not substring matching
-- **JSON backing store:** Survives ChromaDB corruption, human-readable, portable
+- **JSON-first / Chroma-second storage:** JSON files are authoritative and portable; ChromaDB is a rebuildable semantic index.
 - **Graph backend seam before graph DB:** Keep JSON graph edges local-first now, but isolate persistence behind GraphStore so a future graph database can import the same edge contract.
 - **Local embeddings only:** No API cost, no privacy exposure, works offline
 - **No automatic memory writes from agents:** Agents must explicitly call `store_memory`. No surprise writes.
 - **Review helpers stay no-write:** Chunk preview, source connector preview, workflow templates, and pipeline listing must never promote active memories.
 - **Hybrid retrieval is opt-in:** Exact lexical/identifier scoring is useful for code and game-dev symbols, but semantic mode remains the default to avoid unnecessary ranking drift.
+- **Token-proportional retrieval:** Agents should prefer search snippets, chunks, and context packs before full memory reads.
+- **Provider-neutral synthesis:** Codebase mapping prepares bounded context and source receipts; the connected agent performs synthesis.

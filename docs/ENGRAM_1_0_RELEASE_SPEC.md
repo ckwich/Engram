@@ -1,7 +1,8 @@
 # Engram 1.0 Release Spec
 
 Date: 2026-05-05
-Status: Draft for implementation planning
+Updated: 2026-05-06
+Status: Active execution spec
 Scope: Public Engram core release readiness, contract freeze, reliability hardening, and collaboration substrate seams
 
 ## Purpose
@@ -20,7 +21,7 @@ The shared program has two products and one integration contract:
 
 Recommended sequence:
 
-1. Finish and publish the current Engram planning branch.
+1. Finish and publish the current Engram planning branch. Local merge to `main` is complete as of 2026-05-06; remote publication remains a release-management step.
 2. Bring Engram to 1.0 with contract, storage, source-intake, graph, WebUI, docs, and release gates.
 3. Start the collaboration product in a separate repo/project with its own auth, workspace, and UI architecture.
 4. Build the first collaboration vertical slice as a thin app over stable Engram calls: source intake -> cited draft -> human review -> explicit memory promotion.
@@ -64,10 +65,12 @@ The release should feel boring in the best way: stable contracts, recoverable st
 
 Purpose: start 1.0 work from a clean public baseline.
 
+Status: locally complete on 2026-05-06. `main` was fast-forwarded to `codex/collaboration-product-handoff-spec`. The local branch is ahead of `origin/main`; push/PR publication is still an operator decision.
+
 Required outcomes:
 
-- Decide whether to push local `main` with `4e6b6881 Harden source intake tool errors`.
-- Decide whether to merge or PR `codex/collaboration-product-handoff-spec`.
+- Publish local `main` when ready; it now includes `4e6b6881 Harden source intake tool errors` plus tracked 1.0/collaboration planning docs.
+- Keep `codex/collaboration-product-handoff-spec` as historical branch context or delete it after remote publication.
 - Keep ignored `docs/superpowers/` planning artifacts out of public commits unless the repo intentionally changes that policy.
 - Keep any release-planning docs in tracked `docs/`.
 - Preserve existing unrelated worktrees and branches unless a cleanup request is explicit.
@@ -143,8 +146,8 @@ Purpose: make the local dashboard a trustworthy review and operations surface wi
 
 Required outcomes:
 
-- Fix the existing dashboard JSON serialization bug in create/edit forms.
-- Remove or align the hardcoded textarea character limit with server-side validation.
+- Keep the dashboard create/edit form JSON-safe for special characters and multiline markdown.
+- Keep the dashboard content textarea aligned with server-side validation; do not reintroduce client-side silent truncation.
 - Preserve exposed-host auth requirements, write-token mutation protection, host/origin checks, request body limits, throttling, security headers, and CSP without unsafe inline script/style.
 - Surface source draft review, graph relationship browsing, retrieval receipt inspection, health/self-test status, stale warnings, and storage stats only as local Engram surfaces.
 - Keep WebUI logic calling core managers rather than becoming the domain layer.

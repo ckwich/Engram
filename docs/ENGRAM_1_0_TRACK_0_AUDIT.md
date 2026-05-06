@@ -1,6 +1,7 @@
 # Engram 1.0 Track 0 Release-Readiness Audit
 
 Date: 2026-05-05
+Updated: 2026-05-06
 Branch: `codex/collaboration-product-handoff-spec`
 Scope: Repo hygiene, public baseline readiness, release-planning drift, MCP visibility, and 1.0 validation evidence.
 
@@ -34,6 +35,10 @@ A PR from this branch to `origin/main` would mix a runtime hardening fix with pr
 Recommended action:
 
 Publish or merge `4e6b6881 Harden source intake tool errors` to `origin/main` first, then rebase or recreate the planning branch on the updated public baseline. After that, keep the 1.0/collaboration planning docs as their own branch or PR.
+
+Resolution update, 2026-05-06:
+
+Local `main` was fast-forwarded from `4e6b6881` to `253de9c8`, bringing in the 1.0/collaboration planning docs and this audit. `main` is now ahead of `origin/main`; remote publication is still pending.
 
 ### P2: Public version identity is stale for a 1.0 release track
 
@@ -111,7 +116,7 @@ Commands run from `C:\Dev\Engram`:
 
 Do Track 0 cleanup before Track 1 contract freeze:
 
-1. Push or merge the already-validated `4e6b6881` source-intake hardening commit to `origin/main`.
-2. Rebase or recreate `codex/collaboration-product-handoff-spec` so the planning branch contains only tracked planning docs.
-3. Update `plan.md` to remove stale v0.4 open items and point to the 1.0 release spec plus the separate collaboration PRD.
+1. Publish local `main` when ready; it now contains `4e6b6881` plus the tracked planning/audit docs.
+2. Keep or delete `codex/collaboration-product-handoff-spec` after remote publication.
+3. Use `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md` as the next execution plan.
 4. Start Track 1 with a focused MCP/tool contract inventory: `memory_protocol()`, README tool tables, `server.py` docstrings, alias behavior, and return shapes.

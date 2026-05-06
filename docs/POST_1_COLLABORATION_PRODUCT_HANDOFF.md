@@ -1,6 +1,7 @@
 # Post-1.0 Collaboration Product Handoff
 
 Date: 2026-05-05
+Updated: 2026-05-06
 Status: Draft handoff for future product planning
 Scope: Product boundary between public Engram core and a separate collaboration application built on top of Engram
 
@@ -15,6 +16,7 @@ This document fills that gap. It is not an implementation plan. It is the bounda
 Follow-on planning docs:
 
 - `docs/ENGRAM_1_0_RELEASE_SPEC.md`
+- `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md`
 - `docs/COLLABORATION_PRODUCT_PRD.md`
 
 ## Product Boundary Decision
@@ -215,7 +217,8 @@ Recommended starting packet:
 
 - Create a new project/repo for the collaboration app.
 - Copy this boundary document into that project's planning docs or link back to this public spec.
-- Write a product PRD that starts from the separate-app decision instead of debating whether Engram should absorb collaboration.
+- Use `docs/COLLABORATION_PRODUCT_PRD.md` as the starting PRD and update it in the new product repo.
+- Wait for Engram Track 1 contract freeze before treating the Engram adapter surface as stable.
 - Define the first user workflow as a thin vertical slice over Engram's existing contracts.
 - Choose the auth and tenant model before building comments, assignments, or shared pages.
 - Treat the first Engram integration as an adapter with tests, not as direct filesystem access.

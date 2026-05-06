@@ -491,6 +491,20 @@ python server.py --rebuild-index
 
 ---
 
+## Roadmap
+
+Engram is moving toward a 1.0 release focused on the public, generic, local-first memory substrate: MCP contracts, JSON-first storage, source intake, graph relationships, retrieval receipts, reliability gates, WebUI review surfaces, and release documentation.
+
+The team collaboration product is planned separately. Engram will provide the memory substrate and adapter contracts; workspaces, rich pages, comments, assignments, mentions, role-aware visibility, and team workflow UI belong outside this repository.
+
+Planning docs:
+
+- `docs/ENGRAM_1_0_RELEASE_SPEC.md`
+- `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md`
+- `docs/COLLABORATION_PRODUCT_PRD.md`
+
+---
+
 ## Development
 
 Install dev dependencies:

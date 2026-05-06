@@ -1,7 +1,8 @@
 # Collaboration Product PRD
 
 Date: 2026-05-05
-Status: Draft PRD for separate product planning
+Updated: 2026-05-06
+Status: Draft PRD for separate product planning after Engram 1.0 contract freeze
 Scope: A team collaboration application built on top of Engram as a memory substrate
 
 ## Purpose
@@ -20,7 +21,7 @@ The shared program has two products and one integration contract:
 
 Recommended sequence:
 
-1. Finish and publish the current Engram planning branch.
+1. Finish and publish the current Engram planning branch. Local merge to `main` is complete as of 2026-05-06; remote publication remains an operator step.
 2. Bring Engram to 1.0 with contract, storage, source-intake, graph, WebUI, docs, and release gates.
 3. Start the collaboration product in a separate repo/project with its own auth, workspace, and UI architecture.
 4. Build the first collaboration vertical slice as a thin app over stable Engram calls: source intake -> cited draft -> human review -> explicit memory promotion.
@@ -121,6 +122,13 @@ Engram context-pack, operation, or usage metadata that explains what context was
 ## Engram Integration Contract
 
 The app should use an adapter layer, not direct filesystem access.
+
+Pre-build dependency:
+
+- Engram Track 1 must freeze the MCP/tool contract that the adapter relies on.
+- Engram Track 2 must prove storage rebuild and repair behavior so app promotion failures are recoverable.
+- Engram Track 3 must keep source intake draft-first and explicit-promotion only.
+- Engram Track 5 must make retrieval receipts and citations reliable enough to display in review UI.
 
 Required adapter capabilities:
 
@@ -250,4 +258,4 @@ Success criteria:
 
 ## Implementation Planning Notes
 
-Start this product in a new repository or project root. The first implementation plan should build the adapter, workspace/project shell, source item model, draft review model, and one Engram-backed promotion flow. Do not implement rich pages, comments beyond draft discussion, or assignments beyond draft ownership until the source-to-reviewed-memory loop works end to end.
+Start this product in a new repository or project root after Engram 1.0 Track 1 is stable enough to anchor the adapter. The first implementation plan should build the adapter, workspace/project shell, source item model, draft review model, and one Engram-backed promotion flow. Do not implement rich pages, comments beyond draft discussion, or assignments beyond draft ownership until the source-to-reviewed-memory loop works end to end.
