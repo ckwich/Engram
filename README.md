@@ -106,6 +106,10 @@ context_pack(
 
 Engram exposes structured MCP tools first. Text wrappers remain available for older clients, but new integrations should prefer the structured tools.
 
+Product release identity and protocol identity are intentionally separate:
+`memory_protocol()` reports product version `1.0.0-dev`, protocol `version: 2`,
+and protocol `schema_version: "2026-04-27"`.
+
 ### Discovery and Retrieval
 
 | Tool | Purpose |
@@ -167,7 +171,38 @@ Engram exposes structured MCP tools first. Text wrappers remain available for ol
 | `retrieval_eval` | Run deterministic retrieval-quality checks. |
 | `list_workflow_templates` | List built-in agent workflow recipes. |
 
-Compatibility wrappers include `search_memories_text`, `retrieve_chunk_text`, `retrieve_memory_text`, `list_all_memories`, `get_related_memories_text`, and `get_stale_memories_text`.
+### Codebase Mapping
+
+| Tool | Purpose |
+|---|---|
+| `read_codebase_mapping_config` | Read a repo mapping config when one exists. |
+| `draft_codebase_mapping_config` | Draft a safe `.engram/config.json` without writing it. |
+| `store_codebase_mapping_config` | Validate and write `.engram/config.json` with overwrite protection. |
+| `preview_codebase_mapping` | Dry-run configured mapping domains without storing a job. |
+| `prepare_codebase_mapping` | Prepare source-hashed, bounded repo context for agent synthesis. |
+| `read_codebase_mapping_context` | Read one prepared mapping job context part. |
+| `store_codebase_mapping_result` | Store an agent-authored mapping result with source-drift checks. |
+| `install_codebase_mapping_hook` | Install the optional post-commit mapping hook after explicit intent. |
+
+### Operations
+
+| Tool | Purpose |
+|---|---|
+| `list_operation_jobs` | List recent local operation/job receipts. |
+| `list_operation_events` | List recent local operation event records. |
+
+### Compatibility Text Wrappers
+
+| Tool | Purpose |
+|---|---|
+| `search_memories_text` | Legacy text wrapper for memory search. |
+| `retrieve_chunk_text` | Legacy text wrapper for one chunk. |
+| `retrieve_memory_text` | Legacy text wrapper for full-memory retrieval. |
+| `list_all_memories` | Legacy text wrapper for listing memory metadata. |
+| `get_related_memories_text` | Legacy text wrapper for related-memory links. |
+| `get_stale_memories_text` | Legacy text wrapper for stale-memory review. |
+
+Compatibility wrappers remain for older clients. New integrations should prefer the structured tools above.
 
 ---
 

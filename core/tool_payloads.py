@@ -20,8 +20,16 @@ class ProgressiveDiscoveryPayload(TypedDict):
     load_next: dict[str, str]
 
 
+class ProductPayload(TypedDict):
+    name: str
+    version: str
+    release_track: str
+    stability: str
+
+
 class MemoryProtocolPayload(TypedDict):
     name: str
+    product: ProductPayload
     version: int
     schema_version: str
     stability: dict[str, str]

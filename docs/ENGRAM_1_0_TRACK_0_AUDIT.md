@@ -44,8 +44,7 @@ Local `main` was fast-forwarded from `4e6b6881` to `253de9c8`, bringing in the 1
 
 Evidence:
 
-- `server.py:3` still says `Engram v0.1 - MCP Server`.
-- `server.py:2859` still uses argparse description `Engram v0.1 - Semantic Memory MCP Server`.
+- Earlier Track 0 audit found the module docstring and CLI argparse description still using the old v0.1 product identity.
 - `memory_protocol()` reports protocol `version: 2` and `schema_version: 2026-04-27`, while the release spec now targets Engram 1.0 readiness.
 
 Impact:
@@ -55,6 +54,10 @@ The runtime contract has moved far beyond v0.1, but public CLI/module identity s
 Recommended action:
 
 Track this under Release Track 1 or Track 6. Decide the canonical version source, update CLI/module/docs consistently, and keep protocol schema version separate from product release version.
+
+Resolution update, 2026-05-06:
+
+Track 1 chose product version `1.0.0-dev` for the 1.0 development line while preserving MCP protocol `version: 2` and `schema_version: "2026-04-27"`. `server.py`, `memory_protocol()`, README, and release docs now use that split identity.
 
 ### P2: `plan.md` contains stale open work relative to the live WebUI
 

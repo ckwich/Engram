@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Engram v0.1 — MCP Server
+Engram 1.0.0-dev — MCP Server
 Provides semantic memory tools to AI agents via the Model Context Protocol.
 
 Three-tier retrieval pattern (agents should follow this):
@@ -52,6 +52,12 @@ from core.workflow_templates import list_workflow_templates as build_workflow_te
 
 mcp = FastMCP("engram")
 session_pin_store = SessionPinStore()
+PRODUCT_NAME = "Engram"
+PRODUCT_VERSION = "1.0.0-dev"
+PRODUCT_RELEASE_TRACK = "1.0"
+PRODUCT_STABILITY = "development"
+PROTOCOL_VERSION = 2
+PROTOCOL_SCHEMA_VERSION = "2026-04-27"
 DEFAULT_SSE_HOST = "127.0.0.1"
 _USAGE_METERING_ENABLED: ContextVar[bool] = ContextVar(
     "engram_usage_metering_enabled",
@@ -333,8 +339,14 @@ async def memory_protocol() -> MemoryProtocolPayload:
     """
     return {
         "name": "Engram memory protocol",
-        "version": 2,
-        "schema_version": "2026-04-27",
+        "product": {
+            "name": PRODUCT_NAME,
+            "version": PRODUCT_VERSION,
+            "release_track": PRODUCT_RELEASE_TRACK,
+            "stability": PRODUCT_STABILITY,
+        },
+        "version": PROTOCOL_VERSION,
+        "schema_version": PROTOCOL_SCHEMA_VERSION,
         "stability": {
             "memory_protocol": "stable",
             "search_memories": "stable",
@@ -383,6 +395,32 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "stability": "stable",
                 "cost_class": "write",
                 "tools": ["prepare_memory", "store_memory", "write_memory"],
+            },
+            "memory_review": {
+                "purpose": "Inspect duplicate risk, metadata suggestions, validation, related memories, and stale memories.",
+                "stability": "stable",
+                "cost_class": "low",
+                "tools": [
+                    "check_duplicate",
+                    "suggest_memory_metadata",
+                    "validate_memory",
+                    "update_memory_metadata",
+                    "get_related_memories",
+                    "get_stale_memories",
+                    "delete_memory",
+                ],
+            },
+            "session_pins": {
+                "purpose": "Temporarily promote known memory keys within a client session.",
+                "stability": "beta",
+                "cost_class": "low",
+                "tools": ["pin_memory", "unpin_memory", "list_pins", "clear_pins"],
+            },
+            "metadata_governance": {
+                "purpose": "Audit and dry-run-first repair memory metadata without loading full memory bodies.",
+                "stability": "beta",
+                "cost_class": "low-to-write",
+                "tools": ["audit_memory_metadata", "repair_memory_metadata"],
             },
             "graph": {
                 "purpose": "Inspect typed relationships without loading neighbor bodies.",
@@ -442,6 +480,19 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "cost_class": "low",
                 "tools": ["list_operation_jobs", "list_operation_events"],
             },
+            "compatibility_text": {
+                "purpose": "Legacy text-returning wrappers for older MCP clients; prefer structured tools for new integrations.",
+                "stability": "legacy",
+                "cost_class": "varies",
+                "tools": [
+                    "search_memories_text",
+                    "retrieve_chunk_text",
+                    "retrieve_memory_text",
+                    "list_all_memories",
+                    "get_related_memories_text",
+                    "get_stale_memories_text",
+                ],
+            },
         },
         "progressive_discovery": {
             "start_here": "memory_protocol",
@@ -474,11 +525,24 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "retrieve_memory": "Structured full-memory retrieval; token-expensive.",
             "store_memory": "Write or update a memory.",
             "prepare_memory": "Draft key/metadata/validation before storing.",
+            "check_duplicate": "Preview semantic duplicate risk without writing.",
+            "suggest_memory_metadata": "Suggest key, title, tags, and metadata from content.",
+            "validate_memory": "Validate a proposed memory payload before storing.",
+            "update_memory_metadata": "Update memory metadata without rewriting content.",
+            "get_related_memories": "Traverse explicit related_to links without loading unrelated bodies.",
+            "get_stale_memories": "Surface stale or potentially stale memories.",
+            "delete_memory": "Delete a memory intentionally by key.",
+            "read_codebase_mapping_config": "Read a repo .engram/config.json when present.",
             "draft_codebase_mapping_config": "Draft a safe .engram/config.json for a repo without writing it.",
             "store_codebase_mapping_config": "Validate and write a repo .engram/config.json with overwrite protection.",
             "preview_codebase_mapping": "Dry-run configured mapping domains without writing a mapping job.",
             "prepare_codebase_mapping": "Scan a configured repo and prepare source-hashed, bounded context jobs for the connected agent to synthesize.",
+            "read_codebase_mapping_context": "Read a prepared mapping job context part for agent synthesis.",
+            "store_codebase_mapping_result": "Store an agent-authored mapping result after source-drift checks.",
+            "install_codebase_mapping_hook": "Install the optional post-commit mapping hook after explicit intent.",
             "usage_summary": "Engram-attributed token estimate rollups; not billed model usage.",
+            "list_operation_jobs": "List recent local operation/job receipts.",
+            "list_operation_events": "List recent local operation event records.",
         },
         "aliases": {
             "find_memories": "search_memories",
@@ -2856,7 +2920,7 @@ async def delete_memory(key: str) -> str:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Engram v0.1 — Semantic Memory MCP Server")
+    parser = argparse.ArgumentParser(description=f"{PRODUCT_NAME} {PRODUCT_VERSION} — Semantic Memory MCP Server")
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse"],
@@ -2984,7 +3048,7 @@ if __name__ == "__main__":
         embedder._load()
         memory_manager._ensure_initialized()
         report = run_agent_reliability_harness(memory_manager)
-        print(json.dumps(report, indent=2, ensure_ascii=False))
+        sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
         sys.exit(0 if report["summary"]["status"] == "pass" else 1)
 
     if args.self_test:
@@ -3236,7 +3300,7 @@ if __name__ == "__main__":
                 }
             }
         }
-        print(json.dumps(config, indent=2))
+        sys.stdout.write(json.dumps(config, indent=2) + "\n")
         sys.exit(0)
 
     # Pre-load everything before accepting connections so no blocking init

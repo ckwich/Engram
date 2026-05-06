@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import re
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_server_module():
@@ -16,6 +21,12 @@ def test_memory_protocol_describes_agent_retrieval_contract():
     payload = asyncio.run(server.memory_protocol())
 
     assert payload["name"] == "Engram memory protocol"
+    assert payload["product"] == {
+        "name": "Engram",
+        "version": "1.0.0-dev",
+        "release_track": "1.0",
+        "stability": "development",
+    }
     assert payload["version"] == 2
     assert [step["tool"] for step in payload["retrieval_ladder"]] == [
         "search_memories",
@@ -63,6 +74,34 @@ def test_memory_protocol_marks_new_v06_surfaces_as_beta_or_stable():
     assert payload["tool_groups"]["source_intake"]["stability"] == "beta"
     assert payload["tool_groups"]["usage"]["stability"] == "beta"
     assert payload["tool_groups"]["operations"]["stability"] == "beta"
+
+
+def test_readme_mcp_tool_table_covers_protocol_tools():
+    server = load_server_module()
+    payload = asyncio.run(server.memory_protocol())
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    listed_tools = set(re.findall(r"\| `([^`]+)` \|", readme))
+
+    protocol_tools = set(payload["aliases"])
+    protocol_tools.update(payload["canonical_tools"])
+    for group in payload["tool_groups"].values():
+        protocol_tools.update(group["tools"])
+
+    missing = sorted(protocol_tools - listed_tools)
+
+    assert missing == []
+
+
+def test_mcp_contract_doc_covers_server_tools():
+    server_source = (REPO_ROOT / "server.py").read_text(encoding="utf-8")
+    contract_doc = (REPO_ROOT / "docs" / "ENGRAM_1_0_MCP_CONTRACT.md").read_text(
+        encoding="utf-8"
+    )
+    decorated_tools = set(re.findall(r"@mcp\.tool\(\)\s+async def ([a-zA-Z_][a-zA-Z0-9_]*)\(", server_source))
+
+    missing = sorted(tool for tool in decorated_tools if f"`{tool}`" not in contract_doc)
+
+    assert missing == []
 
 
 def test_search_memories_uses_structured_path_when_filters_are_supplied(monkeypatch):

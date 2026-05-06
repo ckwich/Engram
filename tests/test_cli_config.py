@@ -51,6 +51,21 @@ def test_help_documents_agent_reliability_eval():
     assert "Run deterministic agent reliability harness" in result.stdout
 
 
+def test_help_uses_current_product_version_identity():
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "server.py"), "--help"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+
+    combined_output = result.stdout + result.stderr
+
+    assert "Engram 1.0.0-dev — Semantic Memory MCP Server" in result.stdout
+    assert "Engram v0.1" not in combined_output
+
+
 def test_codebase_indexer_dry_run_is_agent_native(tmp_path):
     project = tmp_path / "example_game_0"
     (project / ".engram").mkdir(parents=True)

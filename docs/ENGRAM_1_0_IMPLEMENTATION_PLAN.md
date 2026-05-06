@@ -27,14 +27,15 @@
 - Modify: `README.md`
 - Modify: `AGENTS.md`
 - Modify: `docs/ENGRAM_1_0_RELEASE_SPEC.md`
-- Test: `tests/test_server_structured_tools.py`
+- Create: `docs/ENGRAM_1_0_MCP_CONTRACT.md`
+- Test: `tests/test_agent_protocol_tools.py`, `tests/test_cli_config.py`, `tests/test_server_structured_tools.py`
 
-- [ ] Inventory every MCP tool and alias from `memory_protocol()` and `server.py`.
-- [ ] Decide the product version string for the 1.0 release and keep it separate from protocol schema version.
-- [ ] Replace stale user-facing `Engram v0.1` strings with the chosen release identity.
-- [ ] Verify tool docstrings match real behavior for retrieval, writing, source intake, graph, codebase mapping, usage, operations, and eval tools.
-- [ ] Add or update focused tests for alias behavior where gaps are found.
-- [ ] Run:
+- [x] Inventory every MCP tool and alias from `memory_protocol()` and `server.py`.
+- [x] Decide the product version string for the 1.0 release and keep it separate from protocol schema version.
+- [x] Replace stale user-facing legacy version strings with the chosen release identity.
+- [x] Verify tool docstrings match real behavior for retrieval, writing, source intake, graph, codebase mapping, usage, operations, and eval tools.
+- [x] Add or update focused tests for alias behavior where gaps are found.
+- [x] Run:
 
 ```powershell
 .\venv\Scripts\python.exe server.py --help
@@ -42,7 +43,7 @@
 .\venv\Scripts\python.exe server.py --agent-eval
 ```
 
-- [ ] Commit with a message like `docs: freeze 1.0 MCP contract`.
+- [x] Commit with a message like `docs: freeze 1.0 MCP contract`.
 
 ## Task 2: Storage, Rebuild, and Repair Proof
 

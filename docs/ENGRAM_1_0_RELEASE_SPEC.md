@@ -85,9 +85,11 @@ Acceptance gates:
 
 Purpose: make the MCP and data contracts dependable for agents, clients, and the future collaboration adapter.
 
+Product/protocol identity decision: the 1.0 development release reports product version `1.0.0-dev`. The MCP protocol remains a separate agent contract with `version: 2` and `schema_version: "2026-04-27"` until an explicit protocol migration is required.
+
 Required outcomes:
 
-- Inventory every MCP tool, alias, return shape, schema version, and stability tier.
+- Inventory every MCP tool, alias, return shape, schema version, and stability tier in `docs/ENGRAM_1_0_MCP_CONTRACT.md`.
 - Mark stable, beta, and experimental surfaces clearly in `memory_protocol()`.
 - Ensure `server.py` tool docstrings match real behavior, especially retrieval ladder, no-write helpers, draft promotion, graph traversal, and token/receipt expectations.
 - Freeze the context-pack receipt fields or write migration notes for any field that remains beta.
