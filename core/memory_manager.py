@@ -21,6 +21,7 @@ cannot exhaust the default executor and block other async work.
 from __future__ import annotations
 
 import asyncio
+import atexit
 from contextlib import contextmanager
 import hashlib
 import json
@@ -29,6 +30,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
@@ -67,6 +69,140 @@ JSON_DIR = PROJECT_ROOT / "data" / "memories"
 CHROMA_DIR = PROJECT_ROOT / "data" / "chroma"
 JSON_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+CHROMA_PROCESS_LOCK_PATH = PROJECT_ROOT / "data" / "chroma.lock"
+CHROMA_OWNER_LOCK_PATH = PROJECT_ROOT / "data" / "chroma.owner.lock"
+CHROMA_PROCESS_LOCK_TIMEOUT = float(os.environ.get("ENGRAM_CHROMA_LOCK_TIMEOUT", "45"))
+CHROMA_PROCESS_LOCK_POLL_SECONDS = float(os.environ.get("ENGRAM_CHROMA_LOCK_POLL_SECONDS", "0.05"))
+CHROMA_PROCESS_LOCK_STALE_SECONDS = float(os.environ.get("ENGRAM_CHROMA_LOCK_STALE_SECONDS", "300"))
+_chroma_owner_guard = threading.Lock()
+_chroma_owner_handle = None
+_chroma_owner_registered = False
+_chroma_disabled_reason: str | None = None
+
+
+def _prepare_lock_file(lock_path: Path):
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"0")
+        handle.flush()
+        os.fsync(handle.fileno())
+    handle.seek(0)
+    return handle
+
+
+def _try_lock_handle(handle) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_handle(handle) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _release_chroma_owner() -> None:
+    global _chroma_owner_handle
+    with _chroma_owner_guard:
+        handle = _chroma_owner_handle
+        _chroma_owner_handle = None
+    if handle is None:
+        return
+    try:
+        _unlock_handle(handle)
+    except OSError:
+        pass
+    try:
+        handle.close()
+    except OSError:
+        pass
+
+
+def _ensure_chroma_owner() -> bool:
+    """Claim the single-process Chroma owner slot for this Engram process."""
+    global _chroma_disabled_reason, _chroma_owner_handle, _chroma_owner_registered
+    with _chroma_owner_guard:
+        if _chroma_owner_handle is not None:
+            return True
+
+        handle = _prepare_lock_file(Path(CHROMA_OWNER_LOCK_PATH))
+        try:
+            _try_lock_handle(handle)
+        except OSError:
+            handle.close()
+            _chroma_disabled_reason = (
+                "ChromaDB is owned by another Engram process; "
+                "using JSON-first fallback in this process."
+            )
+            return False
+
+        _chroma_owner_handle = handle
+        _chroma_disabled_reason = None
+        if not _chroma_owner_registered:
+            atexit.register(_release_chroma_owner)
+            _chroma_owner_registered = True
+        return True
+
+
+@contextmanager
+def _chroma_process_lock(operation: str):
+    """Serialize ChromaDB access across concurrent stdio server processes."""
+    lock_path = Path(CHROMA_PROCESS_LOCK_PATH)
+    deadline = time.monotonic() + CHROMA_PROCESS_LOCK_TIMEOUT
+    handle = _prepare_lock_file(lock_path)
+
+    while True:
+        try:
+            _try_lock_handle(handle)
+            payload = json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "thread": threading.get_ident(),
+                    "operation": operation,
+                    "created_at": datetime.now().astimezone().isoformat(),
+                },
+                ensure_ascii=False,
+            )
+            handle.seek(0)
+            handle.truncate()
+            handle.write(payload.encode("utf-8"))
+            handle.flush()
+            break
+        except OSError:
+            if time.monotonic() >= deadline:
+                handle.close()
+                raise RuntimeError(
+                    "Timed out waiting for ChromaDB process lock. "
+                    "Another Engram process may still be using the vector index."
+                )
+            time.sleep(CHROMA_PROCESS_LOCK_POLL_SECONDS)
+
+    try:
+        yield
+    finally:
+        try:
+            _unlock_handle(handle)
+        except OSError:
+            pass
+        try:
+            handle.close()
+        except OSError:
+            pass
 
 
 def _directory_size_bytes(path: Path) -> int:
@@ -409,6 +545,8 @@ class MemoryManager:
     # ── ChromaDB thread-safe lazy init ───────────────────────────────────
 
     def _get_collection(self):
+        if not _ensure_chroma_owner():
+            raise RuntimeError(_chroma_disabled_reason or "ChromaDB is unavailable")
         if self._collection is None:
             with _init_lock:
                 if self._collection is None:
@@ -424,7 +562,8 @@ class MemoryManager:
 
     def _ensure_initialized(self):
         """Eagerly initialize ChromaDB. Call at server startup before mcp.run()."""
-        self._get_collection()
+        with _chroma_process_lock("initialize"):
+            self._get_collection()
 
     # ── Internal helpers ────────────────────────────────────────────────────
 
@@ -585,22 +724,24 @@ class MemoryManager:
 
     def _query_semantic_results(self, query_embedding: list[float], limit: int):
         """Run a semantic search query against the chunk index."""
-        col = self._get_collection()
-        return col.query(
-            query_embeddings=[query_embedding],
-            n_results=min(limit, col.count() or 1),
-            include=self._semantic_query_include(),
-        )
+        with _chroma_process_lock("query"):
+            col = self._get_collection()
+            return col.query(
+                query_embeddings=[query_embedding],
+                n_results=min(limit, col.count() or 1),
+                include=self._semantic_query_include(),
+            )
 
     def _query_structured_semantic_results(self, query_embedding: list[float]):
         """Run a structured search query across the full indexed candidate set."""
-        col = self._get_collection()
-        total_chunks = col.count()
-        return col.query(
-            query_embeddings=[query_embedding],
-            n_results=total_chunks or 1,
-            include=self._semantic_query_include(),
-        )
+        with _chroma_process_lock("structured_query"):
+            col = self._get_collection()
+            total_chunks = col.count()
+            return col.query(
+                query_embeddings=[query_embedding],
+                n_results=total_chunks or 1,
+                include=self._semantic_query_include(),
+            )
 
     @staticmethod
     def _normalize_pinned_keys(pinned_keys: Any) -> set[str]:
@@ -869,14 +1010,14 @@ class MemoryManager:
     def _delete_chunks_from_chroma(self, key: str):
         """Remove all existing chunks for a key from ChromaDB.
         Raises on failure so callers can handle sync drift."""
-        col = self._get_collection()
-        results = col.get(where={"parent_key": key})
-        if results and results.get("ids"):
-            col.delete(ids=results["ids"])
+        with _chroma_process_lock("delete_chunks"):
+            col = self._get_collection()
+            results = col.get(where={"parent_key": key})
+            if results and results.get("ids"):
+                col.delete(ids=results["ids"])
 
     def _index_chunks(self, key: str, chunks: list[dict], data: dict):
         """Embed and upsert chunks into ChromaDB (sync — used by webui/CLI)."""
-        col = self._get_collection()
         if not chunks:
             return
 
@@ -886,12 +1027,14 @@ class MemoryManager:
         ids = [_chunk_doc_id(key, c["chunk_id"]) for c in chunks]
         metadatas = [self._chunk_metadata(key, chunk, data) for chunk in chunks]
 
-        col.upsert(
-            ids=ids,
-            embeddings=embeddings,
-            documents=texts,
-            metadatas=metadatas,
-        )
+        with _chroma_process_lock("upsert_chunks"):
+            col = self._get_collection()
+            col.upsert(
+                ids=ids,
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=metadatas,
+            )
 
     async def _index_chunks_async(self, key: str, chunks: list[dict], data: dict):
         """Embed and upsert chunks into ChromaDB (async — non-blocking for MCP).
@@ -906,13 +1049,14 @@ class MemoryManager:
         metadatas = [self._chunk_metadata(key, chunk, data) for chunk in chunks]
 
         def _do_upsert():
-            col = self._get_collection()
-            col.upsert(
-                ids=ids,
-                embeddings=embeddings,
-                documents=texts,
-                metadatas=metadatas,
-            )
+            with _chroma_process_lock("upsert_chunks"):
+                col = self._get_collection()
+                col.upsert(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=texts,
+                    metadatas=metadatas,
+                )
 
         await _run_chroma(_do_upsert)
 
@@ -932,18 +1076,19 @@ class MemoryManager:
         if len(stripped) < 150:
             return None
 
-        col = self._get_collection()
-        if col.count() == 0:
-            return None
-
         embedding = embedder.embed(stripped)
         try:
-            n = min(5, col.count())
-            results = col.query(
-                query_embeddings=[embedding],
-                n_results=n,
-                include=["metadatas", "distances"],
-            )
+            with _chroma_process_lock("dedup_query"):
+                col = self._get_collection()
+                total_chunks = col.count()
+                if total_chunks == 0:
+                    return None
+
+                results = col.query(
+                    query_embeddings=[embedding],
+                    n_results=min(5, total_chunks),
+                    include=["metadatas", "distances"],
+                )
         except Exception as e:
             print(f"[Engram] WARNING: Dedup check failed: {e}. Proceeding without dedup.", file=sys.stderr)
             return None
@@ -1678,7 +1823,14 @@ class MemoryManager:
             status,
             canonical,
         )
-        await self._index_chunks_async(key, chunks, data)
+        try:
+            await self._index_chunks_async(key, chunks, data)
+        except Exception as e:
+            print(
+                f"[Engram] WARNING: ChromaDB index update failed for '{key}': {e}. "
+                f"JSON remains the source of truth; run rebuild_index later.",
+                file=sys.stderr,
+            )
         return data
 
     @staticmethod
@@ -1786,10 +1938,11 @@ class MemoryManager:
         Retrieve a specific chunk by key and chunk_id.
         Returns {key, chunk_id, text} or None.
         """
-        col = self._get_collection()
         doc_id = _chunk_doc_id(key, chunk_id)
         try:
-            result = col.get(ids=[doc_id], include=["documents", "metadatas"])
+            with _chroma_process_lock("retrieve_chunk"):
+                col = self._get_collection()
+                result = col.get(ids=[doc_id], include=["documents", "metadatas"])
             if result and result["ids"]:
                 return {
                     "key": key,
@@ -1834,8 +1987,9 @@ class MemoryManager:
 
         if doc_ids:
             try:
-                col = self._get_collection()
-                raw = col.get(ids=list(dict.fromkeys(doc_ids)), include=["documents", "metadatas"])
+                with _chroma_process_lock("retrieve_chunks"):
+                    col = self._get_collection()
+                    raw = col.get(ids=list(dict.fromkeys(doc_ids)), include=["documents", "metadatas"])
                 docs_by_id = {
                     doc_id: (document, meta)
                     for doc_id, document, meta in zip(
@@ -2330,8 +2484,9 @@ class MemoryManager:
         Use when the vector index is lost or corrupted.
         """
         print("[Engram] Rebuilding index from JSON files...", file=sys.stderr)
-        col = self._get_collection()
-        col.delete(where={"parent_key": {"$ne": "__never__"}})  # clear all
+        with _chroma_process_lock("rebuild_clear"):
+            col = self._get_collection()
+            col.delete(where={"parent_key": {"$ne": "__never__"}})  # clear all
 
         rebuilt = 0
         skipped = 0
@@ -2353,14 +2508,16 @@ class MemoryManager:
 
     def get_stats(self) -> dict:
         memories = self.list_memories()
-        col = self._get_collection()
+        with _chroma_process_lock("stats"):
+            col = self._get_collection()
+            total_chunks = col.count()
         json_bytes = _directory_size_bytes(JSON_DIR)
         chroma_bytes = _directory_size_bytes(CHROMA_DIR)
         storage_bytes = json_bytes + chroma_bytes
         return {
             "total_memories": len(memories),
             "total_chars": sum(m["chars"] for m in memories),
-            "total_chunks": col.count(),
+            "total_chunks": total_chunks,
             "storage_bytes": storage_bytes,
             "storage_size": _format_storage_size(storage_bytes),
             "json_bytes": json_bytes,

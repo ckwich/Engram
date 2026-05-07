@@ -563,6 +563,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "Prefer context_pack when you need a compact working set rather than whole memories.",
             "Use retrieval_mode='hybrid' intentionally for identifier-heavy queries; semantic remains the cheaper default.",
             "Use list_memories for browsing metadata, not topic lookup.",
+            "When multiple stdio Engram servers are live, only one process owns ChromaDB; other processes keep JSON-first writes available but may skip vector indexing/search until the owner exits.",
         ],
     }
 
@@ -3305,9 +3306,7 @@ if __name__ == "__main__":
     embedder._load()
     print("[Engram] Model ready.", file=sys.stderr)
 
-    print("[Engram] Initializing ChromaDB...", file=sys.stderr)
-    memory_manager._ensure_initialized()
-    print("[Engram] ChromaDB ready.", file=sys.stderr)
+    print("[Engram] ChromaDB will initialize on first vector operation.", file=sys.stderr)
 
     if args.transport == "sse":
         print(f"[Engram] Starting — SSE on {args.host}:{args.port}", file=sys.stderr)

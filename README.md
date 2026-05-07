@@ -252,6 +252,8 @@ codex mcp add engram -- \
 
 Open a fresh Codex thread, or restart Codex, after changing MCP registration. Existing threads may not hot-load newly added MCP servers.
 
+Stdio clients may start one Engram process per conversation. Engram keeps JSON writes available in every process, but only one live process owns the ChromaDB vector index at a time; secondary processes skip vector indexing/search instead of closing the MCP transport. If many stale Engram processes accumulate after client crashes or app updates, close old threads or restart the MCP host before diagnosing storage failures.
+
 ### Claude Code
 
 ```bash

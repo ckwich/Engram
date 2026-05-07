@@ -37,6 +37,7 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 
 ### Never break the JSON/ChromaDB sync
 `memory_manager.py` writes JSON first, then updates ChromaDB. If ChromaDB fails, JSON is the fallback. Never reverse this order.
+Concurrent stdio MCP sessions may leave multiple Engram server processes alive. Only one process may own ChromaDB; secondary processes must preserve JSON-first write behavior and fail/skip vector work without closing MCP transport.
 
 ### No stdout in production paths
 stdout corruption breaks MCP stdio transport. Use `sys.stderr` for debug output only. No bare `print()` in `memory_manager.py` or `server.py`.
