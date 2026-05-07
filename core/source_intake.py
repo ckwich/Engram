@@ -28,6 +28,33 @@ SECTION_TITLES = {
     "validations": "Validation",
 }
 
+PROMOTION_GUIDANCE = {
+    "default_action": "review_before_promotion",
+    "auto_promote": False,
+    "allowed_destinations": [
+        {
+            "kind": "memory",
+            "tool": "store_prepared_memory",
+            "when": "The proposed content is durable, reviewed operating memory.",
+        },
+        {
+            "kind": "graph_edge",
+            "tool": "add_graph_edge",
+            "when": "The durable output is a relationship between existing refs.",
+        },
+        {
+            "kind": "app_record",
+            "owner": "collaboration_app",
+            "when": "The item is team workflow state such as comments, assignments, mentions, page drafts, or visibility notes.",
+        },
+        {
+            "kind": "external_pointer",
+            "field": "source_uri",
+            "when": "The raw source should stay outside Engram and only be referenced.",
+        },
+    ],
+}
+
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
@@ -204,6 +231,15 @@ class SourceIntakeManager:
             "domain": domain,
             "status": pipeline_config.get("memory_status", "draft"),
             "canonical": False,
+            "source_intake": {
+                "draft_id": draft_id,
+                "source_hash": source_digest,
+                "source_type": source_type.strip(),
+                "source_uri": source_uri,
+                "pipeline": pipeline_config["id"],
+                "review_status": "draft",
+                "promotion_required": True,
+            },
         }
         draft = {
             "schema_version": SOURCE_DRAFT_SCHEMA_VERSION,
@@ -222,6 +258,9 @@ class SourceIntakeManager:
             "project": project,
             "domain": domain,
             "status": "draft",
+            "active_memory_write_performed": False,
+            "review_required": True,
+            "promotion_guidance": PROMOTION_GUIDANCE,
             "proposed_memories": [proposed_memory],
             "proposed_edges": [],
             "receipt": {

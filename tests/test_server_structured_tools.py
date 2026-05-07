@@ -1208,6 +1208,26 @@ def test_prepare_source_memory_tool_catches_unexpected_intake_failure(monkeypatc
     }
 
 
+def test_prepare_source_memory_tool_returns_structured_invalid_request_for_malformed_agent_args():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.prepare_source_memory(
+            source_text={"bad": "shape"},
+            source_type="transcript",
+            project="C:/Dev/Engram",
+        )
+    )
+
+    assert payload == {
+        "draft": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "source_text is required",
+        },
+    }
+
+
 def test_review_helper_tools_return_agent_facing_payloads(tmp_path):
     server = load_server_module()
     source = tmp_path / "note.md"
@@ -1282,6 +1302,41 @@ def test_store_prepared_memory_uses_explicit_selected_items(monkeypatch):
     assert payload["stored_count"] == 1
     assert observed["key"] == "draft_memory"
     assert observed["force"] is False
+
+
+def test_store_prepared_memory_rejects_rejected_drafts(monkeypatch):
+    server = load_server_module()
+
+    def fake_get_source_draft(draft_id):
+        return {
+            "draft_id": draft_id,
+            "status": "rejected",
+            "proposed_memories": [
+                {
+                    "key": "draft_memory",
+                    "title": "Draft Memory",
+                    "content": "Draft body",
+                }
+            ],
+        }
+
+    async def fail_if_store_memory(**kwargs):
+        raise AssertionError("rejected drafts must not be promoted")
+
+    monkeypatch.setattr(server.source_intake_manager, "get_source_draft", fake_get_source_draft)
+    monkeypatch.setattr(server.memory_manager, "store_memory_async", fail_if_store_memory)
+
+    payload = asyncio.run(server.store_prepared_memory("draft-a", selected_items=[0]))
+
+    assert payload == {
+        "stored_count": 0,
+        "stored": [],
+        "skipped": [],
+        "error": {
+            "code": "invalid_state",
+            "message": "source draft is rejected and cannot be promoted",
+        },
+    }
 
 
 def test_context_pack_returns_receipt_and_citations(monkeypatch):

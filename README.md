@@ -408,6 +408,17 @@ prepare_source_memory -> inspect draft -> store_prepared_memory
 
 Use `preview_memory_chunks` or `preview_source_connector` when you want to inspect what Engram would ingest before any write happens.
 
+Source intake never auto-promotes active memories. Drafts are review records with
+`status: "draft"`, `active_memory_write_performed: false`, and promotion guidance
+for the four valid outcomes:
+
+- Store selected durable content as Engram memory with `store_prepared_memory`.
+- Store relationship facts as graph edges with `add_graph_edge`.
+- Keep collaboration-only workflow state in the separate app.
+- Keep raw source material outside Engram and reference it by `source_uri`.
+
+Rejected drafts cannot be promoted.
+
 ---
 
 ## CLI Utilities

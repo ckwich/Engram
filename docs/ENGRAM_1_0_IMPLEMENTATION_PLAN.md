@@ -79,19 +79,19 @@ git diff --check
 - Modify: `tests/test_server_structured_tools.py`
 - Modify: `docs/ENGRAM_1_0_RELEASE_SPEC.md`
 
-- [ ] Confirm list/preview connector tools remain no-write.
-- [ ] Confirm malformed `prepare_source_memory` inputs return structured errors and never escape across MCP transport.
-- [ ] Confirm source drafts remain separated from active memory search until explicit promotion.
-- [ ] Define when a draft should become a memory, graph edge, app-only collaboration record, or external pointer.
-- [ ] Tighten lifecycle status docs so agents can prefer current, validated records and exclude stale ones by default.
-- [ ] Run:
+- [x] Confirm list/preview connector tools remain no-write.
+- [x] Confirm malformed `prepare_source_memory` inputs return structured errors and never escape across MCP transport.
+- [x] Confirm source drafts remain separated from active memory search until explicit promotion.
+- [x] Define when a draft should become a memory, graph edge, app-only collaboration record, or external pointer.
+- [x] Tighten lifecycle status docs so agents can prefer current, validated records and exclude stale ones by default.
+- [x] Run:
 
 ```powershell
 .\venv\Scripts\python.exe -m pytest tests/test_source_intake.py tests/test_server_structured_tools.py -q
 .\venv\Scripts\python.exe server.py --self-test
 ```
 
-- [ ] Commit with a message like `fix: harden source intake lifecycle`.
+- [x] Commit with a message like `fix: harden source intake lifecycle`.
 
 ## Task 4: WebUI 1.0 Review Surface
 

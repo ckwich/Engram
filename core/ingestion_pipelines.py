@@ -4,6 +4,12 @@ from copy import deepcopy
 from typing import Any
 
 PIPELINE_SCHEMA_VERSION = "2026-04-30.ingestion-pipelines.v1"
+LIFECYCLE_POLICY = {
+    "prepared_memory_status": "draft",
+    "auto_promote": False,
+    "promotion_tool": "store_prepared_memory",
+    "stale_retrieval_default": "exclude_stale_when_building_context",
+}
 
 _PIPELINES: dict[str, dict[str, Any]] = {
     "generic": {
@@ -80,6 +86,8 @@ def list_ingestion_pipelines() -> dict[str, Any]:
     return {
         "schema_version": PIPELINE_SCHEMA_VERSION,
         "default_pipeline": "generic",
+        "write_performed": False,
+        "lifecycle_policy": deepcopy(LIFECYCLE_POLICY),
         "pipelines": deepcopy(_PIPELINES),
     }
 

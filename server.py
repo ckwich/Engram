@@ -988,6 +988,13 @@ async def store_prepared_memory(
             "skipped": [],
             "error": _tool_error("not_found", f"source draft not found: {draft_id}"),
         })
+    if draft.get("status") == "rejected":
+        return _finish({
+            "stored_count": 0,
+            "stored": [],
+            "skipped": [],
+            "error": _tool_error("invalid_state", "source draft is rejected and cannot be promoted"),
+        })
 
     proposed_memories = draft.get("proposed_memories", [])
     indices = selected_items if selected_items is not None else list(range(len(proposed_memories)))

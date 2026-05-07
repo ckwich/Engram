@@ -128,14 +128,16 @@ Acceptance gates:
 
 Purpose: make messy source material reviewable and trustworthy without memory spam.
 
+Status: implemented in Track 3 branch on 2026-05-07. Source intake now exposes explicit no-write/lifecycle policy, draft promotion guidance, and rejected-draft promotion protection.
+
 Required outcomes:
 
-- Keep `list_ingestion_pipelines()`, `preview_memory_chunks()`, and `preview_source_connector()` no-write.
+- Keep `list_ingestion_pipelines()`, `preview_memory_chunks()`, and `preview_source_connector()` no-write. Pipeline catalog now reports `write_performed: false`.
 - Keep `prepare_source_memory()` transport-safe for malformed agent input.
-- Confirm source drafts are separated from active memory search until promoted.
+- Confirm source drafts are separated from active memory search until promoted; drafts report `active_memory_write_performed: false`.
 - Harden lifecycle statuses and trust metadata enough for agents to prefer approved, current, validated memories.
-- Ensure stale/scanner-derived/source-derived records are visibly marked.
-- Define when a draft should become a memory, a graph edge, app-only collaboration state, or an external pointer.
+- Ensure stale/scanner-derived/source-derived records are visibly marked through draft status, source-intake tags, and proposed-memory `source_intake` receipts.
+- Define when a draft should become a memory, a graph edge, app-only collaboration state, or an external pointer through `promotion_guidance`.
 
 Acceptance gates:
 
