@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 
@@ -64,3 +65,43 @@ def test_chroma_owner_lock_reports_secondary_process_fallback(tmp_path, monkeypa
         mm_module._unlock_handle(external_owner)
         external_owner.close()
         mm_module._release_chroma_owner()
+
+
+def test_semantic_search_raises_when_chroma_owner_is_unavailable(monkeypatch):
+    async def fake_embed_async(query: str):
+        return [0.1, 0.2, 0.3]
+
+    def unavailable_query(*args, **kwargs):
+        raise RuntimeError(
+            "ChromaDB is owned by another Engram process; "
+            "using JSON-first fallback in this process."
+        )
+
+    monkeypatch.setattr(mm_module.embedder, "embed_async", fake_embed_async)
+    monkeypatch.setattr(mm_module.memory_manager, "_query_semantic_results", unavailable_query)
+
+    with pytest.raises(RuntimeError, match="ChromaDB is owned by another Engram process"):
+        asyncio.run(mm_module.memory_manager.search_memories_async("agent memory", limit=3))
+
+
+def test_structured_search_raises_when_chroma_owner_is_unavailable(monkeypatch):
+    async def fake_embed_async(query: str):
+        return [0.1, 0.2, 0.3]
+
+    def unavailable_query(*args, **kwargs):
+        raise RuntimeError(
+            "ChromaDB is owned by another Engram process; "
+            "using JSON-first fallback in this process."
+        )
+
+    monkeypatch.setattr(mm_module.embedder, "embed_async", fake_embed_async)
+    monkeypatch.setattr(mm_module.memory_manager, "_query_structured_semantic_results", unavailable_query)
+
+    with pytest.raises(RuntimeError, match="ChromaDB is owned by another Engram process"):
+        asyncio.run(
+            mm_module.memory_manager.search_memories_structured_async(
+                "agent memory",
+                limit=3,
+                include_stale=False,
+            )
+        )

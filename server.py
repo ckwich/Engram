@@ -563,7 +563,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "Prefer context_pack when you need a compact working set rather than whole memories.",
             "Use retrieval_mode='hybrid' intentionally for identifier-heavy queries; semantic remains the cheaper default.",
             "Use list_memories for browsing metadata, not topic lookup.",
-            "When multiple stdio Engram servers are live, only one process owns ChromaDB; other processes keep JSON-first writes available but may skip vector indexing/search until the owner exits.",
+            "Codex clients may lazy-load Engram; if mcp__engram__ tools are not initially visible, use tool discovery/search for Engram before concluding it is unavailable.",
+            "When multiple stdio Engram servers are live, only one process owns ChromaDB; secondary processes keep JSON-first writes available, and vector search/context tools return a runtime error until the owner exits.",
         ],
     }
 

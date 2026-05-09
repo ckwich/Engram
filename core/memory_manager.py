@@ -80,6 +80,23 @@ _chroma_owner_registered = False
 _chroma_disabled_reason: str | None = None
 
 
+def _is_chroma_availability_error(error: Exception) -> bool:
+    """Return true when a Chroma failure should surface to MCP callers."""
+    if not isinstance(error, RuntimeError):
+        return False
+    message = str(error)
+    return (
+        "ChromaDB is owned by another Engram process" in message
+        or "ChromaDB is unavailable" in message
+        or "Timed out waiting for ChromaDB process lock" in message
+    )
+
+
+def _raise_if_chroma_availability_error(error: Exception) -> None:
+    if _is_chroma_availability_error(error):
+        raise RuntimeError(str(error)) from error
+
+
 def _prepare_lock_file(lock_path: Path):
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("a+b")
@@ -2073,6 +2090,7 @@ class MemoryManager:
             results = self._query_semantic_results(query_embedding, normalized_limit)
         except Exception as e:
             print(f"[Engram] search failed: {e}", file=sys.stderr)
+            _raise_if_chroma_availability_error(e)
             return []
 
         if not results or not results.get("ids") or not results["ids"][0]:
@@ -2128,6 +2146,7 @@ class MemoryManager:
                 return self._query_semantic_results(query_embedding, normalized_limit)
             except Exception as e:
                 print(f"[Engram] search failed: {e}", file=sys.stderr)
+                _raise_if_chroma_availability_error(e)
                 return None
 
         raw = await _run_chroma(_do_query)
@@ -2166,6 +2185,7 @@ class MemoryManager:
             raw = self._query_structured_semantic_results(query_embedding)
         except Exception as e:
             print(f"[Engram] structured search failed: {e}", file=sys.stderr)
+            _raise_if_chroma_availability_error(e)
             return {"query": query, "count": 0, "results": []}
 
         return self._build_structured_payload(
@@ -2210,6 +2230,7 @@ class MemoryManager:
                 return self._query_structured_semantic_results(query_embedding)
             except Exception as e:
                 print(f"[Engram] structured search failed: {e}", file=sys.stderr)
+                _raise_if_chroma_availability_error(e)
                 return None
 
         raw = await _run_chroma(_do_query)

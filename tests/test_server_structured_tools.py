@@ -396,6 +396,37 @@ def test_search_memories_runtime_failure_returns_structured_error(monkeypatch):
     }
 
 
+def test_search_memories_chroma_owner_failure_returns_structured_error(monkeypatch):
+    server = load_server_module()
+
+    async def fake_embed_async(query: str):
+        return [0.1, 0.2, 0.3]
+
+    def unavailable_query(*args, **kwargs):
+        raise RuntimeError(
+            "ChromaDB is owned by another Engram process; "
+            "using JSON-first fallback in this process."
+        )
+
+    monkeypatch.setattr(server.embedder, "embed_async", fake_embed_async)
+    monkeypatch.setattr(server.memory_manager, "_query_semantic_results", unavailable_query)
+
+    payload = asyncio.run(server.search_memories("alpha"))
+
+    assert payload == {
+        "query": "alpha",
+        "count": 0,
+        "results": [],
+        "error": {
+            "code": "runtime_error",
+            "message": (
+                "❌ Engram error: ChromaDB is owned by another Engram process; "
+                "using JSON-first fallback in this process."
+            ),
+        },
+    }
+
+
 def test_search_memories_empty_results_returns_structured_payload(monkeypatch):
     server = load_server_module()
 
@@ -1413,6 +1444,35 @@ def test_context_pack_returns_receipt_and_citations(monkeypatch):
         }
     ]
     assert payload["chunks"][0]["citation"]["citation_id"] == "engram:alpha#0"
+
+
+def test_context_pack_chroma_owner_failure_returns_structured_error(monkeypatch):
+    server = load_server_module()
+
+    async def fake_embed_async(query: str):
+        return [0.1, 0.2, 0.3]
+
+    def unavailable_query(*args, **kwargs):
+        raise RuntimeError(
+            "ChromaDB is owned by another Engram process; "
+            "using JSON-first fallback in this process."
+        )
+
+    monkeypatch.setattr(server.embedder, "embed_async", fake_embed_async)
+    monkeypatch.setattr(server.memory_manager, "_query_structured_semantic_results", unavailable_query)
+
+    payload = asyncio.run(server.context_pack("agent"))
+
+    assert payload["count"] == 0
+    assert payload["chunks"] == []
+    assert payload["error"] == {
+        "code": "runtime_error",
+        "message": (
+            "❌ Engram error: ChromaDB is owned by another Engram process; "
+            "using JSON-first fallback in this process."
+        ),
+    }
+    assert payload["receipt"]["semantic_candidate_count"] == 0
 
 
 def test_context_pack_records_privacy_safe_usage(isolated_usage_meter, monkeypatch):
