@@ -108,7 +108,7 @@ def list_document_extractors() -> dict[str, Any]:
                 "id": "external-document-parser",
                 "kind": "external_document",
                 "label": "External PDF/DOCX parser",
-                "source_types": ["docx", "pdf"],
+                "source_types": ["docx", "pdf", "url"],
                 "requested_outputs": ["markdown", "metadata", "page_images"],
                 "runs_inside_engram": False,
                 "external_framework_required": True,

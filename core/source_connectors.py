@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 CONNECTOR_SCHEMA_VERSION = "2026-04-30.source-connectors.v1"
 DOCUMENT_CONNECTOR_SCHEMA_VERSION = "2026-05-11.document-source-connectors.v1"
@@ -180,14 +181,16 @@ def preview_document_source_connector(
     max_source_text_chars: int = DEFAULT_MAX_SOURCE_TEXT_CHARS,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Preview local document files as arguments for no-write document extraction."""
+    """Preview local document files or URL fetch requests for no-write extraction."""
     normalized_type = (connector_type or "").strip().lower()
-    if normalized_type != "local_path":
-        raise ValueError("Only connector_type='local_path' is currently supported.")
+    if normalized_type not in {"local_path", "url"}:
+        raise ValueError("Only connector_type='local_path' or 'url' is currently supported.")
     if not target or not str(target).strip():
         raise ValueError("target is required")
     if metadata is not None and not isinstance(metadata, dict):
         raise ValueError("metadata must be an object")
+    if normalized_type == "url":
+        return _preview_document_url(target)
 
     root = Path(target).expanduser().resolve()
     if not root.exists():
@@ -310,4 +313,47 @@ def _external_extractor_omission(path: Path, relative_path: str, media_type: str
             "extractor_kind": "external_document",
             "instructions": "Extract text and page images as needed, then feed reviewed outputs into preview_document_extraction or preview_visual_extraction.",
         },
+    }
+
+
+def _preview_document_url(target: str) -> dict[str, Any]:
+    source_uri = target.strip()
+    parsed = urlparse(source_uri)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("target must be an http or https URL")
+    return {
+        "schema_version": DOCUMENT_CONNECTOR_SCHEMA_VERSION,
+        "connector_type": "url",
+        "target": source_uri,
+        "include_globs": [],
+        "max_files": 1,
+        "max_file_size_kb": DEFAULT_MAX_FILE_SIZE_KB,
+        "count": 0,
+        "items": [],
+        "omitted": [
+            {
+                "source_uri": source_uri,
+                "reason": "external_fetch_required",
+                "media_type": "text/html",
+                "recommended_next": "fetch and normalize the URL externally, then prepare_document_extraction_result or preview_document_extraction",
+                "document_extraction_request_arguments": {
+                    "source_ref": {
+                        "source_uri": source_uri,
+                    },
+                    "source_type": "url",
+                    "requested_outputs": ["markdown", "metadata"],
+                    "extractor_id": "engram-document-request",
+                    "extractor_kind": "external_document",
+                    "instructions": "Fetch the URL, preserve source_uri provenance, normalize readable content to markdown, then feed reviewed output into prepare_document_extraction_result.",
+                },
+            }
+        ],
+        "receipt": {
+            "supported_count": 0,
+            "omitted_count": 1,
+            "max_source_text_chars": DEFAULT_MAX_SOURCE_TEXT_CHARS,
+            "source_text_truncated_count": 0,
+        },
+        "write_performed": False,
+        "error": None,
     }

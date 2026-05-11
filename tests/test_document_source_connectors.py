@@ -81,3 +81,33 @@ def test_preview_document_source_connector_omits_external_extractor_formats(tmp_
             },
         }
     ]
+
+
+def test_preview_document_source_connector_prepares_url_fetch_request():
+    payload = preview_document_source_connector(
+        connector_type="url",
+        target="https://example.com/docs/overview",
+    )
+
+    assert payload["schema_version"] == "2026-05-11.document-source-connectors.v1"
+    assert payload["connector_type"] == "url"
+    assert payload["count"] == 0
+    assert payload["write_performed"] is False
+    assert payload["omitted"] == [
+        {
+            "source_uri": "https://example.com/docs/overview",
+            "reason": "external_fetch_required",
+            "media_type": "text/html",
+            "recommended_next": "fetch and normalize the URL externally, then prepare_document_extraction_result or preview_document_extraction",
+            "document_extraction_request_arguments": {
+                "source_ref": {
+                    "source_uri": "https://example.com/docs/overview",
+                },
+                "source_type": "url",
+                "requested_outputs": ["markdown", "metadata"],
+                "extractor_id": "engram-document-request",
+                "extractor_kind": "external_document",
+                "instructions": "Fetch the URL, preserve source_uri provenance, normalize readable content to markdown, then feed reviewed output into prepare_document_extraction_result.",
+            },
+        }
+    ]

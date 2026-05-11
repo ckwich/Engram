@@ -555,7 +555,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
             "list_document_extractors": "List bundled and external document extraction capabilities without running providers.",
-            "preview_document_source_connector": "Preview local Markdown/text/HTML extraction arguments and external parser request arguments without writing memory.",
+            "preview_document_source_connector": "Preview local Markdown/text/HTML extraction arguments plus URL/external parser request arguments without writing memory.",
             "prepare_document_extraction_request": "Prepare a no-write external document parsing request for PDF/DOCX/image-bearing sources.",
             "prepare_document_extraction_result": "Normalize external parser output into no-write preview arguments and provenance.",
             "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
@@ -839,10 +839,11 @@ async def preview_document_source_connector(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Preview local Markdown, text, and HTML files as document extraction inputs.
+    Preview local Markdown/text/HTML files or URL targets as document inputs.
 
-    This helper is no-write. PDF, DOCX, and image-bearing sources are reported
-    as requiring an external extractor instead of being parsed speculatively.
+    This helper is no-write. URL, PDF, DOCX, and image-bearing sources are
+    reported as requiring an external fetch/parser instead of being parsed
+    speculatively inside Engram.
     """
     started_at = time.perf_counter()
     input_payload = {

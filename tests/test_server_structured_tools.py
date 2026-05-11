@@ -1323,6 +1323,22 @@ def test_preview_document_source_connector_tool_returns_document_arguments(tmp_p
     assert payload["items"][0]["document_extraction_arguments"]["metadata"]["project"] == "Engram"
 
 
+def test_preview_document_source_connector_tool_returns_url_fetch_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.preview_document_source_connector(
+            connector_type="url",
+            target="https://example.com/docs/overview",
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["connector_type"] == "url"
+    assert payload["omitted"][0]["reason"] == "external_fetch_required"
+    assert payload["omitted"][0]["document_extraction_request_arguments"]["source_type"] == "url"
+
+
 def test_preview_document_source_connector_tool_returns_structured_invalid_request():
     server = load_server_module()
 
@@ -1342,7 +1358,7 @@ def test_preview_document_source_connector_tool_returns_structured_invalid_reque
         "write_performed": False,
         "error": {
             "code": "invalid_request",
-            "message": "Only connector_type='local_path' is currently supported.",
+            "message": "Only connector_type='local_path' or 'url' is currently supported.",
         },
     }
 

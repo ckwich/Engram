@@ -162,7 +162,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `preview_memory_chunks` | Preview chunking without writing. |
 | `preview_source_connector` | Preview local source intake without writing. |
 | `list_document_extractors` | List bundled and external document extraction capabilities. |
-| `preview_document_source_connector` | Preview local Markdown/text/HTML document intake and external parser request arguments without writing. |
+| `preview_document_source_connector` | Preview local Markdown/text/HTML and URL/external parser request arguments without writing. |
 | `prepare_document_extraction_request` | Prepare a no-write external parser request for PDF/DOCX/image-bearing sources. |
 | `prepare_document_extraction_result` | Normalize external parser output into no-write preview arguments. |
 | `preview_document_extraction` | Preview document evidence and chunks without writing. |

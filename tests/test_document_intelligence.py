@@ -29,7 +29,7 @@ def test_list_document_extractors_reports_bundled_and_external_boundaries():
     )
     assert external["runs_inside_engram"] is False
     assert external["external_framework_required"] is True
-    assert external["source_types"] == ["docx", "pdf"]
+    assert external["source_types"] == ["docx", "pdf", "url"]
     assert "prepare_document_extraction_request" in external["next_tools"]
 
 
