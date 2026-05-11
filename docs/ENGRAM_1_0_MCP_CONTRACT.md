@@ -79,6 +79,8 @@ where typed, and focused tests.
 | `list_ingestion_pipelines` | beta | `dict{pipelines, error}` | No-write source-intake preset catalog. |
 | `preview_memory_chunks` | beta | `dict{title, chunk_count, chunks, omitted, error}` | No-write chunk boundary preview. |
 | `preview_source_connector` | beta | `dict{connector_type, target, count, items, omitted, write_performed, error}` | No-write local source preview. |
+| `preview_document_extraction` | beta | `dict{preview, error}` | No-write document evidence/chunk preview. |
+| `preview_visual_extraction` | beta | `dict{preview, error}` | No-write caller-supplied OCR/vision observation preview; does not run a provider. |
 | `prepare_source_memory` | beta | `dict{draft, error}` | Draft only; malformed input returns structured errors. |
 | `list_source_drafts` | beta | `dict{count, drafts, error}` | Draft inventory. |
 | `discard_source_draft` | beta | `dict{discarded, draft_id, error}` | Rejects a draft while preserving an audit trail. |

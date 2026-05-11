@@ -25,6 +25,10 @@ from fastmcp import FastMCP
 from core.chunk_preview import preview_memory_chunks as build_chunk_preview
 from core.codebase_mapper import codebase_mapping_manager
 from core.context_builder import build_context_receipt, make_filters, merge_graph_candidates
+from core.document_intelligence import (
+    preview_document_extraction as build_document_extraction_preview,
+    preview_visual_extraction as build_visual_extraction_preview,
+)
 from core.embedder import embedder
 from core.graph_manager import graph_manager
 from core.hybrid_retrieval import normalize_retrieval_mode
@@ -361,6 +365,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "codebase_mapping": "beta",
             "graph": "beta",
             "source_intake": "beta",
+            "document_intelligence": "beta",
             "review_helpers": "beta",
             "retrieval_quality": "beta",
             "usage": "beta",
@@ -442,6 +447,15 @@ async def memory_protocol() -> MemoryProtocolPayload:
                     "store_prepared_memory",
                 ],
             },
+            "document_intelligence": {
+                "purpose": "Preview document and visual extraction evidence without writing memory.",
+                "stability": "beta",
+                "cost_class": "medium",
+                "tools": [
+                    "preview_document_extraction",
+                    "preview_visual_extraction",
+                ],
+            },
             "retrieval_quality": {
                 "purpose": "Inspect retrieval cost, quality, citations, and workflow recipes before scaling memory.",
                 "stability": "beta",
@@ -503,6 +517,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "source ingestion": "prepare_source_memory",
                 "source ingestion setup": "list_ingestion_pipelines",
                 "chunk boundary review": "preview_memory_chunks",
+                "document extraction": "preview_document_extraction",
+                "visual extraction": "preview_visual_extraction",
                 "retrieval quality": "retrieval_eval",
                 "codebase mapping": "prepare_codebase_mapping",
                 "codebase mapping setup": "draft_codebase_mapping_config",
@@ -517,6 +533,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
+            "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
+            "preview_visual_extraction": "Preview caller-supplied OCR or vision observations as visual evidence without writing memory.",
             "retrieval_eval": "Run deterministic retrieval quality checks and report pass/fail scenarios.",
             "list_workflow_templates": "List agent workflow recipes for common Engram usage patterns.",
             "list_memories": "Paginated structured directory metadata; no content.",
@@ -556,6 +574,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "context_pack(query='agent memory protocol', project='engram', max_chunks=5)",
             "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
+            "preview_visual_extraction(document_record=doc, observations=vision_notes) before promoting image-derived claims",
             "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
         ],
         "warnings": [
@@ -771,6 +790,101 @@ async def preview_source_connector(
             "error": _tool_error("invalid_request", str(e)),
         }
     _record_usage_for_payload("preview_source_connector", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def preview_document_extraction(
+    title: str,
+    source_uri: str,
+    source_type: str,
+    content: str,
+    media_type: str,
+    metadata: dict[str, Any] | None = None,
+    extractor_id: str = "engram-text-preview",
+    extractor_kind: str = "agent_native",
+) -> dict[str, Any]:
+    """
+    Preview text/markdown document evidence and chunks without storing memory.
+
+    This is a no-write, review-first document-intelligence helper. It does not run
+    OCR or vision models; pair image-derived observations with preview_visual_extraction.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "title": title,
+        "source_uri": source_uri,
+        "source_type": source_type,
+        "content": content,
+        "media_type": media_type,
+        "metadata": metadata,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+    }
+    try:
+        payload = {
+            "preview": build_document_extraction_preview(
+                title=title,
+                source_uri=source_uri,
+                source_type=source_type,
+                content=content,
+                media_type=media_type,
+                metadata=metadata,
+                extractor_id=extractor_id,
+                extractor_kind=extractor_kind,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"preview": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "preview": None,
+            "error": _tool_error("runtime_error", f"Unexpected document preview failure: {e}"),
+        }
+    _record_usage_for_payload("preview_document_extraction", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def preview_visual_extraction(
+    document_record: dict[str, Any],
+    observations: list[dict[str, Any]],
+    extractor_id: str = "engram-visual-preview",
+    extractor_kind: str = "agent_native",
+) -> dict[str, Any]:
+    """
+    Preview caller-supplied OCR or vision observations as reviewable visual evidence.
+
+    This is a no-write helper. Engram records provenance, confidence, and whether an
+    external OCR/vision framework was used; it does not trust image-derived claims as
+    active memory until a later explicit promotion path reviews them.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_record": document_record,
+        "observations": observations,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+    }
+    try:
+        payload = {
+            "preview": build_visual_extraction_preview(
+                document_record=document_record,
+                observations=observations,
+                extractor_id=extractor_id,
+                extractor_kind=extractor_kind,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"preview": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "preview": None,
+            "error": _tool_error("runtime_error", f"Unexpected visual preview failure: {e}"),
+        }
+    _record_usage_for_payload("preview_visual_extraction", input_payload, payload, started_at)
     return payload
 
 

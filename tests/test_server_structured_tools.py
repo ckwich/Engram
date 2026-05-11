@@ -1259,6 +1259,100 @@ def test_prepare_source_memory_tool_returns_structured_invalid_request_for_malfo
     }
 
 
+def test_preview_document_extraction_tool_returns_no_write_preview():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.preview_document_extraction(
+            title="Architecture Note",
+            source_uri="file:///notes/architecture.md",
+            source_type="markdown",
+            media_type="text/markdown",
+            content="# Architecture\n\nDecision: keep visual evidence review-first.",
+            metadata={"project": "engram"},
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["preview"]["write_performed"] is False
+    assert payload["preview"]["active_memory_write_performed"] is False
+    assert payload["preview"]["document_record"]["title"] == "Architecture Note"
+    assert payload["preview"]["receipt"]["chunk_count"] >= 1
+
+
+def test_preview_document_extraction_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.preview_document_extraction(
+            title="Blank",
+            source_uri="file:///notes/blank.md",
+            source_type="markdown",
+            media_type="text/markdown",
+            content="   ",
+        )
+    )
+
+    assert payload == {
+        "preview": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "content is required",
+        },
+    }
+
+
+def test_preview_visual_extraction_tool_returns_no_write_preview():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.preview_visual_extraction(
+            document_record={
+                "document_id": "doc_architecture",
+                "title": "Architecture Screenshot",
+                "source_uri": "file:///notes/architecture.png",
+            },
+            observations=[
+                {
+                    "artifact_type": "diagram",
+                    "source_ref": {"source_uri": "file:///notes/architecture.png", "page": 1},
+                    "description": "A pipeline diagram showing OCR evidence flowing into reviewed chunks.",
+                    "confidence": 0.82,
+                }
+            ],
+            extractor_id="agent-vision-preview",
+            extractor_kind="vision",
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["preview"]["write_performed"] is False
+    assert payload["preview"]["active_memory_write_performed"] is False
+    assert payload["preview"]["receipt"]["external_framework_required"] is True
+    assert payload["preview"]["visual_artifacts"][0]["trusted_memory"] is False
+
+
+def test_preview_visual_extraction_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.preview_visual_extraction(
+            document_record={"document_id": "doc_architecture"},
+            observations=[],
+            extractor_id="agent-vision-preview",
+            extractor_kind="vision",
+        )
+    )
+
+    assert payload == {
+        "preview": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "observations must include at least one item",
+        },
+    }
+
+
 def test_review_helper_tools_return_agent_facing_payloads(tmp_path):
     server = load_server_module()
     source = tmp_path / "note.md"
