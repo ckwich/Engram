@@ -1350,6 +1350,56 @@ def test_prepare_visual_extraction_request_tool_returns_structured_invalid_reque
     }
 
 
+def test_prepare_document_draft_tool_returns_no_write_draft():
+    server = load_server_module()
+    document = {
+        "document_id": "doc_architecture",
+        "title": "Architecture Note",
+        "source_uri": "file:///notes/architecture.md",
+        "source_type": "markdown",
+        "metadata": {"project": "Engram"},
+    }
+
+    payload = asyncio.run(
+        server.prepare_document_draft(
+            document_record=document,
+            analysis={
+                "summary": "Architecture note about review-first import.",
+                "decisions": ["Keep document drafts reviewable."],
+            },
+            chunk_refs=[{"document_id": "doc_architecture", "chunk_id": 0}],
+            visual_artifacts=[],
+            candidate_graph_edges=[],
+            created_by="agent",
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["draft"]["record_type"] == "document_draft"
+    assert payload["draft"]["active_memory_write_performed"] is False
+    assert payload["draft"]["proposed_memories"][0]["status"] == "draft"
+    assert payload["draft"]["receipt"]["proposed_memory_count"] == 1
+
+
+def test_prepare_document_draft_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.prepare_document_draft(
+            document_record={"document_id": "doc_architecture"},
+            analysis={},
+        )
+    )
+
+    assert payload == {
+        "draft": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "analysis or candidate_graph_edges must include at least one item",
+        },
+    }
+
+
 def test_preview_visual_extraction_tool_returns_no_write_preview():
     server = load_server_module()
 

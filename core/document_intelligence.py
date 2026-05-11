@@ -11,7 +11,20 @@ DOCUMENT_INTELLIGENCE_SCHEMA_VERSION = "2026-05-11.document-intelligence.v1"
 DOCUMENT_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.preview.v1"
 VISUAL_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-preview.v1"
 VISUAL_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-request.v1"
+DOCUMENT_DRAFT_SCHEMA_VERSION = "2026-05-11.document-intelligence.draft.v1"
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
+DOCUMENT_ANALYSIS_SECTIONS = {
+    "summary": "Summary",
+    "decisions": "Decisions",
+    "claims": "Claims",
+    "entities": "Entities",
+    "constraints": "Constraints",
+    "tasks": "Tasks",
+    "risks": "Risks",
+    "dates": "Dates",
+    "open_questions": "Open Questions",
+    "external_pointers": "External Pointers",
+}
 VALID_VISUAL_CAPABILITIES = {
     "caption_alt_text",
     "chart_summary",
@@ -221,6 +234,103 @@ def prepare_visual_extraction_request(
     }
 
 
+def prepare_document_draft(
+    *,
+    document_record: dict[str, Any],
+    analysis: dict[str, Any],
+    chunk_refs: list[dict[str, Any]] | None = None,
+    visual_artifacts: list[dict[str, Any]] | None = None,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+    created_by: str = "agent",
+) -> dict[str, Any]:
+    """Prepare a no-write document draft from reviewed document evidence."""
+    document_id = _require_text(document_record.get("document_id"), "document_record.document_id")
+    title = _require_text(document_record.get("title", document_id), "document_record.title")
+    normalized_analysis = _normalize_document_analysis(analysis)
+    normalized_chunk_refs = _normalize_chunk_refs(chunk_refs or [])
+    normalized_visuals = _normalize_visual_artifacts(visual_artifacts or [], document_id)
+    normalized_edges = _normalize_candidate_graph_edges(candidate_graph_edges or [])
+    normalized_created_by = _require_text(created_by, "created_by")
+    if _analysis_item_count(normalized_analysis) == 0 and not normalized_edges:
+        raise ValueError("analysis or candidate_graph_edges must include at least one item")
+
+    visual_artifact_ids = [
+        _require_text(artifact.get("artifact_id"), "visual_artifact.artifact_id")
+        for artifact in normalized_visuals
+    ]
+    draft_seed = "|".join(
+        [
+            document_id,
+            _stable_repr(normalized_analysis),
+            _stable_repr(normalized_chunk_refs),
+            _stable_repr(visual_artifact_ids),
+            _stable_repr(normalized_edges),
+            normalized_created_by,
+        ]
+    )
+    draft_id = _stable_id("doc_draft", draft_seed)
+    content = _analysis_markdown(title, normalized_analysis)
+    metadata = document_record.get("metadata") if isinstance(document_record.get("metadata"), dict) else {}
+    source_type = _optional_text(document_record.get("source_type"), "document_record.source_type")
+    tags = ["document-intelligence"]
+    if source_type:
+        tags.append(source_type)
+    proposed_memory = {
+        "key": _stable_id("doc_mem", draft_seed),
+        "title": f"Document Draft: {title}",
+        "content": content,
+        "tags": tags,
+        "project": metadata.get("project"),
+        "domain": metadata.get("domain"),
+        "status": "draft",
+        "canonical": False,
+        "source_document": {
+            "document_id": document_id,
+            "draft_id": draft_id,
+            "source_uri": document_record.get("source_uri"),
+            "review_status": "draft",
+            "promotion_required": True,
+        },
+    }
+    proposed_edges = [
+        {
+            **edge,
+            "review_status": "draft",
+            "promotion_required": True,
+            "active_memory_write_performed": False,
+        }
+        for edge in normalized_edges
+    ]
+    return {
+        "schema_version": DOCUMENT_DRAFT_SCHEMA_VERSION,
+        "record_type": "document_draft",
+        "draft_id": draft_id,
+        "document_id": document_id,
+        "status": "draft",
+        "created_by": normalized_created_by,
+        "active_memory_write_performed": False,
+        "review_required": True,
+        "promotion_required": True,
+        "promotion_guidance": dict(PROMOTION_GUIDANCE),
+        "analysis": normalized_analysis,
+        "evidence_refs": {
+            "document_id": document_id,
+            "source_uri": document_record.get("source_uri"),
+            "chunk_refs": normalized_chunk_refs,
+            "visual_artifact_ids": visual_artifact_ids,
+        },
+        "proposed_memories": [proposed_memory],
+        "proposed_edges": proposed_edges,
+        "receipt": {
+            "analysis_item_count": _analysis_item_count(normalized_analysis),
+            "chunk_ref_count": len(normalized_chunk_refs),
+            "visual_artifact_count": len(normalized_visuals),
+            "proposed_memory_count": 1,
+            "proposed_edge_count": len(proposed_edges),
+        },
+    }
+
+
 def preview_document_extraction(
     *,
     title: str,
@@ -396,6 +506,100 @@ def _normalize_visual_capabilities(value: Any) -> list[str]:
             raise ValueError(f"Unsupported visual capability: {capability}. Valid: {valid}")
         normalized.add(capability)
     return sorted(normalized)
+
+
+def _normalize_document_analysis(value: Any) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        raise ValueError("analysis must be an object")
+    unknown = sorted(set(value) - set(DOCUMENT_ANALYSIS_SECTIONS))
+    if unknown:
+        raise ValueError(f"Unsupported analysis field: {unknown[0]}")
+    return {
+        field: _normalize_analysis_items(value.get(field), field)
+        for field in DOCUMENT_ANALYSIS_SECTIONS
+    }
+
+
+def _normalize_analysis_items(value: Any, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if not isinstance(value, list):
+        raise ValueError(f"analysis.{field_name} must be a string or list")
+    items: list[str] = []
+    for item in value:
+        text = _require_text(item, f"analysis.{field_name}")
+        if text not in items:
+            items.append(text)
+    return items
+
+
+def _analysis_item_count(analysis: dict[str, list[str]]) -> int:
+    return sum(len(items) for items in analysis.values())
+
+
+def _analysis_markdown(title: str, analysis: dict[str, list[str]]) -> str:
+    lines = [f"# Document Draft: {title}", ""]
+    for field, heading in DOCUMENT_ANALYSIS_SECTIONS.items():
+        items = analysis[field]
+        if not items:
+            continue
+        lines.append(f"## {heading}")
+        lines.extend(f"- {item}" for item in items)
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+def _normalize_chunk_refs(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("chunk_refs must be a list")
+    normalized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or not item:
+            raise ValueError("chunk_refs entries must be objects")
+        normalized.append(dict(item))
+    return normalized
+
+
+def _normalize_visual_artifacts(value: Any, document_id: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("visual_artifacts must be a list")
+    normalized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("visual_artifacts entries must be objects")
+        artifact_document_id = _require_text(item.get("document_id"), "visual_artifact.document_id")
+        if artifact_document_id != document_id:
+            raise ValueError("visual_artifact document_id does not match document_record.document_id")
+        _require_text(item.get("artifact_id"), "visual_artifact.artifact_id")
+        normalized.append(dict(item))
+    return normalized
+
+
+def _normalize_candidate_graph_edges(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("candidate_graph_edges must be a list")
+    normalized: list[dict[str, Any]] = []
+    for edge in value:
+        if not isinstance(edge, dict):
+            raise ValueError("candidate_graph_edges entries must be objects")
+        for field in ("from_ref", "to_ref"):
+            if not isinstance(edge.get(field), dict) or not edge[field]:
+                raise ValueError(f"candidate_graph_edge.{field} is required")
+        normalized.append(
+            {
+                "from_ref": dict(edge["from_ref"]),
+                "to_ref": dict(edge["to_ref"]),
+                "edge_type": _require_text(edge.get("edge_type"), "candidate_graph_edge.edge_type"),
+                "confidence": _normalize_confidence(edge.get("confidence", 0.5)),
+                "evidence": _require_text(edge.get("evidence"), "candidate_graph_edge.evidence"),
+                "source": _optional_text(edge.get("source"), "candidate_graph_edge.source") or "document_intelligence",
+                "status": _optional_text(edge.get("status"), "candidate_graph_edge.status") or "draft",
+            }
+        )
+    return normalized
 
 
 def _normalize_extractor_kind(value: Any) -> str:

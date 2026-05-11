@@ -4,6 +4,7 @@ import pytest
 
 from core.document_intelligence import (
     prepare_document_record,
+    prepare_document_draft,
     prepare_extractor_receipt,
     prepare_visual_extraction_request,
     prepare_visual_artifact_record,
@@ -233,6 +234,117 @@ def test_prepare_visual_extraction_request_validates_images_and_capabilities():
             requested_capabilities=["read_minds"],
             extractor_id="local-vision-v1",
             extractor_kind="ocr",
+        )
+
+
+def test_prepare_document_draft_turns_evidence_into_reviewable_proposals_without_writes():
+    preview = preview_document_extraction(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content="# Architecture\n\nDecision: Keep review-first document import.",
+        media_type="text/markdown",
+        metadata={"project": "Engram", "domain": "memory-os"},
+    )
+    artifact = prepare_visual_artifact_record(
+        document_id=preview["document_record"]["document_id"],
+        artifact_type="diagram",
+        source_ref={"source_uri": "file:///docs/architecture.md", "page": 1},
+        extractor_id="agent-vision",
+        extractor_kind="agent_native",
+        description="A diagram linking document evidence to reviewed memories.",
+        page_number=1,
+        confidence=0.88,
+    )
+
+    draft = prepare_document_draft(
+        document_record=preview["document_record"],
+        analysis={
+            "summary": "Architecture note about document import.",
+            "decisions": ["Keep document imports review-first."],
+            "claims": ["Visual evidence stays evidence until promotion."],
+        },
+        chunk_refs=[preview["chunks"][0]["provenance"]],
+        visual_artifacts=[artifact],
+        candidate_graph_edges=[
+            {
+                "from_ref": {"kind": "document", "key": preview["document_record"]["document_id"]},
+                "to_ref": {"kind": "memory", "key": "engram_document_intelligence"},
+                "edge_type": "supports",
+                "confidence": 0.7,
+                "evidence": "The architecture note supports document intelligence planning.",
+            }
+        ],
+        created_by="agent",
+    )
+    duplicate = prepare_document_draft(
+        document_record=preview["document_record"],
+        analysis={
+            "summary": ["Architecture note about document import."],
+            "claims": ["Visual evidence stays evidence until promotion."],
+            "decisions": ["Keep document imports review-first."],
+        },
+        chunk_refs=[preview["chunks"][0]["provenance"]],
+        visual_artifacts=[artifact],
+        candidate_graph_edges=[
+            {
+                "from_ref": {"kind": "document", "key": preview["document_record"]["document_id"]},
+                "to_ref": {"kind": "memory", "key": "engram_document_intelligence"},
+                "edge_type": "supports",
+                "confidence": 0.7,
+                "evidence": "The architecture note supports document intelligence planning.",
+            }
+        ],
+        created_by="agent",
+    )
+
+    assert duplicate["draft_id"] == draft["draft_id"]
+    assert draft["schema_version"] == "2026-05-11.document-intelligence.draft.v1"
+    assert draft["record_type"] == "document_draft"
+    assert draft["status"] == "draft"
+    assert draft["active_memory_write_performed"] is False
+    assert draft["review_required"] is True
+    assert draft["promotion_guidance"]["auto_promote"] is False
+    assert draft["evidence_refs"]["visual_artifact_ids"] == [artifact["artifact_id"]]
+    assert draft["evidence_refs"]["chunk_refs"] == [preview["chunks"][0]["provenance"]]
+    assert draft["analysis"]["summary"] == ["Architecture note about document import."]
+    assert draft["proposed_memories"][0]["status"] == "draft"
+    assert "## Decisions" in draft["proposed_memories"][0]["content"]
+    assert draft["proposed_edges"][0]["review_status"] == "draft"
+    assert draft["receipt"] == {
+        "analysis_item_count": 3,
+        "chunk_ref_count": 1,
+        "visual_artifact_count": 1,
+        "proposed_memory_count": 1,
+        "proposed_edge_count": 1,
+    }
+
+
+def test_prepare_document_draft_validates_reviewable_evidence_boundary():
+    document = prepare_document_record(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content_hash="sha256:" + "c" * 64,
+        media_type="text/markdown",
+    )
+    other_artifact = prepare_visual_artifact_record(
+        document_id="doc_other",
+        artifact_type="diagram",
+        source_ref={"source_uri": "file:///docs/other.md"},
+        extractor_id="agent-vision",
+        extractor_kind="agent_native",
+        description="Other doc.",
+    )
+
+    with pytest.raises(ValueError, match="analysis or candidate_graph_edges must include at least one item"):
+        prepare_document_draft(document_record=document, analysis={})
+
+    with pytest.raises(ValueError, match="visual_artifact document_id does not match document_record.document_id"):
+        prepare_document_draft(
+            document_record=document,
+            analysis={"claims": ["Claim"]},
+            visual_artifacts=[other_artifact],
         )
 
 
