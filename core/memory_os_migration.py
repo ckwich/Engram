@@ -1075,6 +1075,8 @@ class MemoryOSMigrationKernel:
             raise ValueError("document evidence record must be an object")
         if _normalize_bool(record.get("active_memory_write_performed")):
             raise ValueError("document evidence records must not be active memory writes")
+        if _normalize_bool(record.get("write_performed")):
+            raise ValueError("document evidence records must not be executed write receipts")
 
         record_type = _normalize_optional_text(record.get("record_type"))
         if not record_type or record_type not in DOCUMENT_EVIDENCE_ID_FIELDS:

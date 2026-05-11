@@ -350,6 +350,30 @@ def test_document_evidence_store_rejects_active_memory_records(tmp_path):
         MemoryOSMigrationKernel(tmp_path / "store").store_document_evidence_records([document])
 
 
+def test_document_evidence_store_rejects_executed_write_records(tmp_path):
+    document = prepare_document_record(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content_hash="sha256:" + "c" * 64,
+        media_type="text/markdown",
+    )
+    draft = prepare_document_draft(
+        document_record=document,
+        analysis={"claims": ["Reviewed claim"]},
+    )
+    transaction = prepare_document_promotion_transaction(
+        document_draft=draft,
+        selected_memory_indexes=[0],
+        selected_edge_indexes=[],
+        approved_by="agent-review",
+    )
+    transaction["write_performed"] = True
+
+    with pytest.raises(ValueError, match="document evidence records must not be executed write receipts"):
+        MemoryOSMigrationKernel(tmp_path / "store").store_document_evidence_records([transaction])
+
+
 def test_document_draft_records_persist_and_restore_with_evidence_records(tmp_path):
     store_root = tmp_path / "store"
     restore_root = tmp_path / "restored"
