@@ -541,12 +541,36 @@ MVP formats:
 - DOCX
 - repository folders
 - transcript exports
+- image-bearing documents and folders when visual extraction is needed
 
 Pipeline:
 
 ```text
 connector -> extractor -> normalizer -> sectioner -> chunker -> draft analysis -> explicit promotion
 ```
+
+Visual extraction is part of document intelligence when the agent's native
+visual capability is not enough to create durable, reviewable memory. It should
+be a pluggable lane, not an always-on opaque processor:
+
+```text
+image or page render -> OCR/vision extractor -> visual artifact records -> section/chunk references -> draft analysis
+```
+
+Visual extraction should support:
+
+- OCR text from scans, screenshots, image-only PDFs, and photographed notes
+- figure, chart, table, and diagram descriptions
+- screenshot UI state and error-message capture
+- captions, alt text, page coordinates, bounding boxes, and confidence scores
+- links from visual artifacts back to source document ids, page ids, section ids,
+  and content-addressed raw files
+
+The output of image recognition should be evidence, not trusted memory. Agents
+must review visual extraction records before promotion, and every promoted claim
+from an image should retain provenance to the rendered page or image artifact.
+Engram should allow provider-neutral local or external OCR/vision adapters, but
+the storage contract must not depend on one model vendor.
 
 Document analysis should identify:
 
@@ -948,7 +972,11 @@ Acceptance gates:
 ### Phase 4: Document Intelligence
 
 - Add source connectors and extractors.
+- Add optional OCR/vision extraction adapters for image-bearing documents when
+  native agent visual analysis is not enough.
 - Add normalized document store.
+- Add visual artifact records for scans, figures, diagrams, screenshots, tables,
+  captions, coordinates, and confidence scores.
 - Add section and chunk provenance.
 - Add draft analysis packets.
 - Add explicit promotion transactions.
@@ -956,7 +984,11 @@ Acceptance gates:
 Acceptance gates:
 
 - markdown, text, HTML, URL, PDF, and DOCX fixtures import as evidence.
+- image-only PDF, screenshot, figure, and diagram fixtures produce reviewable
+  visual extraction evidence with source/page/coordinate provenance.
 - source citations survive chunk retrieval.
+- promoted claims from visual extraction retain links to the originating image
+  artifact and extractor receipt.
 - drafts do not become active memories automatically.
 
 ### Phase 5: Agent Workflows

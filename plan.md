@@ -166,7 +166,7 @@ Status update, 2026-05-11: the old 1.0 finish-line track is paused in favor of t
 
 Tracked planning docs:
 
-- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence, and optional hosted-edition direction.
+- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence including optional OCR/vision extraction, and optional hosted-edition direction.
 - `docs/ENGRAM_1_0_RELEASE_SPEC.md` — binding Engram 1.0 scope, invariants, release tracks, and validation gate.
 - `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md` — execution plan for finishing 1.0 in small, validated commits.
 - `docs/ENGRAM_1_0_TRACK_0_AUDIT.md` — repo/branch hygiene audit and evidence.
@@ -195,3 +195,4 @@ Current release tracks:
 - **Hybrid retrieval is opt-in:** Exact lexical/identifier scoring is useful for code and game-dev symbols, but semantic mode remains the default to avoid unnecessary ranking drift.
 - **Token-proportional retrieval:** Agents should prefer search snippets, chunks, and context packs before full memory reads.
 - **Provider-neutral synthesis:** Codebase mapping prepares bounded context and source receipts; the connected agent performs synthesis.
+- **Review-first document intelligence:** Document imports, including OCR/vision extraction for image-bearing sources, create evidence and drafts before any active memory promotion.
