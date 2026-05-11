@@ -21,6 +21,31 @@ def _parse_codex_mcp_get(output: str) -> dict[str, str]:
     return fields
 
 
+def _git_common_dir(path: Path) -> Path | None:
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return None
+    common_dir = Path(result.stdout.strip())
+    if not common_dir.is_absolute():
+        common_dir = path / common_dir
+    return common_dir.resolve()
+
+
+def _is_same_repo_checkout(server_path: Path) -> bool:
+    current_common_dir = _git_common_dir(REPO_ROOT)
+    registered_common_dir = _git_common_dir(server_path.parent)
+    return (
+        current_common_dir is not None
+        and registered_common_dir is not None
+        and current_common_dir == registered_common_dir
+    )
+
+
 def test_codex_engram_registration_smoke():
     codex = shutil.which("codex")
     if codex is None:
@@ -43,5 +68,7 @@ def test_codex_engram_registration_smoke():
     assert fields.get("transport") == "stdio"
     assert command
     assert args
-    assert Path(args).resolve() == (REPO_ROOT / "server.py").resolve()
+    server_path = Path(args).resolve()
+    assert server_path.name == "server.py"
+    assert server_path == (REPO_ROOT / "server.py").resolve() or _is_same_repo_checkout(server_path)
     assert Path(command).exists() or shutil.which(command) is not None
