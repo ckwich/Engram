@@ -52,6 +52,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert payload["tool_groups"]["graph"]["stability"] == "beta"
     assert "add_graph_edge" in payload["tool_groups"]["graph"]["tools"]
     assert "impact_scan" in payload["tool_groups"]["graph"]["tools"]
+    assert "conflict_scan" in payload["tool_groups"]["graph"]["tools"]
     assert payload["tool_groups"]["source_intake"]["stability"] == "beta"
     assert "prepare_source_memory" in payload["tool_groups"]["source_intake"]["tools"]
     assert "list_source_drafts" in payload["tool_groups"]["source_intake"]["tools"]
@@ -74,6 +75,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert payload["tool_groups"]["usage"]["stability"] == "beta"
     assert payload["progressive_discovery"]["start_here"] == "memory_protocol"
     assert payload["progressive_discovery"]["load_next"]["source ingestion"] == "prepare_source_memory"
+    assert payload["progressive_discovery"]["load_next"]["conflict inspection"] == "conflict_scan"
     assert payload["progressive_discovery"]["load_next"]["document extraction"] == "preview_document_extraction"
     assert payload["progressive_discovery"]["load_next"]["document extractor discovery"] == "list_document_extractors"
     assert payload["progressive_discovery"]["load_next"]["document source connector"] == "preview_document_source_connector"
@@ -99,6 +101,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "prepare_context" in payload["canonical_tools"]
     assert "list_context_profiles" in payload["canonical_tools"]
     assert "make_handoff" in payload["canonical_tools"]
+    assert "conflict_scan" in payload["canonical_tools"]
     assert payload["warnings"][0].startswith("Do not call retrieve_memory")
 
 

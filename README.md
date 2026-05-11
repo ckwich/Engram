@@ -178,6 +178,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `add_graph_edge` | Store a typed relationship between refs. |
 | `list_graph_edges` | List graph edges around refs. |
 | `impact_scan` | Traverse graph relationships for impact analysis. |
+| `conflict_scan` | List contradiction, invalidation, and supersession graph edges without loading memory bodies. |
 | `audit_graph` | Inspect graph hygiene. |
 | `usage_summary` | Summarize Engram-attributed token estimates. |
 | `list_usage_calls` | Inspect recent estimated usage calls. |

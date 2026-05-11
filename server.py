@@ -446,7 +446,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "purpose": "Inspect typed relationships without loading neighbor bodies.",
                 "stability": "beta",
                 "cost_class": "low",
-                "tools": ["add_graph_edge", "list_graph_edges", "impact_scan", "audit_graph"],
+                "tools": ["add_graph_edge", "list_graph_edges", "impact_scan", "conflict_scan", "audit_graph"],
             },
             "source_intake": {
                 "purpose": "Prepare source drafts without promoting durable memories.",
@@ -545,6 +545,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "retrieval profiles": "list_context_profiles",
                 "handoff generator": "make_handoff",
                 "relationship inspection": "impact_scan",
+                "conflict inspection": "conflict_scan",
                 "source ingestion": "prepare_source_memory",
                 "source ingestion setup": "list_ingestion_pipelines",
                 "chunk boundary review": "preview_memory_chunks",
@@ -572,6 +573,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_context": "Compile a no-write, cited context packet for a task using retrieval profiles.",
             "make_handoff": "Generate a no-write handoff packet with context refs, citations, next steps, and validation notes.",
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
+            "conflict_scan": "List active contradiction, invalidation, and supersession graph edges without loading memory bodies.",
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
             "list_document_extractors": "List bundled and external document extraction capabilities without running providers.",
@@ -729,6 +731,42 @@ async def impact_scan(
             "root_ref": root_ref,
             "count": 0,
             "edges": [],
+            "error": _tool_error("runtime_error", str(e)),
+        }
+
+
+@mcp.tool()
+async def conflict_scan(
+    ref: dict[str, Any] | None = None,
+    status: str = "active",
+) -> dict[str, Any]:
+    """
+    List contradiction, invalidation, and supersession edges without loading memory bodies.
+
+    Use this before relying on a memory set when trust or freshness matters. The
+    response returns compact refs, edge types, confidence, and evidence only;
+    call retrieve_chunk/search_memories separately if body text is needed.
+    """
+    try:
+        return graph_manager.conflict_scan(ref=ref, status=status)
+    except ValueError as e:
+        return {
+            "schema_version": "2026-04-27.conflict-scan.v1",
+            "ref": ref,
+            "status": status,
+            "edge_types": [],
+            "count": 0,
+            "conflicts": [],
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    except RuntimeError as e:
+        return {
+            "schema_version": "2026-04-27.conflict-scan.v1",
+            "ref": ref,
+            "status": status,
+            "edge_types": [],
+            "count": 0,
+            "conflicts": [],
             "error": _tool_error("runtime_error", str(e)),
         }
 

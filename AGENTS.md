@@ -79,7 +79,7 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 
 ## v0.6 Agent Operating Layer Rules
 - Start with `memory_protocol()` for progressive discovery when tool choice is unclear.
-- Use graph tools for relationship IDs, impact, and evidence; do not treat graph traversal as permission to load neighbor memory bodies.
+- Use graph tools for relationship IDs, impact, conflicts, and evidence; do not treat graph traversal as permission to load neighbor memory bodies.
 - Use `list_ingestion_pipelines()` before `prepare_source_memory()` when processing transcripts, logs, code scans, design docs, or handoffs; only `store_prepared_memory()` promotes selected drafts.
 - Use `preview_memory_chunks()` before storing large or messy source material. It is the safe way to inspect token shape before write pressure.
 - Treat source drafts as review records, not active memories. A draft's `promotion_guidance` distinguishes durable Engram memories, graph edges, app-owned collaboration records, and external pointers; comments, assignments, mentions, rich page drafts, and visibility notes stay app-owned unless explicitly converted into reviewed memory.

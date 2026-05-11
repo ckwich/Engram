@@ -78,6 +78,7 @@ where typed, and focused tests.
 | `add_graph_edge` | beta | `dict{edge, error}` | Stores compact graph edge records. |
 | `list_graph_edges` | beta | `dict{count, edges, error}` | Lists graph records without loading memory bodies. |
 | `impact_scan` | beta | `dict{root_ref, count, edges, error}` | Graph traversal returns refs/evidence, not neighbor bodies. |
+| `conflict_scan` | beta | `dict{schema_version, ref, status, edge_types, count, conflicts, error}` | Read-only contradiction, invalidation, and supersession scan; returns refs/evidence only. |
 | `audit_graph` | beta | `dict{issue_count, issues, error}` | Read-only graph hygiene check. |
 | `list_ingestion_pipelines` | beta | `dict{pipelines, error}` | No-write source-intake preset catalog. |
 | `preview_memory_chunks` | beta | `dict{title, chunk_count, chunks, omitted, error}` | No-write chunk boundary preview. |

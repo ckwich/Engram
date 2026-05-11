@@ -1187,6 +1187,52 @@ def test_impact_scan_mcp_never_returns_memory_content(monkeypatch):
     assert "content" not in payload["edges"][0]
 
 
+def test_conflict_scan_mcp_returns_conflict_edges_only(monkeypatch):
+    server = load_server_module()
+
+    def fake_conflict_scan(ref=None, status="active"):
+        return {
+            "schema_version": "2026-04-27.conflict-scan.v1",
+            "ref": ref,
+            "status": status,
+            "count": 1,
+            "conflicts": [
+                {
+                    "edge_id": "sha256:abc",
+                    "from_ref": {"kind": "memory", "key": "new_decision"},
+                    "to_ref": {"kind": "memory", "key": "old_decision"},
+                    "edge_type": "supersedes",
+                    "evidence": "New decision supersedes old decision.",
+                }
+            ],
+            "error": None,
+        }
+
+    monkeypatch.setattr(server.graph_manager, "conflict_scan", fake_conflict_scan)
+
+    payload = asyncio.run(server.conflict_scan(ref={"kind": "memory", "key": "new_decision"}))
+
+    assert payload["count"] == 1
+    assert payload["conflicts"][0]["edge_type"] == "supersedes"
+    assert "content" not in payload["conflicts"][0]
+    assert payload["error"] is None
+
+
+def test_conflict_scan_mcp_returns_structured_invalid_request(monkeypatch):
+    server = load_server_module()
+
+    def fake_conflict_scan(ref=None, status="active"):
+        raise ValueError("ref.kind is required")
+
+    monkeypatch.setattr(server.graph_manager, "conflict_scan", fake_conflict_scan)
+
+    payload = asyncio.run(server.conflict_scan(ref={"key": "missing-kind"}))
+
+    assert payload["count"] == 0
+    assert payload["conflicts"] == []
+    assert payload["error"]["code"] == "invalid_request"
+
+
 def test_prepare_source_memory_tool_returns_draft(monkeypatch):
     server = load_server_module()
 

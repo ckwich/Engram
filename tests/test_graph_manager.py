@@ -131,6 +131,35 @@ def test_impact_scan_returns_ids_without_memory_bodies(isolated_graph_storage):
     assert "content" not in payload["edges"][0]
 
 
+def test_conflict_scan_returns_conflict_edges_without_memory_bodies(isolated_graph_storage):
+    gm = isolated_graph_storage.graph_manager
+    gm.add_edge(
+        from_ref={"kind": "memory", "key": "new_decision"},
+        to_ref={"kind": "memory", "key": "old_decision"},
+        edge_type="supersedes",
+        evidence="New decision replaced old decision.",
+    )
+    gm.add_edge(
+        from_ref={"kind": "memory", "key": "runtime_observation"},
+        to_ref={"kind": "memory", "key": "old_claim"},
+        edge_type="contradicts",
+        evidence="Runtime output disproved old claim.",
+    )
+    gm.add_edge(
+        from_ref={"kind": "memory", "key": "new_decision"},
+        to_ref={"kind": "memory", "key": "implementation_note"},
+        edge_type="supports",
+        evidence="Support edge is not a conflict.",
+    )
+
+    payload = gm.conflict_scan(ref={"kind": "memory", "key": "new_decision"})
+
+    assert payload["count"] == 1
+    assert payload["conflicts"][0]["edge_type"] == "supersedes"
+    assert payload["conflicts"][0]["to_ref"] == {"kind": "memory", "key": "old_decision"}
+    assert "content" not in payload["conflicts"][0]
+
+
 def test_audit_graph_reports_missing_required_fields(isolated_graph_storage):
     isolated_graph_storage.EDGES_PATH.write_text(
         '{"schema_version":"2026-04-27","edges":[{"edge_type":"supports"}]}',

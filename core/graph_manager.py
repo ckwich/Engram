@@ -22,6 +22,7 @@ GRAPH_EDGE_TYPES = {
     "exemplifies",
     "warns_against",
 }
+CONFLICT_EDGE_TYPES = {"contradicts", "invalidates", "supersedes"}
 GRAPH_EDGE_STATUSES = {"active", "archived"}
 REQUIRED_EDGE_FIELDS = {
     "edge_id",
@@ -212,6 +213,39 @@ class GraphManager:
             "max_hops": max_hops,
             "count": len(selected),
             "edges": selected,
+            "error": None,
+        }
+
+    def conflict_scan(
+        self,
+        *,
+        ref: dict[str, Any] | None = None,
+        status: str = "active",
+    ) -> dict[str, Any]:
+        if ref is not None:
+            self._validate_ref(ref, "ref")
+        self._validate_status(status)
+
+        conflicts: list[dict[str, Any]] = []
+        for edge in self._load_graph().get("edges", []):
+            if status is not None and edge.get("status") != status:
+                continue
+            if edge.get("edge_type") not in CONFLICT_EDGE_TYPES:
+                continue
+            if ref is not None and not (
+                _refs_equal(edge.get("from_ref", {}), ref)
+                or _refs_equal(edge.get("to_ref", {}), ref)
+            ):
+                continue
+            conflicts.append(edge)
+
+        return {
+            "schema_version": f"{GRAPH_SCHEMA_VERSION}.conflict-scan.v1",
+            "ref": ref,
+            "status": status,
+            "edge_types": sorted(CONFLICT_EDGE_TYPES),
+            "count": len(conflicts),
+            "conflicts": conflicts,
             "error": None,
         }
 
