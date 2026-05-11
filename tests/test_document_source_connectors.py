@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from core.source_connectors import preview_document_source_connector
 
 
@@ -47,6 +49,7 @@ def test_preview_document_source_connector_prepares_document_extraction_argument
 def test_preview_document_source_connector_omits_external_extractor_formats(tmp_path):
     pdf = tmp_path / "scan.pdf"
     pdf.write_bytes(b"%PDF-1.4 image-only")
+    content_hash = "sha256:" + hashlib.sha256(pdf.read_bytes()).hexdigest()
 
     payload = preview_document_source_connector(
         connector_type="local_path",
@@ -63,5 +66,18 @@ def test_preview_document_source_connector_omits_external_extractor_formats(tmp_
             "reason": "external_extractor_required",
             "media_type": "application/pdf",
             "recommended_next": "use an external PDF/OCR extractor, then preview_document_extraction or preview_visual_extraction",
+            "document_extraction_request_arguments": {
+                "source_ref": {
+                    "source_uri": pdf.resolve().as_uri(),
+                    "content_hash": content_hash,
+                    "path": str(pdf.resolve()),
+                    "relative_path": "scan.pdf",
+                },
+                "source_type": "pdf",
+                "requested_outputs": ["markdown", "metadata", "page_images"],
+                "extractor_id": "engram-document-request",
+                "extractor_kind": "external_document",
+                "instructions": "Extract text and page images as needed, then feed reviewed outputs into preview_document_extraction or preview_visual_extraction.",
+            },
         }
     ]

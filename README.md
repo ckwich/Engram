@@ -161,7 +161,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `discard_source_draft` | Delete a draft. |
 | `preview_memory_chunks` | Preview chunking without writing. |
 | `preview_source_connector` | Preview local source intake without writing. |
-| `preview_document_source_connector` | Preview local Markdown/text/HTML document intake without writing. |
+| `preview_document_source_connector` | Preview local Markdown/text/HTML document intake and external parser request arguments without writing. |
 | `prepare_document_extraction_request` | Prepare a no-write external parser request for PDF/DOCX/image-bearing sources. |
 | `preview_document_extraction` | Preview document evidence and chunks without writing. |
 | `prepare_document_draft` | Prepare no-write document memory/graph proposals. |

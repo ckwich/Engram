@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,14 @@ DOCUMENT_MEDIA_TYPES = {
 EXTERNAL_EXTRACTOR_MEDIA_TYPES = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+EXTERNAL_EXTRACTOR_SOURCE_TYPES = {
+    ".pdf": "pdf",
+    ".docx": "docx",
+}
+EXTERNAL_EXTRACTOR_OUTPUTS = {
+    ".pdf": ["markdown", "metadata", "page_images"],
+    ".docx": ["markdown", "metadata"],
 }
 SKIP_DIR_NAMES = {
     ".git",
@@ -279,10 +288,26 @@ def preview_document_source_connector(
 
 
 def _external_extractor_omission(path: Path, relative_path: str, media_type: str) -> dict[str, Any]:
+    suffix = path.suffix.lower()
+    source_uri = _file_uri(path)
+    content_hash = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
     return {
         "path": str(path),
         "relative_path": relative_path,
         "reason": "external_extractor_required",
         "media_type": media_type,
         "recommended_next": "use an external PDF/OCR extractor, then preview_document_extraction or preview_visual_extraction",
+        "document_extraction_request_arguments": {
+            "source_ref": {
+                "source_uri": source_uri,
+                "content_hash": content_hash,
+                "path": str(path),
+                "relative_path": relative_path,
+            },
+            "source_type": EXTERNAL_EXTRACTOR_SOURCE_TYPES[suffix],
+            "requested_outputs": list(EXTERNAL_EXTRACTOR_OUTPUTS[suffix]),
+            "extractor_id": "engram-document-request",
+            "extractor_kind": "external_document",
+            "instructions": "Extract text and page images as needed, then feed reviewed outputs into preview_document_extraction or preview_visual_extraction.",
+        },
     }

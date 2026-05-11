@@ -548,7 +548,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
-            "preview_document_source_connector": "Preview local Markdown/text/HTML documents as document extraction arguments without writing memory.",
+            "preview_document_source_connector": "Preview local Markdown/text/HTML extraction arguments and external parser request arguments without writing memory.",
             "prepare_document_extraction_request": "Prepare a no-write external document parsing request for PDF/DOCX/image-bearing sources.",
             "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
             "prepare_document_draft": "Prepare a no-write document draft with proposed memories and graph edges.",
