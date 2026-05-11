@@ -24,6 +24,7 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 | `core/source_connectors.py` | Preview-only source connector helpers | Must not import or promote memory without a separate explicit store flow |
 | `core/source_intake.py` | Reviewable source draft preparation | Draft-only until explicit promotion |
 | `core/hybrid_retrieval.py` | Lexical scoring helpers for opt-in hybrid retrieval | Semantic retrieval remains the default |
+| `core/memory_quality.py` | Metadata-only quality audit signals | Read-only scope/lifecycle/chunking risk report; must not load memory bodies or write repairs |
 | `core/retrieval_eval.py` | Agent/WebUI wrapper for deterministic retrieval evals | Delegates to the reliability harness |
 | `core/workflow_templates.py` | Static agent workflow recipes | Keep compact and action-oriented |
 | `core/usage_meter.py` | Token estimate telemetry | Privacy-safe estimates only, no raw tool bodies |
@@ -75,6 +76,7 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 - `prepare_codebase_mapping()` / `read_codebase_mapping_context()` / `store_codebase_mapping_result()` are agent-native. Engram prepares bounded repo context, tracks source hashes, and blocks stale stores unless forced; the connected agent performs synthesis. Do not add provider-specific model subprocesses to this path.
 - `find_memories`, `read_chunk`, `read_memory`, and `write_memory` are aliases/helpers for agent verb discovery; keep them behaviorally aligned with the canonical tools.
 - `prepare_memory()` should remain a no-write draft gate that combines metadata suggestion, validation, and duplicate checking before `store_memory()` / `write_memory()`.
+- `audit_memory_quality()` is read-only and metadata-only. It reports quality/risk signals for agent judgment; it is not a repair tool and must not load full memory bodies.
 - `audit_memory_metadata()` is read-only. `repair_memory_metadata()` must remain dry-run by default and must preserve JSON-first, Chroma-second ordering when writes are requested.
 
 ## v0.6 Agent Operating Layer Rules

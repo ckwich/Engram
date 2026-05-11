@@ -2004,6 +2004,46 @@ def test_list_context_profiles_returns_no_write_catalog():
     assert payload["error"] is None
 
 
+def test_audit_memory_quality_returns_metadata_only_report(monkeypatch):
+    server = load_server_module()
+
+    async def fake_list_memories():
+        return [
+            {
+                "key": "quality_note",
+                "title": "Quality note",
+                "project": "C:/Dev/Engram",
+                "domain": None,
+                "tags": [],
+                "status": "active",
+                "canonical": False,
+                "chars": 500,
+                "chunk_count": 1,
+            },
+            {
+                "key": "other_project",
+                "title": "Other project",
+                "project": "Other",
+                "domain": None,
+                "tags": [],
+                "status": "active",
+                "canonical": False,
+                "chars": 500,
+                "chunk_count": 1,
+            },
+        ]
+
+    monkeypatch.setattr(server.memory_manager, "list_memories_async", fake_list_memories)
+
+    payload = asyncio.run(server.audit_memory_quality(project="C:/Dev/Engram"))
+
+    assert payload["count"] == 1
+    assert payload["memories"][0]["key"] == "quality_note"
+    assert payload["memories"][0]["issues"][0]["code"] == "missing_domain"
+    assert "content" not in payload["memories"][0]
+    assert payload["error"] is None
+
+
 def test_prepare_context_uses_profile_defaults_and_returns_context_packet(monkeypatch):
     server = load_server_module()
     observed: dict[str, object] = {}

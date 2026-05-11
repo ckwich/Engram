@@ -47,6 +47,7 @@ from core.graph_manager import graph_manager
 from core.hybrid_retrieval import normalize_retrieval_mode
 from core.ingestion_pipelines import list_ingestion_pipelines as build_ingestion_pipeline_catalog
 from core.memory_manager import memory_manager, DuplicateMemoryError, _config
+from core.memory_quality import audit_memory_quality as build_memory_quality_audit
 from core.operation_log import operation_log
 from core.reliability_harness import run_agent_reliability_harness
 from core.retrieval_eval import run_retrieval_eval
@@ -425,6 +426,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                     "suggest_memory_metadata",
                     "validate_memory",
                     "update_memory_metadata",
+                    "audit_memory_quality",
                     "get_related_memories",
                     "get_stale_memories",
                     "delete_memory",
@@ -562,6 +564,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "codebase mapping": "prepare_codebase_mapping",
                 "codebase mapping setup": "draft_codebase_mapping_config",
                 "usage review": "usage_summary",
+                "memory quality": "audit_memory_quality",
                 "metadata browsing": "list_memories",
                 "memory writing": "prepare_memory",
             },
@@ -572,6 +575,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "list_context_profiles": "List no-write retrieval profiles for context compilation.",
             "prepare_context": "Compile a no-write, cited context packet for a task using retrieval profiles.",
             "make_handoff": "Generate a no-write handoff packet with context refs, citations, next steps, and validation notes.",
+            "audit_memory_quality": "Read-only metadata quality audit for scope, lifecycle, chunking, and retrieval risk signals.",
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "conflict_scan": "List active contradiction, invalidation, and supersession graph edges without loading memory bodies.",
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
@@ -2163,6 +2167,58 @@ async def list_memories(
         offset=normalized_offset,
         has_more=has_more,
     )
+
+
+@mcp.tool()
+async def audit_memory_quality(
+    limit: int = 100,
+    offset: int = 0,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Audit memory metadata quality without loading memory bodies or writing repairs.
+
+    This reports scope, lifecycle, chunking, and retrieval-risk signals so agents
+    can prefer well-scoped active memories and notice low-quality context before
+    relying on it. For repairable JSON hygiene, use audit_memory_metadata().
+    """
+    try:
+        memories = await memory_manager.list_memories_async()
+    except Exception as e:
+        return {
+            "schema_version": "2026-05-11.memory-quality.v1",
+            "count": 0,
+            "total": 0,
+            "issue_count": 0,
+            "limit": _clamp_list_limit(limit),
+            "offset": _normalize_offset(offset),
+            "has_more": False,
+            "summary": {"low_risk_count": 0, "medium_risk_count": 0, "high_risk_count": 0},
+            "memories": [],
+            "write_performed": False,
+            "error": _tool_error("runtime_error", f"❌ Engram error: {e}"),
+        }
+
+    required_tags = _normalize_string_list(tags)
+
+    def keep(memory: dict[str, Any]) -> bool:
+        if project is not None and memory.get("project") != project:
+            return False
+        if domain is not None and memory.get("domain") != domain:
+            return False
+        if required_tags and not all(tag in (memory.get("tags") or []) for tag in required_tags):
+            return False
+        return True
+
+    payload = build_memory_quality_audit(
+        [memory for memory in memories if keep(memory)],
+        limit=_clamp_list_limit(limit),
+        offset=_normalize_offset(offset),
+    )
+    payload["error"] = None
+    return payload
 
 
 @mcp.tool()

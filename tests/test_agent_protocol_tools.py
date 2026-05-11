@@ -72,6 +72,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "prepare_context" in payload["tool_groups"]["agent_workflows"]["tools"]
     assert "list_context_profiles" in payload["tool_groups"]["agent_workflows"]["tools"]
     assert "make_handoff" in payload["tool_groups"]["agent_workflows"]["tools"]
+    assert "audit_memory_quality" in payload["tool_groups"]["memory_review"]["tools"]
     assert payload["tool_groups"]["usage"]["stability"] == "beta"
     assert payload["progressive_discovery"]["start_here"] == "memory_protocol"
     assert payload["progressive_discovery"]["load_next"]["source ingestion"] == "prepare_source_memory"
@@ -89,6 +90,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert payload["progressive_discovery"]["load_next"]["retrieval profiles"] == "list_context_profiles"
     assert payload["progressive_discovery"]["load_next"]["handoff generator"] == "make_handoff"
     assert payload["progressive_discovery"]["load_next"]["usage review"] == "usage_summary"
+    assert payload["progressive_discovery"]["load_next"]["memory quality"] == "audit_memory_quality"
     assert "preview_document_extraction" in payload["canonical_tools"]
     assert "list_document_extractors" in payload["canonical_tools"]
     assert "preview_document_source_connector" in payload["canonical_tools"]
@@ -102,6 +104,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "list_context_profiles" in payload["canonical_tools"]
     assert "make_handoff" in payload["canonical_tools"]
     assert "conflict_scan" in payload["canonical_tools"]
+    assert "audit_memory_quality" in payload["canonical_tools"]
     assert payload["warnings"][0].startswith("Do not call retrieve_memory")
 
 

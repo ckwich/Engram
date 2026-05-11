@@ -146,6 +146,7 @@ and protocol `schema_version: "2026-04-27"`.
 | Tool | Purpose |
 |---|---|
 | `list_memories` | Paginated memory directory with filters. |
+| `audit_memory_quality` | Read-only metadata quality audit for scope, lifecycle, chunking, and retrieval-risk signals. |
 | `get_related_memories` | Traverse forward and reverse memory links. |
 | `get_stale_memories` | Surface stale or potentially stale memories. |
 | `pin_memory` | Pin a memory for the current session. |

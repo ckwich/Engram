@@ -58,6 +58,7 @@ where typed, and focused tests.
 | `suggest_memory_metadata` | stable | `dict{suggestion, error}` | Read-only metadata suggestion. |
 | `validate_memory` | stable | `dict{valid, errors, normalized, error}` | Read-only payload validation. |
 | `update_memory_metadata` | stable | `dict{key, updated, memory, error}` | Metadata-only update path. |
+| `audit_memory_quality` | stable | `dict{schema_version, count, total, issue_count, summary, memories, write_performed, error}` | Read-only metadata quality audit; does not load memory bodies or write repairs. |
 | `get_related_memories` | stable | `dict{key, found, forward, reverse, forward_count, reverse_count, error}` | Traverses explicit memory links. |
 | `get_stale_memories` | stable | `dict{days, type, count, memories, error}` | Surfaces time/code stale candidates. |
 | `delete_memory` | stable | `str` | Explicit delete by key. |
