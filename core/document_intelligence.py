@@ -4,8 +4,11 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from core.chunker import chunk_content_with_metadata
+
 
 DOCUMENT_INTELLIGENCE_SCHEMA_VERSION = "2026-05-11.document-intelligence.v1"
+DOCUMENT_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.preview.v1"
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
 PROMOTION_GUIDANCE = {
     "default_action": "review_before_promotion",
@@ -146,6 +149,72 @@ def prepare_extractor_receipt(
         "active_memory_write_performed": False,
         "promotion_required": True,
         "promotion_guidance": dict(PROMOTION_GUIDANCE),
+    }
+
+
+def preview_document_extraction(
+    *,
+    title: str,
+    source_uri: str,
+    source_type: str,
+    content: str,
+    media_type: str,
+    metadata: dict[str, Any] | None = None,
+    extractor_id: str = "engram-text-preview",
+    extractor_kind: str = "agent_native",
+) -> dict[str, Any]:
+    """Preview text/markdown document evidence and chunks without writing."""
+    normalized_content = _require_text(content, "content")
+    content_hash = "sha256:" + hashlib.sha256(normalized_content.encode("utf-8")).hexdigest()
+    document_record = prepare_document_record(
+        title=title,
+        source_uri=source_uri,
+        source_type=source_type,
+        content_hash=content_hash,
+        media_type=media_type,
+        metadata=metadata,
+    )
+    chunks = [
+        _preview_chunk(document_record, chunk)
+        for chunk in chunk_content_with_metadata(normalized_content)
+    ]
+    extractor_receipt = prepare_extractor_receipt(
+        document_record=document_record,
+        visual_artifacts=[],
+        extractor_id=extractor_id,
+        extractor_kind=extractor_kind,
+    )
+    return {
+        "schema_version": DOCUMENT_PREVIEW_SCHEMA_VERSION,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "review_required": True,
+        "document_record": document_record,
+        "chunks": chunks,
+        "visual_artifacts": [],
+        "extractor_receipt": extractor_receipt,
+        "receipt": {
+            "input_chars": len(normalized_content),
+            "chunk_count": len(chunks),
+            "visual_artifact_count": 0,
+            "extractor_kind": extractor_kind,
+        },
+    }
+
+
+def _preview_chunk(document_record: dict[str, Any], chunk: dict[str, Any]) -> dict[str, Any]:
+    chunk_id = int(chunk["chunk_id"])
+    return {
+        "chunk_id": chunk_id,
+        "text": chunk["text"],
+        "section_title": chunk.get("section_title", ""),
+        "heading_path": list(chunk.get("heading_path", [])),
+        "chunk_kind": chunk.get("chunk_kind", "section"),
+        "provenance": {
+            "document_id": document_record["document_id"],
+            "source_uri": document_record["source_uri"],
+            "chunk_id": chunk_id,
+        },
     }
 
 

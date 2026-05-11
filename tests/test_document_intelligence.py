@@ -6,6 +6,7 @@ from core.document_intelligence import (
     prepare_document_record,
     prepare_extractor_receipt,
     prepare_visual_artifact_record,
+    preview_document_extraction,
 )
 
 
@@ -149,3 +150,71 @@ def test_prepare_extractor_receipt_links_visual_evidence_without_promoting_memor
     assert receipt["active_memory_write_performed"] is False
     assert receipt["promotion_required"] is True
     assert receipt["promotion_guidance"]["default_action"] == "review_before_promotion"
+
+
+def test_preview_document_extraction_returns_no_write_chunks_and_receipt_for_markdown():
+    content = "# Memory OS\n\nAgent memory substrate.\n\n## Retrieval\n\nChunk before full memory."
+    preview = preview_document_extraction(
+        title="Memory OS Notes",
+        source_uri="file:///docs/memory-os.md",
+        source_type="markdown",
+        content=content,
+        media_type="text/markdown",
+        metadata={"project": "Engram"},
+    )
+
+    assert preview["schema_version"] == "2026-05-11.document-intelligence.preview.v1"
+    assert preview["write_performed"] is False
+    assert preview["active_memory_write_performed"] is False
+    assert preview["review_required"] is True
+    assert preview["document_record"]["record_type"] == "document"
+    assert preview["document_record"]["metadata"] == {"project": "Engram"}
+    assert preview["extractor_receipt"]["image_recognition_used"] is False
+    assert preview["extractor_receipt"]["external_framework_required"] is False
+    assert preview["receipt"] == {
+        "input_chars": len(content),
+        "chunk_count": 2,
+        "visual_artifact_count": 0,
+        "extractor_kind": "agent_native",
+    }
+    assert [
+        {
+            "chunk_id": chunk["chunk_id"],
+            "text": chunk["text"],
+            "heading_path": chunk["heading_path"],
+            "provenance": chunk["provenance"],
+        }
+        for chunk in preview["chunks"]
+    ] == [
+        {
+            "chunk_id": 0,
+            "text": "# Memory OS\n\nAgent memory substrate.",
+            "heading_path": ["Memory OS"],
+            "provenance": {
+                "document_id": preview["document_record"]["document_id"],
+                "source_uri": "file:///docs/memory-os.md",
+                "chunk_id": 0,
+            },
+        },
+        {
+            "chunk_id": 1,
+            "text": "## Retrieval\n\nChunk before full memory.",
+            "heading_path": ["Memory OS", "Retrieval"],
+            "provenance": {
+                "document_id": preview["document_record"]["document_id"],
+                "source_uri": "file:///docs/memory-os.md",
+                "chunk_id": 1,
+            },
+        },
+    ]
+
+
+def test_preview_document_extraction_rejects_blank_content():
+    with pytest.raises(ValueError, match="content is required"):
+        preview_document_extraction(
+            title="Blank",
+            source_uri="file:///blank.txt",
+            source_type="plain_text",
+            content="   ",
+            media_type="text/plain",
+        )
