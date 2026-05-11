@@ -80,6 +80,7 @@ where typed, and focused tests.
 | `preview_memory_chunks` | beta | `dict{title, chunk_count, chunks, omitted, error}` | No-write chunk boundary preview. |
 | `preview_source_connector` | beta | `dict{connector_type, target, count, items, omitted, write_performed, error}` | No-write local source preview. |
 | `preview_document_source_connector` | beta | `dict{connector_type, target, count, items, omitted, write_performed, error}` | No-write local Markdown/text/HTML document preview; external formats are reported as extractor-required. |
+| `prepare_document_extraction_request` | beta | `dict{request, error}` | No-write external parser request for PDF/DOCX/image-bearing sources; does not run a provider. |
 | `preview_document_extraction` | beta | `dict{preview, error}` | No-write document evidence/chunk preview. |
 | `prepare_document_draft` | beta | `dict{draft, error}` | No-write document memory/graph proposal draft; does not promote. |
 | `prepare_document_promotion_transaction` | beta | `dict{transaction, error}` | No-write operation plan for reviewed document draft promotion; does not execute writes. |

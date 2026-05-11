@@ -11,9 +11,33 @@ DOCUMENT_INTELLIGENCE_SCHEMA_VERSION = "2026-05-11.document-intelligence.v1"
 DOCUMENT_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.preview.v1"
 VISUAL_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-preview.v1"
 VISUAL_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-request.v1"
+DOCUMENT_EXTRACTION_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.extraction-request.v1"
 DOCUMENT_DRAFT_SCHEMA_VERSION = "2026-05-11.document-intelligence.draft.v1"
 DOCUMENT_PROMOTION_SCHEMA_VERSION = "2026-05-11.document-intelligence.promotion.v1"
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
+VALID_DOCUMENT_EXTRACTOR_KINDS = {
+    "agent_native",
+    "docx",
+    "external_document",
+    "html",
+    "ocr",
+    "ocr_document",
+    "ocr_vision",
+    "pdf",
+    "vision",
+}
+VALID_DOCUMENT_OUTPUTS = {
+    "figures",
+    "html",
+    "markdown",
+    "metadata",
+    "page_images",
+    "plain_text",
+    "tables",
+    "visual_artifacts",
+}
+VISUAL_DOCUMENT_OUTPUTS = {"figures", "page_images", "tables", "visual_artifacts"}
+VISUAL_SOURCE_TYPES = {"image", "image_folder", "pdf", "scan", "screenshot"}
 DOCUMENT_ANALYSIS_SECTIONS = {
     "summary": "Summary",
     "decisions": "Decisions",
@@ -49,6 +73,16 @@ EXPECTED_VISUAL_OBSERVATION_FIELDS = [
     "bounding_box",
     "confidence",
     "metadata",
+]
+EXPECTED_DOCUMENT_EXTRACTION_FIELDS = [
+    "title",
+    "source_uri",
+    "source_type",
+    "content",
+    "media_type",
+    "content_hash",
+    "metadata",
+    "image_refs",
 ]
 
 
@@ -232,6 +266,69 @@ def prepare_visual_extraction_request(
         "active_memory_write_performed": False,
         "promotion_required": True,
         "promotion_guidance": dict(PROMOTION_GUIDANCE),
+    }
+
+
+def prepare_document_extraction_request(
+    *,
+    source_ref: dict[str, Any],
+    source_type: str,
+    requested_outputs: list[str],
+    extractor_id: str,
+    extractor_kind: str,
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    """Prepare a reviewable external document extraction request without running a provider."""
+    normalized_source_ref = _normalize_source_ref(source_ref)
+    normalized_source_type = _require_text(source_type, "source_type")
+    normalized_outputs = _normalize_document_outputs(requested_outputs)
+    normalized_extractor_id = _require_text(extractor_id, "extractor_id")
+    normalized_extractor_kind = _normalize_document_extractor_kind(extractor_kind)
+    normalized_instructions = _optional_text(instructions, "instructions")
+    request_seed = "|".join(
+        [
+            _stable_repr(normalized_source_ref),
+            normalized_source_type,
+            _stable_repr(normalized_outputs),
+            normalized_extractor_id,
+            normalized_extractor_kind,
+            normalized_instructions or "",
+        ]
+    )
+    image_recognition = (
+        normalized_source_type in VISUAL_SOURCE_TYPES
+        or bool(set(normalized_outputs) & VISUAL_DOCUMENT_OUTPUTS)
+        or normalized_extractor_kind in {"ocr", "ocr_document", "ocr_vision", "vision"}
+    )
+    return {
+        "schema_version": DOCUMENT_EXTRACTION_REQUEST_SCHEMA_VERSION,
+        "record_type": "document_extraction_request",
+        "request_id": _stable_id("doc_req", request_seed),
+        "source_ref": normalized_source_ref,
+        "source_type": normalized_source_type,
+        "requested_outputs": normalized_outputs,
+        "instructions": normalized_instructions,
+        "extractor": {
+            "id": normalized_extractor_id,
+            "kind": normalized_extractor_kind,
+            "external_framework_required": normalized_extractor_kind != "agent_native",
+        },
+        "external_framework_required": normalized_extractor_kind != "agent_native",
+        "image_recognition_may_be_required": image_recognition,
+        "expected_extraction_fields": list(EXPECTED_DOCUMENT_EXTRACTION_FIELDS),
+        "review_status": "request",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "promotion_required": True,
+        "promotion_guidance": {
+            "default_action": "run_external_extractor_then_preview",
+            "auto_promote": False,
+            "next_tools": [
+                "preview_document_extraction",
+                "preview_visual_extraction",
+                "prepare_document_draft",
+            ],
+        },
     }
 
 
@@ -592,6 +689,19 @@ def _normalize_visual_capabilities(value: Any) -> list[str]:
     return sorted(normalized)
 
 
+def _normalize_document_outputs(value: Any) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("requested_outputs must include at least one item")
+    normalized: set[str] = set()
+    for item in value:
+        output = _require_text(item, "requested_output").lower()
+        if output not in VALID_DOCUMENT_OUTPUTS:
+            valid = ", ".join(sorted(VALID_DOCUMENT_OUTPUTS))
+            raise ValueError(f"Unsupported document output: {output}. Valid: {valid}")
+        normalized.add(output)
+    return sorted(normalized)
+
+
 def _normalize_document_analysis(value: Any) -> dict[str, list[str]]:
     if not isinstance(value, dict):
         raise ValueError("analysis must be an object")
@@ -744,6 +854,14 @@ def _normalize_extractor_kind(value: Any) -> str:
     text = _require_text(value, "extractor_kind")
     if text not in VALID_EXTRACTOR_KINDS:
         valid = ", ".join(sorted(VALID_EXTRACTOR_KINDS))
+        raise ValueError(f"extractor_kind must be one of: {valid}")
+    return text
+
+
+def _normalize_document_extractor_kind(value: Any) -> str:
+    text = _require_text(value, "extractor_kind").lower()
+    if text not in VALID_DOCUMENT_EXTRACTOR_KINDS:
+        valid = ", ".join(sorted(VALID_DOCUMENT_EXTRACTOR_KINDS))
         raise ValueError(f"extractor_kind must be one of: {valid}")
     return text
 

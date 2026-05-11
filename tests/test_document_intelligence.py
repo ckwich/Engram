@@ -5,6 +5,7 @@ import pytest
 from core.document_intelligence import (
     prepare_document_record,
     prepare_document_draft,
+    prepare_document_extraction_request,
     prepare_document_promotion_transaction,
     prepare_extractor_receipt,
     prepare_visual_extraction_request,
@@ -235,6 +236,63 @@ def test_prepare_visual_extraction_request_validates_images_and_capabilities():
             requested_capabilities=["read_minds"],
             extractor_id="local-vision-v1",
             extractor_kind="ocr",
+        )
+
+
+def test_prepare_document_extraction_request_marks_external_parsing_as_reviewable():
+    request = prepare_document_extraction_request(
+        source_ref={
+            "source_uri": "file:///docs/architecture.pdf",
+            "content_hash": "sha256:" + "d" * 64,
+        },
+        source_type="pdf",
+        requested_outputs=["markdown", "metadata", "page_images"],
+        extractor_id="local-pdf-extractor",
+        extractor_kind="external_document",
+        instructions="Extract text and render page images for diagram review.",
+    )
+    duplicate = prepare_document_extraction_request(
+        source_ref={
+            "content_hash": "sha256:" + "d" * 64,
+            "source_uri": "file:///docs/architecture.pdf",
+        },
+        source_type="pdf",
+        requested_outputs=["page_images", "markdown", "metadata"],
+        extractor_id="local-pdf-extractor",
+        extractor_kind="external_document",
+        instructions="Extract text and render page images for diagram review.",
+    )
+
+    assert duplicate["request_id"] == request["request_id"]
+    assert request["schema_version"] == "2026-05-11.document-intelligence.extraction-request.v1"
+    assert request["record_type"] == "document_extraction_request"
+    assert request["source_type"] == "pdf"
+    assert request["requested_outputs"] == ["markdown", "metadata", "page_images"]
+    assert request["external_framework_required"] is True
+    assert request["image_recognition_may_be_required"] is True
+    assert request["write_performed"] is False
+    assert request["active_memory_write_performed"] is False
+    assert "preview_document_extraction" in request["promotion_guidance"]["next_tools"]
+    assert "preview_visual_extraction" in request["promotion_guidance"]["next_tools"]
+
+
+def test_prepare_document_extraction_request_validates_source_and_outputs():
+    with pytest.raises(ValueError, match="source_ref is required"):
+        prepare_document_extraction_request(
+            source_ref={},
+            source_type="pdf",
+            requested_outputs=["markdown"],
+            extractor_id="local-pdf-extractor",
+            extractor_kind="external_document",
+        )
+
+    with pytest.raises(ValueError, match="Unsupported document output"):
+        prepare_document_extraction_request(
+            source_ref={"source_uri": "file:///docs/architecture.pdf"},
+            source_type="pdf",
+            requested_outputs=["telepathy"],
+            extractor_id="local-pdf-extractor",
+            extractor_kind="external_document",
         )
 
 

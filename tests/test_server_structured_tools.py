@@ -1347,6 +1347,48 @@ def test_preview_document_source_connector_tool_returns_structured_invalid_reque
     }
 
 
+def test_prepare_document_extraction_request_tool_returns_no_write_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.prepare_document_extraction_request(
+            source_ref={"source_uri": "file:///docs/architecture.pdf"},
+            source_type="pdf",
+            requested_outputs=["markdown", "page_images"],
+            extractor_id="local-pdf-extractor",
+            extractor_kind="external_document",
+            instructions="Extract text and page images.",
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["request"]["record_type"] == "document_extraction_request"
+    assert payload["request"]["write_performed"] is False
+    assert payload["request"]["requested_outputs"] == ["markdown", "page_images"]
+
+
+def test_prepare_document_extraction_request_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.prepare_document_extraction_request(
+            source_ref={},
+            source_type="pdf",
+            requested_outputs=["markdown"],
+            extractor_id="local-pdf-extractor",
+            extractor_kind="external_document",
+        )
+    )
+
+    assert payload == {
+        "request": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "source_ref is required",
+        },
+    }
+
+
 def test_prepare_visual_extraction_request_tool_returns_no_write_request():
     server = load_server_module()
     document = {

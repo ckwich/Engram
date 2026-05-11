@@ -27,6 +27,7 @@ from core.codebase_mapper import codebase_mapping_manager
 from core.context_builder import build_context_receipt, make_filters, merge_graph_candidates
 from core.document_intelligence import (
     prepare_document_draft as build_document_draft,
+    prepare_document_extraction_request as build_document_extraction_request,
     prepare_document_promotion_transaction as build_document_promotion_transaction,
     prepare_visual_extraction_request as build_visual_extraction_request,
     preview_document_extraction as build_document_extraction_preview,
@@ -457,6 +458,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "cost_class": "medium",
                 "tools": [
                     "prepare_document_draft",
+                    "prepare_document_extraction_request",
                     "prepare_document_promotion_transaction",
                     "prepare_visual_extraction_request",
                     "preview_document_source_connector",
@@ -526,6 +528,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "source ingestion setup": "list_ingestion_pipelines",
                 "chunk boundary review": "preview_memory_chunks",
                 "document extraction": "preview_document_extraction",
+                "document extraction request": "prepare_document_extraction_request",
                 "document source connector": "preview_document_source_connector",
                 "document draft": "prepare_document_draft",
                 "document promotion": "prepare_document_promotion_transaction",
@@ -546,6 +549,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
             "preview_document_source_connector": "Preview local Markdown/text/HTML documents as document extraction arguments without writing memory.",
+            "prepare_document_extraction_request": "Prepare a no-write external document parsing request for PDF/DOCX/image-bearing sources.",
             "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
             "prepare_document_draft": "Prepare a no-write document draft with proposed memories and graph edges.",
             "prepare_document_promotion_transaction": "Prepare a no-write operation plan for reviewed document draft promotion.",
@@ -591,6 +595,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
             "preview_document_source_connector(connector_type='local_path', target='docs') before document extraction",
+            "prepare_document_extraction_request(source_ref={'source_uri': 'file:///notes.pdf'}, source_type='pdf', requested_outputs=['markdown', 'page_images']) before running a local parser",
             "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
             "prepare_document_promotion_transaction(document_draft=draft, approved_by='agent-review') before executing writes",
             "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
@@ -860,6 +865,56 @@ async def preview_document_source_connector(
             "error": _tool_error("invalid_request", str(e)),
         }
     _record_usage_for_payload("preview_document_source_connector", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_extraction_request(
+    source_ref: dict[str, Any],
+    source_type: str,
+    requested_outputs: list[str],
+    extractor_id: str = "engram-document-request",
+    extractor_kind: str = "external_document",
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write external document extraction request.
+
+    Use this for PDF, DOCX, image-bearing, or otherwise external-parser-backed
+    documents before running a local/framework extractor. The returned request is
+    reviewable provenance only; Engram does not run the provider or write memory.
+    Feed extracted text into preview_document_extraction and image/OCR observations
+    into preview_visual_extraction before any draft promotion.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source_ref": source_ref,
+        "source_type": source_type,
+        "requested_outputs": requested_outputs,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+        "instructions": instructions,
+    }
+    try:
+        payload = {
+            "request": build_document_extraction_request(
+                source_ref=source_ref,
+                source_type=source_type,
+                requested_outputs=requested_outputs,
+                extractor_id=extractor_id,
+                extractor_kind=extractor_kind,
+                instructions=instructions,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"request": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "request": None,
+            "error": _tool_error("runtime_error", f"Unexpected document extraction request failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_extraction_request", input_payload, payload, started_at)
     return payload
 
 
