@@ -161,6 +161,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `discard_source_draft` | Delete a draft. |
 | `preview_memory_chunks` | Preview chunking without writing. |
 | `preview_source_connector` | Preview local source intake without writing. |
+| `preview_document_source_connector` | Preview local Markdown/text/HTML document intake without writing. |
 | `preview_document_extraction` | Preview document evidence and chunks without writing. |
 | `prepare_document_draft` | Prepare no-write document memory/graph proposals. |
 | `prepare_document_promotion_transaction` | Prepare no-write document promotion operations. |
@@ -413,7 +414,7 @@ The review flow is:
 prepare_source_memory -> inspect draft -> store_prepared_memory
 ```
 
-Use `preview_memory_chunks`, `preview_source_connector`, `preview_document_extraction`, `prepare_document_draft`, `prepare_document_promotion_transaction`, `prepare_visual_extraction_request`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any write happens. Document draft proposals, promotion operation plans, and image/OCR requests or observations are evidence records, not trusted active memory, until a later explicit review path promotes them.
+Use `preview_memory_chunks`, `preview_source_connector`, `preview_document_source_connector`, `preview_document_extraction`, `prepare_document_draft`, `prepare_document_promotion_transaction`, `prepare_visual_extraction_request`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any write happens. Document draft proposals, promotion operation plans, and image/OCR requests or observations are evidence records, not trusted active memory, until a later explicit review path promotes them.
 
 Source intake never auto-promotes active memories. Drafts are review records with
 `status: "draft"`, `active_memory_write_performed: false`, and promotion guidance

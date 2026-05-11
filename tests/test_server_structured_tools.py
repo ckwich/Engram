@@ -1302,6 +1302,51 @@ def test_preview_document_extraction_tool_returns_structured_invalid_request():
     }
 
 
+def test_preview_document_source_connector_tool_returns_document_arguments(tmp_path):
+    server = load_server_module()
+    note = tmp_path / "architecture.md"
+    note.write_text("# Architecture\n\nDecision: Keep imports reviewable.", encoding="utf-8")
+
+    payload = asyncio.run(
+        server.preview_document_source_connector(
+            connector_type="local_path",
+            target=str(note),
+            include_globs=["*.md"],
+            metadata={"project": "Engram"},
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["count"] == 1
+    assert payload["write_performed"] is False
+    assert payload["items"][0]["document_extraction_arguments"]["source_type"] == "markdown"
+    assert payload["items"][0]["document_extraction_arguments"]["metadata"]["project"] == "Engram"
+
+
+def test_preview_document_source_connector_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.preview_document_source_connector(
+            connector_type="unsupported",
+            target="missing",
+        )
+    )
+
+    assert payload == {
+        "connector_type": "unsupported",
+        "target": "missing",
+        "count": 0,
+        "items": [],
+        "omitted": [],
+        "write_performed": False,
+        "error": {
+            "code": "invalid_request",
+            "message": "Only connector_type='local_path' is currently supported.",
+        },
+    }
+
+
 def test_prepare_visual_extraction_request_tool_returns_no_write_request():
     server = load_server_module()
     document = {

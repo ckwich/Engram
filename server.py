@@ -43,6 +43,7 @@ from core.retrieval_eval import run_retrieval_eval
 from core.session_pins import SessionPinStore
 from core.source_intake import source_intake_manager
 from core.source_connectors import preview_source_connector as build_source_connector_preview
+from core.source_connectors import preview_document_source_connector as build_document_source_connector_preview
 from core.tool_payloads import (
     build_list_error_payload,
     build_list_payload,
@@ -458,6 +459,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                     "prepare_document_draft",
                     "prepare_document_promotion_transaction",
                     "prepare_visual_extraction_request",
+                    "preview_document_source_connector",
                     "preview_document_extraction",
                     "preview_visual_extraction",
                 ],
@@ -524,6 +526,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "source ingestion setup": "list_ingestion_pipelines",
                 "chunk boundary review": "preview_memory_chunks",
                 "document extraction": "preview_document_extraction",
+                "document source connector": "preview_document_source_connector",
                 "document draft": "prepare_document_draft",
                 "document promotion": "prepare_document_promotion_transaction",
                 "visual extraction request": "prepare_visual_extraction_request",
@@ -542,6 +545,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
+            "preview_document_source_connector": "Preview local Markdown/text/HTML documents as document extraction arguments without writing memory.",
             "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
             "prepare_document_draft": "Prepare a no-write document draft with proposed memories and graph edges.",
             "prepare_document_promotion_transaction": "Prepare a no-write operation plan for reviewed document draft promotion.",
@@ -586,6 +590,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "context_pack(query='agent memory protocol', project='engram', max_chunks=5)",
             "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
+            "preview_document_source_connector(connector_type='local_path', target='docs') before document extraction",
             "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
             "prepare_document_promotion_transaction(document_draft=draft, approved_by='agent-review') before executing writes",
             "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
@@ -805,6 +810,56 @@ async def preview_source_connector(
             "error": _tool_error("invalid_request", str(e)),
         }
     _record_usage_for_payload("preview_source_connector", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def preview_document_source_connector(
+    connector_type: str,
+    target: str,
+    include_globs: list[str] | None = None,
+    max_files: int = 20,
+    max_file_size_kb: int = 256,
+    max_source_text_chars: int = 12000,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Preview local Markdown, text, and HTML files as document extraction inputs.
+
+    This helper is no-write. PDF, DOCX, and image-bearing sources are reported
+    as requiring an external extractor instead of being parsed speculatively.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "connector_type": connector_type,
+        "target": target,
+        "include_globs": include_globs,
+        "max_files": max_files,
+        "max_file_size_kb": max_file_size_kb,
+        "max_source_text_chars": max_source_text_chars,
+        "metadata": metadata,
+    }
+    try:
+        payload = build_document_source_connector_preview(
+            connector_type=connector_type,
+            target=target,
+            include_globs=include_globs,
+            max_files=max_files,
+            max_file_size_kb=max_file_size_kb,
+            max_source_text_chars=max_source_text_chars,
+            metadata=metadata,
+        )
+    except ValueError as e:
+        payload = {
+            "connector_type": connector_type,
+            "target": target,
+            "count": 0,
+            "items": [],
+            "omitted": [],
+            "write_performed": False,
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    _record_usage_for_payload("preview_document_source_connector", input_payload, payload, started_at)
     return payload
 
 
