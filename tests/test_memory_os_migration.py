@@ -827,3 +827,51 @@ def test_migration_cli_imports_legacy_graph_edge_documents(tmp_path):
     assert report["imported_count"] == 1
     assert report["edge_ids"] == ["sha256:graph-cli-edge"]
     assert MemoryOSMigrationKernel(store_root).read_graph_edge_records()[0] == graph_edge
+
+
+def test_migration_cli_lists_document_intelligence_records(tmp_path):
+    store_root = tmp_path / "store"
+    report_path = tmp_path / "document_records_report.json"
+    document = prepare_document_record(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content_hash="sha256:" + "c" * 64,
+        media_type="text/markdown",
+    )
+    draft = prepare_document_draft(
+        document_record=document,
+        analysis={"claims": ["Reviewed claim"]},
+    )
+    MemoryOSMigrationKernel(store_root).store_document_evidence_records([document, draft])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "core.memory_os_migration",
+            "list-document-records",
+            "--store-root",
+            str(store_root),
+            "--document-id",
+            document["document_id"],
+            "--record-type",
+            "document_draft",
+            "--report",
+            str(report_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert json.loads(result.stdout) == report
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v7"
+    assert report["filters"] == {
+        "document_id": document["document_id"],
+        "record_type": "document_draft",
+    }
+    assert report["count"] == 1
+    assert report["records"] == [draft]

@@ -1332,6 +1332,33 @@ def run_restore_bundle(
     return report
 
 
+def run_list_document_records(
+    store_root: str | Path,
+    *,
+    document_id: str | None = None,
+    record_type: str | None = None,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """List persisted document-intelligence records from a migration store."""
+    records = MemoryOSMigrationKernel(store_root).read_document_evidence_records(
+        document_id=document_id,
+        record_type=record_type,
+    )
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "store_root": str(Path(store_root)),
+        "filters": {
+            "document_id": document_id,
+            "record_type": record_type,
+        },
+        "count": len(records),
+        "records": records,
+    }
+    if report_path is not None:
+        _write_json_file(Path(report_path), report)
+    return report
+
+
 def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
     encoded = (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     _atomic_write(path, encoded)
@@ -1383,6 +1410,15 @@ def _build_parser() -> argparse.ArgumentParser:
     restore_bundle.add_argument("--store-root", required=True, help="Target Memory OS migration store root.")
     restore_bundle.add_argument("--bundle", required=True, help="Input bundle JSON path.")
     restore_bundle.add_argument("--report", help="Optional JSON restore report path.")
+
+    list_document_records = subparsers.add_parser(
+        "list-document-records",
+        help="List persisted document-intelligence records from a migration store.",
+    )
+    list_document_records.add_argument("--store-root", required=True, help="Memory OS migration store root.")
+    list_document_records.add_argument("--document-id", help="Optional document_id filter.")
+    list_document_records.add_argument("--record-type", help="Optional record_type filter.")
+    list_document_records.add_argument("--report", help="Optional JSON report path.")
     return parser
 
 
@@ -1430,6 +1466,16 @@ def main(argv: list[str] | None = None) -> int:
         report = run_restore_bundle(
             store_root=args.store_root,
             bundle_path=args.bundle,
+            report_path=args.report,
+        )
+        sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        return 0
+
+    if args.command == "list-document-records":
+        report = run_list_document_records(
+            store_root=args.store_root,
+            document_id=args.document_id,
+            record_type=args.record_type,
             report_path=args.report,
         )
         sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
