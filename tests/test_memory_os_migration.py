@@ -13,6 +13,7 @@ from core.document_intelligence import (
     prepare_document_record,
     prepare_document_draft,
     prepare_document_extraction_request,
+    prepare_document_extraction_result,
     prepare_document_promotion_transaction,
     prepare_extractor_receipt,
     prepare_visual_artifact_record,
@@ -365,6 +366,39 @@ def test_document_extraction_request_records_round_trip_before_document_exists(t
     assert report["record_ids"] == [request["request_id"]]
     assert stored_requests == [request]
     assert restored.read_document_evidence_records(record_type="document_extraction_request") == [request]
+
+
+def test_document_extraction_result_records_round_trip_with_document_group(tmp_path):
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    request = prepare_document_extraction_request(
+        source_ref={"source_uri": "file:///docs/architecture.pdf"},
+        source_type="pdf",
+        requested_outputs=["markdown", "metadata", "page_images"],
+        extractor_id="local-pdf-extractor",
+        extractor_kind="external_document",
+    )
+    result = prepare_document_extraction_result(
+        extraction_request=request,
+        title="Architecture Scan",
+        content="# Architecture\n\nDecision: Keep extraction results reviewable.",
+        media_type="text/markdown",
+        image_refs=[{"source_uri": "file:///docs/architecture.pdf", "page": 1}],
+    )
+    document_id = result["document_record"]["document_id"]
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    report = kernel.store_document_evidence_records([result])
+    stored_results = kernel.read_document_evidence_records(
+        document_id=document_id,
+        record_type="document_extraction_result",
+    )
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+
+    assert report["record_ids"] == [result["result_id"]]
+    assert stored_results == [result]
+    assert restored.read_document_evidence_records(record_type="document_extraction_result") == [result]
 
 
 def test_document_evidence_store_rejects_active_memory_records(tmp_path):
