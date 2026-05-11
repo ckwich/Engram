@@ -6,6 +6,7 @@ from core.document_intelligence import (
     prepare_document_record,
     prepare_document_draft,
     prepare_document_extraction_request,
+    prepare_document_extraction_result,
     prepare_document_promotion_transaction,
     prepare_extractor_receipt,
     prepare_visual_extraction_request,
@@ -293,6 +294,76 @@ def test_prepare_document_extraction_request_validates_source_and_outputs():
             requested_outputs=["telepathy"],
             extractor_id="local-pdf-extractor",
             extractor_kind="external_document",
+        )
+
+
+def test_prepare_document_extraction_result_links_parser_output_to_review_tools():
+    request = prepare_document_extraction_request(
+        source_ref={
+            "source_uri": "file:///docs/architecture.pdf",
+            "content_hash": "sha256:" + "d" * 64,
+        },
+        source_type="pdf",
+        requested_outputs=["markdown", "metadata", "page_images"],
+        extractor_id="local-pdf-extractor",
+        extractor_kind="external_document",
+    )
+
+    result = prepare_document_extraction_result(
+        extraction_request=request,
+        title="Architecture Scan",
+        content="# Architecture\n\nDecision: Keep extraction review-first.",
+        media_type="text/markdown",
+        metadata={"project": "Engram"},
+        image_refs=[
+            {
+                "source_uri": "file:///docs/architecture.pdf",
+                "page": 1,
+                "image_hash": "sha256:" + "e" * 64,
+            }
+        ],
+    )
+
+    assert result["schema_version"] == "2026-05-11.document-intelligence.extraction-result.v1"
+    assert result["record_type"] == "document_extraction_result"
+    assert result["request_id"] == request["request_id"]
+    assert result["source_ref"] == request["source_ref"]
+    assert result["source_type"] == "pdf"
+    assert result["write_performed"] is False
+    assert result["active_memory_write_performed"] is False
+    assert result["requires_visual_review"] is True
+    assert result["document_record"]["record_type"] == "document"
+    assert result["document_extraction_arguments"]["title"] == "Architecture Scan"
+    assert result["document_extraction_arguments"]["content"].startswith("# Architecture")
+    assert result["document_extraction_arguments"]["metadata"]["project"] == "Engram"
+    assert result["document_extraction_arguments"]["metadata"]["extraction_request_id"] == request["request_id"]
+    assert result["image_refs"][0]["page"] == 1
+    assert "preview_document_extraction" in result["promotion_guidance"]["next_tools"]
+    assert "prepare_visual_extraction_request" in result["promotion_guidance"]["next_tools"]
+
+
+def test_prepare_document_extraction_result_validates_request_and_content():
+    with pytest.raises(ValueError, match="extraction_request.request_id is required"):
+        prepare_document_extraction_result(
+            extraction_request={},
+            title="Architecture Scan",
+            content="# Architecture",
+            media_type="text/markdown",
+        )
+
+    request = prepare_document_extraction_request(
+        source_ref={"source_uri": "file:///docs/architecture.pdf"},
+        source_type="pdf",
+        requested_outputs=["markdown"],
+        extractor_id="local-pdf-extractor",
+        extractor_kind="external_document",
+    )
+    with pytest.raises(ValueError, match="content is required"):
+        prepare_document_extraction_result(
+            extraction_request=request,
+            title="Architecture Scan",
+            content=" ",
+            media_type="text/markdown",
         )
 
 

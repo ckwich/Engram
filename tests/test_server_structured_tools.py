@@ -1389,6 +1389,56 @@ def test_prepare_document_extraction_request_tool_returns_structured_invalid_req
     }
 
 
+def test_prepare_document_extraction_result_tool_returns_no_write_result():
+    server = load_server_module()
+    request = asyncio.run(
+        server.prepare_document_extraction_request(
+            source_ref={"source_uri": "file:///docs/architecture.pdf"},
+            source_type="pdf",
+            requested_outputs=["markdown", "page_images"],
+            extractor_id="local-pdf-extractor",
+            extractor_kind="external_document",
+        )
+    )["request"]
+
+    payload = asyncio.run(
+        server.prepare_document_extraction_result(
+            extraction_request=request,
+            title="Architecture Scan",
+            content="# Architecture\n\nDecision: Review extraction output.",
+            media_type="text/markdown",
+            metadata={"project": "Engram"},
+            image_refs=[{"source_uri": "file:///docs/architecture.pdf", "page": 1}],
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["result"]["record_type"] == "document_extraction_result"
+    assert payload["result"]["write_performed"] is False
+    assert payload["result"]["requires_visual_review"] is True
+
+
+def test_prepare_document_extraction_result_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.prepare_document_extraction_result(
+            extraction_request={},
+            title="Architecture Scan",
+            content="# Architecture",
+            media_type="text/markdown",
+        )
+    )
+
+    assert payload == {
+        "result": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "extraction_request.request_id is required",
+        },
+    }
+
+
 def test_prepare_visual_extraction_request_tool_returns_no_write_request():
     server = load_server_module()
     document = {

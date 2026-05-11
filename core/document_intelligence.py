@@ -12,6 +12,7 @@ DOCUMENT_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.preview.v1"
 VISUAL_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-preview.v1"
 VISUAL_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-request.v1"
 DOCUMENT_EXTRACTION_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.extraction-request.v1"
+DOCUMENT_EXTRACTION_RESULT_SCHEMA_VERSION = "2026-05-11.document-intelligence.extraction-result.v1"
 DOCUMENT_DRAFT_SCHEMA_VERSION = "2026-05-11.document-intelligence.draft.v1"
 DOCUMENT_PROMOTION_SCHEMA_VERSION = "2026-05-11.document-intelligence.promotion.v1"
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
@@ -325,6 +326,86 @@ def prepare_document_extraction_request(
             "auto_promote": False,
             "next_tools": [
                 "preview_document_extraction",
+                "preview_visual_extraction",
+                "prepare_document_draft",
+            ],
+        },
+    }
+
+
+def prepare_document_extraction_result(
+    *,
+    extraction_request: dict[str, Any],
+    title: str,
+    content: str,
+    media_type: str,
+    metadata: dict[str, Any] | None = None,
+    image_refs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Prepare a reviewable external parser result without writing memory."""
+    if not isinstance(extraction_request, dict):
+        raise ValueError("extraction_request must be an object")
+    request_id = _require_text(extraction_request.get("request_id"), "extraction_request.request_id")
+    source_ref = _normalize_source_ref(extraction_request.get("source_ref"))
+    source_uri = _require_text(source_ref.get("source_uri"), "extraction_request.source_ref.source_uri")
+    source_type = _require_text(extraction_request.get("source_type"), "extraction_request.source_type")
+    normalized_title = _require_text(title, "title")
+    normalized_content = _require_text(content, "content")
+    normalized_media_type = _require_text(media_type, "media_type")
+    normalized_metadata = _normalize_metadata(metadata)
+    normalized_metadata["extraction_request_id"] = request_id
+    normalized_images = _normalize_optional_source_refs(image_refs)
+    content_hash = "sha256:" + hashlib.sha256(normalized_content.encode("utf-8")).hexdigest()
+    document_record = prepare_document_record(
+        title=normalized_title,
+        source_uri=source_uri,
+        source_type=source_type,
+        content_hash=content_hash,
+        media_type=normalized_media_type,
+        metadata=normalized_metadata,
+    )
+    result_seed = "|".join(
+        [
+            request_id,
+            document_record["document_id"],
+            content_hash,
+            _stable_repr(normalized_images),
+        ]
+    )
+    requires_visual_review = bool(normalized_images) or _normalize_bool(
+        extraction_request.get("image_recognition_may_be_required")
+    )
+    return {
+        "schema_version": DOCUMENT_EXTRACTION_RESULT_SCHEMA_VERSION,
+        "record_type": "document_extraction_result",
+        "result_id": _stable_id("doc_result", result_seed),
+        "request_id": request_id,
+        "source_ref": source_ref,
+        "source_type": source_type,
+        "requested_outputs": list(extraction_request.get("requested_outputs") or []),
+        "extractor": dict(extraction_request.get("extractor") or {}),
+        "document_record": document_record,
+        "content_hash": content_hash,
+        "image_refs": normalized_images,
+        "requires_visual_review": requires_visual_review,
+        "document_extraction_arguments": {
+            "title": normalized_title,
+            "source_uri": source_uri,
+            "source_type": source_type,
+            "content": normalized_content,
+            "media_type": normalized_media_type,
+            "metadata": normalized_metadata,
+        },
+        "review_status": "evidence",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "promotion_required": True,
+        "promotion_guidance": {
+            "default_action": "preview_before_draft",
+            "auto_promote": False,
+            "next_tools": [
+                "preview_document_extraction",
+                "prepare_visual_extraction_request",
                 "preview_visual_extraction",
                 "prepare_document_draft",
             ],
@@ -676,6 +757,14 @@ def _normalize_image_refs(value: Any) -> list[dict[str, Any]]:
     return [_normalize_source_ref(item) for item in value]
 
 
+def _normalize_optional_source_refs(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("image_refs must be a list")
+    return [_normalize_source_ref(item) for item in value]
+
+
 def _normalize_visual_capabilities(value: Any) -> list[str]:
     if not isinstance(value, list) or not value:
         raise ValueError("requested_capabilities must include at least one item")
@@ -712,6 +801,14 @@ def _normalize_document_analysis(value: Any) -> dict[str, list[str]]:
         field: _normalize_analysis_items(value.get(field), field)
         for field in DOCUMENT_ANALYSIS_SECTIONS
     }
+
+
+def _normalize_metadata(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("metadata must be an object")
+    return dict(value)
 
 
 def _normalize_analysis_items(value: Any, field_name: str) -> list[str]:
