@@ -7,7 +7,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from core.memory_os_migration import MemoryOSMigrationKernel, legacy_json_filename
+import pytest
+
+from core.memory_os_migration import (
+    MemoryOSMigrationKernel,
+    build_vector_index_documents,
+    legacy_json_filename,
+)
+from core.vector_index import VectorIndexDocument
 
 
 def _write_memory(path: Path, payload: dict) -> dict:
@@ -146,6 +153,94 @@ def test_bundle_restore_preserves_chunk_records(tmp_path):
     restored.restore_bundle(bundle)
 
     assert restored.read_chunk_records("alpha") == kernel.read_chunk_records("alpha")
+
+
+def test_chunk_ledger_exports_vector_source_records_with_metadata_and_citations(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha Memory",
+            "content": "# Alpha\n\nAlpha content",
+            "tags": ["migration", "agent"],
+            "project": "Engram",
+            "domain": "memory-os",
+            "status": "active",
+            "canonical": True,
+            "chunk_count": 1,
+        },
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    kernel.import_legacy_json(legacy_dir)
+    sources = kernel.read_vector_source_records("alpha")
+
+    assert len(sources) == 1
+    source = sources[0]
+    assert source["document_id"] == _chunk_doc_id("alpha", 0)
+    assert source["parent_key"] == "alpha"
+    assert source["chunk_id"] == 0
+    assert source["text"] == "# Alpha\n\nAlpha content"
+    assert source["metadata"] == {
+        "key": "alpha",
+        "title": "Alpha Memory",
+        "tags": ["migration", "agent"],
+        "project": "Engram",
+        "domain": "memory-os",
+        "status": "active",
+        "canonical": True,
+        "section_title": "Alpha",
+        "heading_path": ["Alpha"],
+        "chunk_kind": "section",
+        "text_hash": hashlib.sha256("# Alpha\n\nAlpha content".encode("utf-8")).hexdigest(),
+    }
+    assert source["citation"] == {
+        "source": "memory_os_migration",
+        "key": "alpha",
+        "chunk_id": 0,
+        "document_id": _chunk_doc_id("alpha", 0),
+    }
+
+
+def test_vector_source_records_convert_to_documents_only_with_supplied_embeddings(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha Memory",
+            "content": "Alpha content",
+            "chunk_count": 1,
+        },
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    kernel.import_legacy_json(legacy_dir)
+    sources = kernel.read_vector_source_records()
+    embeddings = {sources[0]["document_id"]: [1.0, 0.0]}
+
+    documents = build_vector_index_documents(sources, embeddings)
+
+    assert documents == [
+        VectorIndexDocument(
+            document_id=sources[0]["document_id"],
+            parent_key="alpha",
+            chunk_id=0,
+            text="Alpha content",
+            embedding=[1.0, 0.0],
+            metadata=sources[0]["metadata"],
+            citation=sources[0]["citation"],
+        )
+    ]
+    with pytest.raises(ValueError, match="missing embedding"):
+        build_vector_index_documents(sources, {})
 
 
 def test_legacy_import_exports_bundle_and_restores_legacy_json_artifacts(tmp_path):

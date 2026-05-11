@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from core.chunker import chunk_content_with_metadata
+from core.vector_index import VectorIndexDocument
 
 SCHEMA_VERSION = "2026-05-11.memory_os_migration.v2"
 LEDGER_FILENAME = "ledger.sqlite3"
@@ -176,6 +177,31 @@ def _atomic_write(path: Path, raw: bytes) -> None:
         raise
 
 
+def build_vector_index_documents(
+    source_records: list[dict[str, Any]],
+    embeddings_by_document_id: dict[str, list[float]],
+) -> list[VectorIndexDocument]:
+    """Pair migration chunk source records with caller-provided embeddings."""
+    documents: list[VectorIndexDocument] = []
+    for source in source_records:
+        document_id = str(source["document_id"])
+        embedding = embeddings_by_document_id.get(document_id)
+        if embedding is None:
+            raise ValueError(f"missing embedding for document_id: {document_id}")
+        documents.append(
+            VectorIndexDocument(
+                document_id=document_id,
+                parent_key=str(source["parent_key"]),
+                chunk_id=int(source["chunk_id"]),
+                text=str(source["text"]),
+                embedding=list(embedding),
+                metadata=dict(source.get("metadata") or {}),
+                citation=dict(source.get("citation") or {}),
+            )
+        )
+    return documents
+
+
 class MemoryOSMigrationKernel:
     """Import legacy Engram JSON into a SQLite ledger plus artifact store."""
 
@@ -303,6 +329,28 @@ class MemoryOSMigrationKernel:
         with self._connection(initialize=False) as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_chunk(row) for row in rows]
+
+    def read_vector_source_records(self, key: str | None = None) -> list[dict[str, Any]]:
+        query = """
+            SELECT chunks.*,
+                   memories.title,
+                   memories.tags_json,
+                   memories.project,
+                   memories.domain,
+                   memories.status,
+                   memories.canonical
+            FROM chunks
+            JOIN memories ON memories.key = chunks.memory_key
+        """
+        params: tuple[Any, ...] = ()
+        if key is not None:
+            query += " WHERE chunks.memory_key = ?"
+            params = (key,)
+        query += " ORDER BY chunks.memory_key, chunks.chunk_index"
+
+        with self._connection(initialize=False) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._row_to_vector_source(row) for row in rows]
 
     def _connect(self, initialize: bool = True) -> sqlite3.Connection:
         if initialize:
@@ -646,6 +694,35 @@ class MemoryOSMigrationKernel:
             "section_title": row["section_title"],
             "heading_path": json.loads(row["heading_path_json"]),
             "chunk_kind": row["chunk_kind"],
+        }
+
+    def _row_to_vector_source(self, row: sqlite3.Row) -> dict[str, Any]:
+        heading_path = json.loads(row["heading_path_json"])
+        metadata = {
+            "key": row["memory_key"],
+            "title": row["title"],
+            "tags": json.loads(row["tags_json"]),
+            "project": row["project"],
+            "domain": row["domain"],
+            "status": row["status"],
+            "canonical": bool(row["canonical"]),
+            "section_title": row["section_title"],
+            "heading_path": heading_path,
+            "chunk_kind": row["chunk_kind"],
+            "text_hash": row["text_hash"],
+        }
+        return {
+            "document_id": row["document_id"],
+            "parent_key": row["memory_key"],
+            "chunk_id": row["chunk_id"],
+            "text": row["text"],
+            "metadata": metadata,
+            "citation": {
+                "source": "memory_os_migration",
+                "key": row["memory_key"],
+                "chunk_id": row["chunk_id"],
+                "document_id": row["document_id"],
+            },
         }
 
     def _derive_chunk_records(self, key: str, content: str) -> list[dict[str, Any]]:
