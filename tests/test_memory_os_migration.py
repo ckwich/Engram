@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -12,6 +13,11 @@ from core.memory_os_migration import MemoryOSMigrationKernel, legacy_json_filena
 def _write_memory(path: Path, payload: dict) -> dict:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload
+
+
+def _chunk_doc_id(key: str, chunk_id: int) -> str:
+    key_hash = hashlib.md5(key.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return f"{key_hash}_{chunk_id}"
 
 
 def test_legacy_import_dry_run_reports_counts_without_writing_store(tmp_path):
@@ -67,6 +73,79 @@ def test_legacy_import_dry_run_reports_counts_without_writing_store(tmp_path):
     assert report["field_mappings"]["related_to"] == "memories.related_to_json"
     assert not (store_root / "ledger.sqlite3").exists()
     assert not (store_root / "objects").exists()
+
+
+def test_legacy_import_stores_queryable_chunk_records(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "content": "# Alpha\n\nAlpha content\n\n## Alpha\n\nDetailed content",
+            "tags": ["one"],
+            "project": "Engram",
+            "domain": "migration",
+            "chunk_count": 99,
+        },
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    dry_run = kernel.import_legacy_json(legacy_dir, dry_run=True)
+    import_report = kernel.import_legacy_json(legacy_dir)
+    chunks = kernel.read_chunk_records("alpha")
+
+    assert dry_run["chunk_count_total"] == 99
+    assert dry_run["derived_chunk_count_total"] == 2
+    assert dry_run["chunk_count_mismatches"] == [
+        {"key": "alpha", "legacy_chunk_count": 99, "derived_chunk_count": 2}
+    ]
+    assert import_report["derived_chunk_count_total"] == 2
+    assert len(chunks) == 2
+    assert chunks[0] == {
+        "document_id": _chunk_doc_id("alpha", 0),
+        "memory_key": "alpha",
+        "chunk_id": 0,
+        "chunk_index": 0,
+        "text": "# Alpha\n\nAlpha content",
+        "text_hash": hashlib.sha256("# Alpha\n\nAlpha content".encode("utf-8")).hexdigest(),
+        "chars": 22,
+        "section_title": "Alpha",
+        "heading_path": ["Alpha"],
+        "chunk_kind": "section",
+    }
+    assert chunks[1]["document_id"] == _chunk_doc_id("alpha", 1)
+    assert chunks[1]["text"] == "## Alpha\n\nDetailed content"
+    assert chunks[1]["section_title"] == "Alpha"
+    assert chunks[1]["heading_path"] == ["Alpha", "Alpha"]
+
+
+def test_bundle_restore_preserves_chunk_records(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "content": "# Alpha\n\nAlpha content\n\n## Details\n\nDetailed content",
+            "chunk_count": 2,
+        },
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    kernel.import_legacy_json(legacy_dir)
+    bundle = kernel.export_bundle()
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(bundle)
+
+    assert restored.read_chunk_records("alpha") == kernel.read_chunk_records("alpha")
 
 
 def test_legacy_import_exports_bundle_and_restores_legacy_json_artifacts(tmp_path):
@@ -193,6 +272,8 @@ def test_round_trip_cli_writes_durable_parity_report(tmp_path):
     assert stdout_report == report
     assert report["status"] == "pass"
     assert report["dry_run"]["valid_count"] == 2
+    assert report["dry_run"]["derived_chunk_count_total"] == 2
+    assert report["dry_run"]["chunk_count_mismatch_count"] == 0
     assert report["import"]["imported_count"] == 2
     assert report["bundle"]["memory_count"] == 2
     assert report["restore"]["restored_count"] == 2

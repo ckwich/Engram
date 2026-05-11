@@ -19,8 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.chunker import chunk_content_with_metadata
 
-SCHEMA_VERSION = "2026-05-11.memory_os_migration.v1"
+SCHEMA_VERSION = "2026-05-11.memory_os_migration.v2"
 LEDGER_FILENAME = "ledger.sqlite3"
 
 KNOWN_LEGACY_FIELDS = {
@@ -62,6 +63,7 @@ FIELD_MAPPINGS = {
     "chars": "memories.chars",
     "lines": "memories.lines",
     "chunk_count": "memories.chunk_count",
+    "derived_chunks": "chunks",
 }
 
 
@@ -69,6 +71,12 @@ def legacy_json_filename(key: str) -> str:
     """Return the legacy Engram JSON filename for a memory key."""
     digest = hashlib.md5(key.encode("utf-8"), usedforsecurity=False).hexdigest()
     return f"{digest}.json"
+
+
+def legacy_chunk_document_id(key: str, chunk_id: int) -> str:
+    """Return the legacy Engram vector document ID for a memory chunk."""
+    digest = hashlib.md5(key.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return f"{digest}_{chunk_id}"
 
 
 def _now() -> str:
@@ -126,6 +134,12 @@ def _normalize_string_list(value: Any) -> list[str]:
         seen.add(text)
         normalized.append(text)
     return normalized
+
+
+def _normalize_heading_path(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _normalize_bool(value: Any) -> bool:
@@ -278,6 +292,18 @@ class MemoryOSMigrationKernel:
             return None
         return self._row_to_memory(row)
 
+    def read_chunk_records(self, key: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM chunks"
+        params: tuple[Any, ...] = ()
+        if key is not None:
+            query += " WHERE memory_key = ?"
+            params = (key,)
+        query += " ORDER BY memory_key, chunk_index"
+
+        with self._connection(initialize=False) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._row_to_chunk(row) for row in rows]
+
     def _connect(self, initialize: bool = True) -> sqlite3.Connection:
         if initialize:
             self.store_root.mkdir(parents=True, exist_ok=True)
@@ -332,6 +358,25 @@ class MemoryOSMigrationKernel:
                 imported_at TEXT NOT NULL,
                 FOREIGN KEY(memory_key) REFERENCES memories(key) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS chunks (
+                document_id TEXT PRIMARY KEY,
+                memory_key TEXT NOT NULL,
+                chunk_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                text_hash TEXT NOT NULL,
+                chars INTEGER NOT NULL,
+                section_title TEXT NOT NULL,
+                heading_path_json TEXT NOT NULL,
+                chunk_kind TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(memory_key) REFERENCES memories(key) ON DELETE CASCADE,
+                UNIQUE(memory_key, chunk_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chunks_memory_key
+            ON chunks(memory_key);
             """
         )
         conn.execute(
@@ -421,6 +466,32 @@ class MemoryOSMigrationKernel:
                 record["imported_at"],
             ),
         )
+        conn.execute("DELETE FROM chunks WHERE memory_key = ?", (record["key"],))
+        conn.executemany(
+            """
+            INSERT INTO chunks (
+                document_id, memory_key, chunk_id, chunk_index, text, text_hash,
+                chars, section_title, heading_path_json, chunk_kind, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    chunk["document_id"],
+                    chunk["memory_key"],
+                    chunk["chunk_id"],
+                    chunk["chunk_index"],
+                    chunk["text"],
+                    chunk["text_hash"],
+                    chunk["chars"],
+                    chunk["section_title"],
+                    _json_dumps(chunk["heading_path"]),
+                    chunk["chunk_kind"],
+                    record["imported_at"],
+                )
+                for chunk in record["chunks"]
+            ],
+        )
         conn.commit()
 
     def _scan_legacy_dir(self, legacy_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -487,6 +558,7 @@ class MemoryOSMigrationKernel:
             "legacy_filename": path.name,
             "source_path": str(path),
             "raw_bytes": raw_bytes,
+            "chunks": self._derive_chunk_records(key, content),
             "unsupported_fields": sorted(set(data) - KNOWN_LEGACY_FIELDS),
             "imported_at": imported_at,
         }
@@ -508,6 +580,13 @@ class MemoryOSMigrationKernel:
         key = _normalize_optional_text(ledger.get("key"))
         if not key:
             raise ValueError("bundle memory item is missing key")
+        try:
+            legacy_data = json.loads(raw_bytes.decode("utf-8"))
+        except Exception as error:
+            raise ValueError(f"bundle artifact is not valid legacy JSON for {key}") from error
+        content = legacy_data.get("content") if isinstance(legacy_data, dict) else None
+        if not isinstance(content, str):
+            raise ValueError(f"bundle artifact is missing text content for {key}")
 
         return {
             "key": key,
@@ -529,6 +608,7 @@ class MemoryOSMigrationKernel:
             "legacy_filename": str(item.get("legacy_filename") or legacy_json_filename(key)),
             "source_path": None,
             "raw_bytes": raw_bytes,
+            "chunks": self._derive_chunk_records(key, content),
             "unsupported_fields": [],
             "imported_at": _now(),
         }
@@ -554,6 +634,41 @@ class MemoryOSMigrationKernel:
             "imported_at": row["imported_at"],
         }
 
+    def _row_to_chunk(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "document_id": row["document_id"],
+            "memory_key": row["memory_key"],
+            "chunk_id": row["chunk_id"],
+            "chunk_index": row["chunk_index"],
+            "text": row["text"],
+            "text_hash": row["text_hash"],
+            "chars": row["chars"],
+            "section_title": row["section_title"],
+            "heading_path": json.loads(row["heading_path_json"]),
+            "chunk_kind": row["chunk_kind"],
+        }
+
+    def _derive_chunk_records(self, key: str, content: str) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for chunk in chunk_content_with_metadata(content):
+            chunk_id = int(chunk["chunk_id"])
+            text = str(chunk["text"])
+            records.append(
+                {
+                    "document_id": legacy_chunk_document_id(key, chunk_id),
+                    "memory_key": key,
+                    "chunk_id": chunk_id,
+                    "chunk_index": chunk_id,
+                    "text": text,
+                    "text_hash": _sha256_text(text),
+                    "chars": len(text),
+                    "section_title": str(chunk.get("section_title") or ""),
+                    "heading_path": _normalize_heading_path(chunk.get("heading_path")),
+                    "chunk_kind": str(chunk.get("chunk_kind") or "section"),
+                }
+            )
+        return records
+
     def _build_import_report(
         self,
         records: list[dict[str, Any]],
@@ -567,6 +682,15 @@ class MemoryOSMigrationKernel:
             if record["unsupported_fields"]
         }
         chunk_counts = [record["chunk_count"] for record in records if isinstance(record["chunk_count"], int)]
+        chunk_count_mismatches = [
+            {
+                "key": record["key"],
+                "legacy_chunk_count": record["chunk_count"],
+                "derived_chunk_count": len(record["chunks"]),
+            }
+            for record in records
+            if isinstance(record["chunk_count"], int) and record["chunk_count"] != len(record["chunks"])
+        ]
         return {
             "schema_version": SCHEMA_VERSION,
             "dry_run": dry_run,
@@ -577,6 +701,8 @@ class MemoryOSMigrationKernel:
             "imported_count": imported_count,
             "key_set": [record["key"] for record in records],
             "chunk_count_total": sum(chunk_counts),
+            "derived_chunk_count_total": sum(len(record["chunks"]) for record in records),
+            "chunk_count_mismatches": chunk_count_mismatches,
             "related_to_count": sum(len(record["related_to"]) for record in records),
             "unsupported_fields": unsupported,
             "field_mappings": dict(FIELD_MAPPINGS),
@@ -643,6 +769,9 @@ def run_round_trip_check(
             "valid_count": dry_run["valid_count"],
             "invalid_count": dry_run["invalid_count"],
             "chunk_count_total": dry_run["chunk_count_total"],
+            "derived_chunk_count_total": dry_run["derived_chunk_count_total"],
+            "chunk_count_mismatch_count": len(dry_run["chunk_count_mismatches"]),
+            "chunk_count_mismatches": dry_run["chunk_count_mismatches"],
             "related_to_count": dry_run["related_to_count"],
             "unsupported_fields": dry_run["unsupported_fields"],
             "invalid": dry_run["invalid"],
