@@ -162,6 +162,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `preview_memory_chunks` | Preview chunking without writing. |
 | `preview_source_connector` | Preview local source intake without writing. |
 | `preview_document_extraction` | Preview document evidence and chunks without writing. |
+| `prepare_visual_extraction_request` | Prepare a no-write OCR/vision work request. |
 | `preview_visual_extraction` | Preview OCR/vision observations without writing. |
 | `list_ingestion_pipelines` | List available source-intake pipelines. |
 | `add_graph_edge` | Store a typed relationship between refs. |
@@ -410,7 +411,7 @@ The review flow is:
 prepare_source_memory -> inspect draft -> store_prepared_memory
 ```
 
-Use `preview_memory_chunks`, `preview_source_connector`, `preview_document_extraction`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any write happens. Image/OCR observations are evidence records, not trusted active memory, until a later explicit review path promotes them.
+Use `preview_memory_chunks`, `preview_source_connector`, `preview_document_extraction`, `prepare_visual_extraction_request`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any write happens. Image/OCR requests and observations are evidence records, not trusted active memory, until a later explicit review path promotes them.
 
 Source intake never auto-promotes active memories. Drafts are review records with
 `status: "draft"`, `active_memory_write_performed: false`, and promotion guidance

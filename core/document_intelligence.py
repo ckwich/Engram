@@ -10,12 +10,32 @@ from core.chunker import chunk_content_with_metadata
 DOCUMENT_INTELLIGENCE_SCHEMA_VERSION = "2026-05-11.document-intelligence.v1"
 DOCUMENT_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.preview.v1"
 VISUAL_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-preview.v1"
+VISUAL_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-request.v1"
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
+VALID_VISUAL_CAPABILITIES = {
+    "caption_alt_text",
+    "chart_summary",
+    "diagram_description",
+    "figure_description",
+    "ocr_text",
+    "screenshot_state",
+    "table_structure",
+}
 PROMOTION_GUIDANCE = {
     "default_action": "review_before_promotion",
     "auto_promote": False,
     "allowed_destinations": ["memory", "graph_edge", "document_store", "external_pointer"],
 }
+EXPECTED_VISUAL_OBSERVATION_FIELDS = [
+    "artifact_type",
+    "source_ref",
+    "text",
+    "description",
+    "page_number",
+    "bounding_box",
+    "confidence",
+    "metadata",
+]
 
 
 def prepare_document_record(
@@ -147,6 +167,54 @@ def prepare_extractor_receipt(
         "artifact_count": len(artifact_ids),
         "image_recognition_used": bool(artifact_ids),
         "external_framework_required": bool(external_required),
+        "active_memory_write_performed": False,
+        "promotion_required": True,
+        "promotion_guidance": dict(PROMOTION_GUIDANCE),
+    }
+
+
+def prepare_visual_extraction_request(
+    *,
+    document_record: dict[str, Any],
+    image_refs: list[dict[str, Any]],
+    requested_capabilities: list[str],
+    extractor_id: str,
+    extractor_kind: str,
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    """Prepare a reviewable OCR/vision work request without running an extractor."""
+    document_id = _require_text(document_record.get("document_id"), "document_record.document_id")
+    normalized_images = _normalize_image_refs(image_refs)
+    normalized_capabilities = _normalize_visual_capabilities(requested_capabilities)
+    normalized_extractor_id = _require_text(extractor_id, "extractor_id")
+    normalized_extractor_kind = _normalize_extractor_kind(extractor_kind)
+    normalized_instructions = _optional_text(instructions, "instructions")
+    request_seed = "|".join(
+        [
+            document_id,
+            _stable_repr(normalized_images),
+            _stable_repr(normalized_capabilities),
+            normalized_extractor_id,
+            normalized_extractor_kind,
+            normalized_instructions or "",
+        ]
+    )
+    return {
+        "schema_version": VISUAL_REQUEST_SCHEMA_VERSION,
+        "record_type": "visual_extraction_request",
+        "request_id": _stable_id("vis_req", request_seed),
+        "document_id": document_id,
+        "image_refs": normalized_images,
+        "requested_capabilities": normalized_capabilities,
+        "instructions": normalized_instructions,
+        "extractor": {
+            "id": normalized_extractor_id,
+            "kind": normalized_extractor_kind,
+            "external_framework_required": normalized_extractor_kind != "agent_native",
+        },
+        "image_recognition_required": normalized_extractor_kind in {"vision", "ocr_vision"},
+        "expected_observation_fields": list(EXPECTED_VISUAL_OBSERVATION_FIELDS),
+        "review_status": "request",
         "active_memory_write_performed": False,
         "promotion_required": True,
         "promotion_guidance": dict(PROMOTION_GUIDANCE),
@@ -309,6 +377,25 @@ def _normalize_source_ref(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or not value:
         raise ValueError("source_ref is required")
     return dict(value)
+
+
+def _normalize_image_refs(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("image_refs must include at least one item")
+    return [_normalize_source_ref(item) for item in value]
+
+
+def _normalize_visual_capabilities(value: Any) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("requested_capabilities must include at least one item")
+    normalized: set[str] = set()
+    for item in value:
+        capability = _require_text(item, "requested_capability")
+        if capability not in VALID_VISUAL_CAPABILITIES:
+            valid = ", ".join(sorted(VALID_VISUAL_CAPABILITIES))
+            raise ValueError(f"Unsupported visual capability: {capability}. Valid: {valid}")
+        normalized.add(capability)
+    return sorted(normalized)
 
 
 def _normalize_extractor_kind(value: Any) -> str:

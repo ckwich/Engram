@@ -1302,6 +1302,54 @@ def test_preview_document_extraction_tool_returns_structured_invalid_request():
     }
 
 
+def test_prepare_visual_extraction_request_tool_returns_no_write_request():
+    server = load_server_module()
+    document = {
+        "document_id": "doc_architecture",
+        "title": "Architecture Screenshot",
+        "source_uri": "file:///notes/architecture.png",
+    }
+
+    payload = asyncio.run(
+        server.prepare_visual_extraction_request(
+            document_record=document,
+            image_refs=[{"source_uri": "file:///notes/architecture.png", "page": 1}],
+            requested_capabilities=["ocr_text", "diagram_description"],
+            extractor_id="local-vision-v1",
+            extractor_kind="ocr_vision",
+            instructions="Read labels and summarize the diagram.",
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["request"]["record_type"] == "visual_extraction_request"
+    assert payload["request"]["active_memory_write_performed"] is False
+    assert payload["request"]["extractor"]["external_framework_required"] is True
+    assert payload["request"]["requested_capabilities"] == ["diagram_description", "ocr_text"]
+
+
+def test_prepare_visual_extraction_request_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.prepare_visual_extraction_request(
+            document_record={"document_id": "doc_architecture"},
+            image_refs=[],
+            requested_capabilities=["ocr_text"],
+            extractor_id="local-vision-v1",
+            extractor_kind="ocr",
+        )
+    )
+
+    assert payload == {
+        "request": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "image_refs must include at least one item",
+        },
+    }
+
+
 def test_preview_visual_extraction_tool_returns_no_write_preview():
     server = load_server_module()
 

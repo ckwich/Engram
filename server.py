@@ -26,6 +26,7 @@ from core.chunk_preview import preview_memory_chunks as build_chunk_preview
 from core.codebase_mapper import codebase_mapping_manager
 from core.context_builder import build_context_receipt, make_filters, merge_graph_candidates
 from core.document_intelligence import (
+    prepare_visual_extraction_request as build_visual_extraction_request,
     preview_document_extraction as build_document_extraction_preview,
     preview_visual_extraction as build_visual_extraction_preview,
 )
@@ -452,6 +453,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "stability": "beta",
                 "cost_class": "medium",
                 "tools": [
+                    "prepare_visual_extraction_request",
                     "preview_document_extraction",
                     "preview_visual_extraction",
                 ],
@@ -518,6 +520,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "source ingestion setup": "list_ingestion_pipelines",
                 "chunk boundary review": "preview_memory_chunks",
                 "document extraction": "preview_document_extraction",
+                "visual extraction request": "prepare_visual_extraction_request",
                 "visual extraction": "preview_visual_extraction",
                 "retrieval quality": "retrieval_eval",
                 "codebase mapping": "prepare_codebase_mapping",
@@ -534,6 +537,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
             "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
+            "prepare_visual_extraction_request": "Prepare a no-write OCR/vision work request for image-bearing documents.",
             "preview_visual_extraction": "Preview caller-supplied OCR or vision observations as visual evidence without writing memory.",
             "retrieval_eval": "Run deterministic retrieval quality checks and report pass/fail scenarios.",
             "list_workflow_templates": "List agent workflow recipes for common Engram usage patterns.",
@@ -574,6 +578,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "context_pack(query='agent memory protocol', project='engram', max_chunks=5)",
             "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
+            "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
             "preview_visual_extraction(document_record=doc, observations=vision_notes) before promoting image-derived claims",
             "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
         ],
@@ -843,6 +848,54 @@ async def preview_document_extraction(
             "error": _tool_error("runtime_error", f"Unexpected document preview failure: {e}"),
         }
     _record_usage_for_payload("preview_document_extraction", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_visual_extraction_request(
+    document_record: dict[str, Any],
+    image_refs: list[dict[str, Any]],
+    requested_capabilities: list[str],
+    extractor_id: str = "engram-visual-request",
+    extractor_kind: str = "ocr_vision",
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write OCR/vision work request for image-bearing documents.
+
+    This does not run an OCR or vision provider. It gives agents a stable request
+    packet for external/local frameworks, whose observations should return through
+    preview_visual_extraction before any memory promotion.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_record": document_record,
+        "image_refs": image_refs,
+        "requested_capabilities": requested_capabilities,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+        "instructions": instructions,
+    }
+    try:
+        payload = {
+            "request": build_visual_extraction_request(
+                document_record=document_record,
+                image_refs=image_refs,
+                requested_capabilities=requested_capabilities,
+                extractor_id=extractor_id,
+                extractor_kind=extractor_kind,
+                instructions=instructions,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"request": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "request": None,
+            "error": _tool_error("runtime_error", f"Unexpected visual request failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_visual_extraction_request", input_payload, payload, started_at)
     return payload
 
 

@@ -5,6 +5,7 @@ import pytest
 from core.document_intelligence import (
     prepare_document_record,
     prepare_extractor_receipt,
+    prepare_visual_extraction_request,
     prepare_visual_artifact_record,
     preview_document_extraction,
     preview_visual_extraction,
@@ -151,6 +152,88 @@ def test_prepare_extractor_receipt_links_visual_evidence_without_promoting_memor
     assert receipt["active_memory_write_performed"] is False
     assert receipt["promotion_required"] is True
     assert receipt["promotion_guidance"]["default_action"] == "review_before_promotion"
+
+
+def test_prepare_visual_extraction_request_marks_external_framework_work_as_reviewable():
+    document = prepare_document_record(
+        title="Architecture Notes",
+        source_uri="file:///docs/architecture.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "e" * 64,
+        media_type="application/pdf",
+    )
+
+    request = prepare_visual_extraction_request(
+        document_record=document,
+        image_refs=[
+            {
+                "source_uri": "file:///docs/architecture.pdf",
+                "page": 7,
+                "image_hash": "sha256:" + "f" * 64,
+            }
+        ],
+        requested_capabilities=["ocr_text", "diagram_description"],
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+        instructions="Extract visible labels and describe the architecture diagram.",
+    )
+    duplicate = prepare_visual_extraction_request(
+        document_record=document,
+        image_refs=[
+            {
+                "source_uri": "file:///docs/architecture.pdf",
+                "page": 7,
+                "image_hash": "sha256:" + "f" * 64,
+            }
+        ],
+        requested_capabilities=["diagram_description", "ocr_text"],
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+        instructions="Extract visible labels and describe the architecture diagram.",
+    )
+
+    assert duplicate["request_id"] == request["request_id"]
+    assert request["schema_version"] == "2026-05-11.document-intelligence.visual-request.v1"
+    assert request["record_type"] == "visual_extraction_request"
+    assert request["document_id"] == document["document_id"]
+    assert request["extractor"] == {
+        "id": "local-vision-v1",
+        "kind": "ocr_vision",
+        "external_framework_required": True,
+    }
+    assert request["requested_capabilities"] == ["diagram_description", "ocr_text"]
+    assert request["image_recognition_required"] is True
+    assert request["active_memory_write_performed"] is False
+    assert request["promotion_required"] is True
+    assert "artifact_type" in request["expected_observation_fields"]
+
+
+def test_prepare_visual_extraction_request_validates_images_and_capabilities():
+    document = prepare_document_record(
+        title="Architecture Notes",
+        source_uri="file:///docs/architecture.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "e" * 64,
+        media_type="application/pdf",
+    )
+
+    with pytest.raises(ValueError, match="image_refs must include at least one item"):
+        prepare_visual_extraction_request(
+            document_record=document,
+            image_refs=[],
+            requested_capabilities=["ocr_text"],
+            extractor_id="local-vision-v1",
+            extractor_kind="ocr",
+        )
+
+    with pytest.raises(ValueError, match="Unsupported visual capability"):
+        prepare_visual_extraction_request(
+            document_record=document,
+            image_refs=[{"source_uri": "file:///docs/architecture.pdf", "page": 1}],
+            requested_capabilities=["read_minds"],
+            extractor_id="local-vision-v1",
+            extractor_kind="ocr",
+        )
 
 
 def test_preview_document_extraction_returns_no_write_chunks_and_receipt_for_markdown():

@@ -80,6 +80,7 @@ where typed, and focused tests.
 | `preview_memory_chunks` | beta | `dict{title, chunk_count, chunks, omitted, error}` | No-write chunk boundary preview. |
 | `preview_source_connector` | beta | `dict{connector_type, target, count, items, omitted, write_performed, error}` | No-write local source preview. |
 | `preview_document_extraction` | beta | `dict{preview, error}` | No-write document evidence/chunk preview. |
+| `prepare_visual_extraction_request` | beta | `dict{request, error}` | No-write OCR/vision work request; does not run a provider. |
 | `preview_visual_extraction` | beta | `dict{preview, error}` | No-write caller-supplied OCR/vision observation preview; does not run a provider. |
 | `prepare_source_memory` | beta | `dict{draft, error}` | Draft only; malformed input returns structured errors. |
 | `list_source_drafts` | beta | `dict{count, drafts, error}` | Draft inventory. |
