@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Iterable, Protocol, runtime_checkable
+
+from core.hybrid_retrieval import (
+    combine_retrieval_score,
+    lexical_relevance_score,
+    normalize_retrieval_mode,
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,7 @@ class VectorIndexQuery:
     query_embedding: list[float]
     limit: int = 5
     filters: dict[str, Any] = field(default_factory=dict)
+    retrieval_mode: str = "semantic"
 
 
 @dataclass(frozen=True)
@@ -88,7 +95,12 @@ class InMemoryVectorIndex:
         for document in self._documents.values():
             if not self._matches_filters(document.metadata, query.filters):
                 continue
-            score = _cosine_similarity(query.query_embedding, document.embedding)
+            semantic_score = _cosine_similarity(query.query_embedding, document.embedding)
+            score = rank_vector_result_score(
+                query,
+                _candidate_texts(document),
+                semantic_score,
+            )
             citation = document.citation or {
                 "source": "vector_index",
                 "key": document.parent_key,
@@ -139,6 +151,7 @@ class InMemoryVectorIndex:
             raise ValueError("limit must be positive")
         if not query.query_embedding:
             raise ValueError("query_embedding is required")
+        normalize_retrieval_mode(query.retrieval_mode)
 
     @staticmethod
     def _matches_filters(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
@@ -161,3 +174,24 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return dot / (left_norm * right_norm)
+
+
+def rank_vector_result_score(
+    query: VectorIndexQuery,
+    candidate_texts: Iterable[str],
+    semantic_score: float,
+) -> float:
+    """Return the adapter contract score for semantic or hybrid vector search."""
+    retrieval_mode = normalize_retrieval_mode(query.retrieval_mode)
+    if retrieval_mode == "semantic":
+        return semantic_score
+    lexical_score = lexical_relevance_score(query.query_text, candidate_texts)
+    return combine_retrieval_score(semantic_score, lexical_score)
+
+
+def _candidate_texts(document: VectorIndexDocument) -> list[str]:
+    return [
+        document.text,
+        document.parent_key,
+        *[str(value) for value in document.metadata.values()],
+    ]

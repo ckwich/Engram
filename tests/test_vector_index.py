@@ -119,3 +119,45 @@ def test_in_memory_vector_index_delete_by_parent_key_removes_all_chunks():
     assert deleted == 2
     assert [result.document_id for result in results] == ["beta-0"]
     assert index.stats() == {"document_count": 1}
+
+
+def test_in_memory_vector_index_hybrid_mode_promotes_exact_identifiers():
+    index = InMemoryVectorIndex()
+    index.rebuild(
+        [
+            VectorIndexDocument(
+                document_id="semantic-0",
+                parent_key="semantic",
+                chunk_id=0,
+                text="General mapping guidance without the exact tool name.",
+                embedding=[1.0, 0.0],
+            ),
+            VectorIndexDocument(
+                document_id="identifier-0",
+                parent_key="identifier",
+                chunk_id=0,
+                text="Use prepare_codebase_mapping before storing mapped repo context.",
+                embedding=[0.7, 0.7],
+                metadata={"tool": "prepare_codebase_mapping"},
+            ),
+        ]
+    )
+
+    semantic_results = index.search(
+        VectorIndexQuery(
+            query_text="prepare_codebase_mapping",
+            query_embedding=[1.0, 0.0],
+            limit=2,
+        )
+    )
+    hybrid_results = index.search(
+        VectorIndexQuery(
+            query_text="prepare_codebase_mapping",
+            query_embedding=[1.0, 0.0],
+            limit=2,
+            retrieval_mode="hybrid",
+        )
+    )
+
+    assert [result.document_id for result in semantic_results] == ["semantic-0", "identifier-0"]
+    assert [result.document_id for result in hybrid_results] == ["identifier-0", "semantic-0"]

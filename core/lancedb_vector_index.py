@@ -13,6 +13,7 @@ from core.vector_index import (
     VectorIndexDocument,
     VectorIndexQuery,
     VectorIndexSearchResult,
+    rank_vector_result_score,
 )
 
 
@@ -69,20 +70,25 @@ class LanceDBVectorIndex:
                 "chunk_id": row["chunk_id"],
             }
             distance = float(row.get("_distance", 0.0))
+            semantic_score = 1.0 / (1.0 + max(distance, 0.0))
+            score = rank_vector_result_score(
+                query,
+                _candidate_texts(row, metadata),
+                semantic_score,
+            )
             results.append(
                 VectorIndexSearchResult(
                     document_id=row["document_id"],
                     parent_key=row["parent_key"],
                     chunk_id=int(row["chunk_id"]),
                     text=row["text"],
-                    score=1.0 / (1.0 + max(distance, 0.0)),
+                    score=score,
                     metadata=metadata,
                     citation=citation,
                 )
             )
-            if len(results) >= query.limit:
-                break
-        return results
+        results.sort(key=lambda result: (-result.score, result.document_id))
+        return results[: query.limit]
 
     def delete_by_parent_key(self, parent_key: str) -> int:
         if self._table is None:
@@ -147,6 +153,14 @@ def _matches_filters(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
         elif actual != expected:
             return False
     return True
+
+
+def _candidate_texts(row: dict[str, Any], metadata: dict[str, Any]) -> list[str]:
+    return [
+        str(row.get("text") or ""),
+        str(row.get("parent_key") or ""),
+        *[str(value) for value in metadata.values()],
+    ]
 
 
 def _escape_sql_literal(value: str) -> str:

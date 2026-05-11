@@ -133,6 +133,49 @@ def test_lancedb_vector_index_upsert_and_delete_use_contract_ids(tmp_path):
     assert results[0].text == "Beta updated"
 
 
+def test_lancedb_vector_index_hybrid_mode_reranks_exact_identifier_candidates(tmp_path):
+    fake_db = FakeLanceDB()
+    index = LanceDBVectorIndex(tmp_path / "lance", connect=lambda uri: fake_db)
+    index.rebuild(
+        [
+            VectorIndexDocument(
+                document_id="semantic-0",
+                parent_key="semantic",
+                chunk_id=0,
+                text="General mapping guidance without the exact tool name.",
+                embedding=[1.0],
+            ),
+            VectorIndexDocument(
+                document_id="identifier-0",
+                parent_key="identifier",
+                chunk_id=0,
+                text="Use prepare_codebase_mapping before storing mapped repo context.",
+                embedding=[0.5],
+                metadata={"tool": "prepare_codebase_mapping"},
+            ),
+        ]
+    )
+
+    semantic_results = index.search(
+        VectorIndexQuery(
+            query_text="prepare_codebase_mapping",
+            query_embedding=[1.0],
+            limit=2,
+        )
+    )
+    hybrid_results = index.search(
+        VectorIndexQuery(
+            query_text="prepare_codebase_mapping",
+            query_embedding=[1.0],
+            limit=2,
+            retrieval_mode="hybrid",
+        )
+    )
+
+    assert [result.document_id for result in semantic_results] == ["semantic-0", "identifier-0"]
+    assert [result.document_id for result in hybrid_results] == ["identifier-0", "semantic-0"]
+
+
 def test_lancedb_vector_index_missing_dependency_error_is_actionable(monkeypatch, tmp_path):
     real_import = builtins.__import__
 
