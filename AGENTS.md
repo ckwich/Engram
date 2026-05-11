@@ -18,6 +18,7 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 | `core/memory_manager.py` | All storage logic | JSON + ChromaDB must stay in sync |
 | `core/graph_manager.py` | Typed relationship validation and traversal | Delegates persistence to graph_store; graph traversal returns IDs/evidence, not memory bodies |
 | `core/graph_store.py` | Swappable graph persistence backend | JSON is current default; preserve GraphStore contract for future graph DB migration |
+| `core/kuzu_graph_store.py` | Optional Kuzu-backed graph persistence adapter | Must preserve the GraphStore document contract; Kuzu remains optional until explicitly wired |
 | `core/chunk_preview.py` | No-write chunk boundary previews | Uses the same markdown-aware chunker agents rely on before storage |
 | `core/ingestion_pipelines.py` | Named no-write source intake presets | Pipeline ids are agent-facing contracts |
 | `core/source_connectors.py` | Preview-only source connector helpers | Must not import or promote memory without a separate explicit store flow |
