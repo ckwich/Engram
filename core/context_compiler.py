@@ -6,6 +6,7 @@ from typing import Any
 
 CONTEXT_PROFILE_CATALOG_SCHEMA_VERSION = "2026-05-11.context-profiles.v1"
 CONTEXT_PACKET_SCHEMA_VERSION = "2026-05-11.context-packet.v1"
+HANDOFF_PACKET_SCHEMA_VERSION = "2026-05-11.handoff-packet.v1"
 
 _CONTEXT_PROFILES: dict[str, dict[str, Any]] = {
     "repo_resume": {
@@ -156,6 +157,59 @@ def compile_context_packet(
     }
 
 
+def build_handoff_packet(
+    *,
+    task: str,
+    project: str | None,
+    branch: str | None,
+    status: str | None,
+    next_steps: str | list[str] | None,
+    validation: str | list[str] | None,
+    blockers: str | list[str] | None,
+    context_packet: dict[str, Any],
+) -> dict[str, Any]:
+    """Turn a context packet plus operator notes into a no-write handoff."""
+    normalized_next_steps = _normalize_text_list(next_steps)
+    normalized_validation = _normalize_text_list(validation)
+    normalized_blockers = _normalize_text_list(blockers)
+    context = dict(context_packet.get("context") or {})
+    context_chunks = list(context.get("chunks") or [])
+    context_refs = [
+        {
+            "key": chunk.get("key"),
+            "chunk_id": chunk.get("chunk_id"),
+        }
+        for chunk in context_chunks
+        if chunk.get("key") is not None and chunk.get("chunk_id") is not None
+    ]
+
+    return {
+        "schema_version": HANDOFF_PACKET_SCHEMA_VERSION,
+        "record_type": "handoff_packet",
+        "task": str(task).strip(),
+        "project": project,
+        "branch": _normalize_optional_text(branch),
+        "status": _normalize_optional_text(status),
+        "next_steps": normalized_next_steps,
+        "validation": normalized_validation,
+        "blockers": normalized_blockers,
+        "context_profile": (context_packet.get("profile") or {}).get("id"),
+        "context_refs": context_refs,
+        "citations": list(context.get("citations") or context_packet.get("citations") or []),
+        "warnings": list(context_packet.get("warnings") or []),
+        "resume_prompt": _build_resume_prompt(
+            task=task,
+            project=project,
+            branch=branch,
+            status=status,
+            next_steps=normalized_next_steps,
+            validation=normalized_validation,
+            blockers=normalized_blockers,
+        ),
+        "write_performed": False,
+    }
+
+
 def _build_context_warnings(
     context_payload: dict[str, Any],
     context_receipt: dict[str, Any],
@@ -210,3 +264,52 @@ def _build_next_actions(chunks: list[dict[str, Any]], omitted: list[dict[str, An
         }
     )
     return actions
+
+
+def _normalize_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_text_list(value: str | list[str] | None) -> list[str]:
+    if value is None:
+        return []
+    raw_items = value if isinstance(value, list) else [value]
+    normalized: list[str] = []
+    for item in raw_items:
+        for part in str(item).replace("\r\n", "\n").split("\n"):
+            text = part.strip()
+            if text:
+                normalized.append(text)
+    return normalized
+
+
+def _build_resume_prompt(
+    *,
+    task: str,
+    project: str | None,
+    branch: str | None,
+    status: str | None,
+    next_steps: list[str],
+    validation: list[str],
+    blockers: list[str],
+) -> str:
+    lines = [f"Resume task: {str(task).strip()}"]
+    if project:
+        lines.append(f"Project: {project}")
+    if branch:
+        lines.append(f"Branch: {branch}")
+    if status:
+        lines.append(f"Status: {status}")
+    if next_steps:
+        lines.append("Next steps:")
+        lines.extend(f"- {step}" for step in next_steps)
+    if validation:
+        lines.append("Validation:")
+        lines.extend(f"- {command}" for command in validation)
+    if blockers:
+        lines.append("Blockers:")
+        lines.extend(f"- {blocker}" for blocker in blockers)
+    return "\n".join(lines)

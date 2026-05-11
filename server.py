@@ -26,6 +26,7 @@ from core.chunk_preview import preview_memory_chunks as build_chunk_preview
 from core.codebase_mapper import codebase_mapping_manager
 from core.context_builder import build_context_receipt, make_filters, merge_graph_candidates
 from core.context_compiler import (
+    build_handoff_packet,
     build_context_query,
     compile_context_packet,
     get_context_profile,
@@ -481,7 +482,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "purpose": "Compile task-focused, cited context packets without writing memory.",
                 "stability": "beta",
                 "cost_class": "medium",
-                "tools": ["list_context_profiles", "prepare_context"],
+                "tools": ["list_context_profiles", "prepare_context", "make_handoff"],
             },
             "retrieval_quality": {
                 "purpose": "Inspect retrieval cost, quality, citations, and workflow recipes before scaling memory.",
@@ -542,6 +543,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "compact working set": "context_pack",
                 "context compiler": "prepare_context",
                 "retrieval profiles": "list_context_profiles",
+                "handoff generator": "make_handoff",
                 "relationship inspection": "impact_scan",
                 "source ingestion": "prepare_source_memory",
                 "source ingestion setup": "list_ingestion_pipelines",
@@ -568,6 +570,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "context_pack": "Search, dedupe, and retrieve a bounded set of chunks in one call.",
             "list_context_profiles": "List no-write retrieval profiles for context compilation.",
             "prepare_context": "Compile a no-write, cited context packet for a task using retrieval profiles.",
+            "make_handoff": "Generate a no-write handoff packet with context refs, citations, next steps, and validation notes.",
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
@@ -618,6 +621,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "retrieve_chunk(key='example_project_notes', chunk_id=3)",
             "context_pack(query='agent memory protocol', project='engram', max_chunks=5)",
             "prepare_context(task='resume repository work', project='C:/Dev/Engram', profile='repo_resume') for a cited working packet",
+            "make_handoff(task='continue rebuild', project='C:/Dev/Engram', next_steps='run validation') before ending a long session",
             "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
             "list_document_extractors() before choosing a local parser, OCR/vision adapter, or agent-native preview path",
@@ -2385,6 +2389,97 @@ async def prepare_context(
         "error": context_payload.get("error"),
     }
     _record_usage_for_payload("prepare_context", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def make_handoff(
+    task: str,
+    project: str | None = None,
+    profile: str = "repo_resume",
+    branch: str | None = None,
+    status: str | None = None,
+    next_steps: str | list[str] | None = None,
+    validation: str | list[str] | None = None,
+    blockers: str | list[str] | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    max_chunks: int | None = None,
+    budget_chars: int | None = None,
+    include_stale: bool | None = None,
+    use_graph: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Generate a no-write handoff packet for resuming agent work.
+
+    The packet includes a prepared context summary, citation refs, warnings,
+    next steps, validation commands, blockers, and a resume prompt. It does not
+    write memory; use write_memory/store_memory explicitly if the handoff should
+    become durable Engram memory.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "task": task,
+        "project": project,
+        "profile": profile,
+        "branch": branch,
+        "status": status,
+        "next_steps": next_steps,
+        "validation": validation,
+        "blockers": blockers,
+        "domain": domain,
+        "tags": tags,
+        "max_chunks": max_chunks,
+        "budget_chars": budget_chars,
+        "include_stale": include_stale,
+        "use_graph": use_graph,
+    }
+
+    metering_token = _USAGE_METERING_ENABLED.set(False)
+    try:
+        context_payload = await prepare_context(
+            task=task,
+            project=project,
+            profile=profile,
+            domain=domain,
+            tags=tags,
+            max_chunks=max_chunks,
+            budget_chars=budget_chars,
+            include_stale=include_stale,
+            use_graph=use_graph,
+        )
+    finally:
+        _USAGE_METERING_ENABLED.reset(metering_token)
+
+    if context_payload.get("error") is not None:
+        payload = {
+            "task": task,
+            "profile": profile,
+            "handoff": None,
+            "write_performed": False,
+            "error": context_payload["error"],
+        }
+        _record_usage_for_payload("make_handoff", input_payload, payload, started_at)
+        return payload
+
+    handoff = build_handoff_packet(
+        task=task,
+        project=project,
+        branch=branch,
+        status=status,
+        next_steps=next_steps,
+        validation=validation,
+        blockers=blockers,
+        context_packet=context_payload.get("packet") or {},
+    )
+    payload = {
+        "task": task,
+        "profile": context_payload.get("profile", profile),
+        "handoff": handoff,
+        "write_performed": False,
+        "error": None,
+    }
+    _record_usage_for_payload("make_handoff", input_payload, payload, started_at)
     return payload
 
 

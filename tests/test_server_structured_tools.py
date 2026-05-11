@@ -2026,6 +2026,80 @@ def test_prepare_context_rejects_unknown_profile_before_retrieval(monkeypatch):
     assert payload["error"]["code"] == "invalid_profile"
 
 
+def test_make_handoff_compiles_context_and_returns_no_write_packet(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_prepare_context(**kwargs):
+        observed.update(kwargs)
+        return {
+            "task": kwargs["task"],
+            "profile": kwargs["profile"],
+            "packet": {
+                "record_type": "context_packet",
+                "task": kwargs["task"],
+                "project": kwargs["project"],
+                "profile": {"id": kwargs["profile"]},
+                "context": {
+                    "chunks": [
+                        {
+                            "key": "engram_context_compiler",
+                            "chunk_id": 0,
+                            "title": "Context compiler",
+                        }
+                    ],
+                    "citations": [{"citation_id": "engram:engram_context_compiler#0"}],
+                    "omitted": [],
+                },
+                "warnings": [],
+            },
+            "write_performed": False,
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "prepare_context", fake_prepare_context)
+
+    payload = asyncio.run(
+        server.make_handoff(
+            task="continue Engram rebuild",
+            project="C:/Dev/Engram",
+            branch="codex/memory-os-migration-kernel",
+            status="context compiler committed",
+            next_steps="add handoff generator\nrun full validation",
+            validation="pytest -q",
+        )
+    )
+
+    assert observed["task"] == "continue Engram rebuild"
+    assert observed["profile"] == "repo_resume"
+    assert payload["handoff"]["record_type"] == "handoff_packet"
+    assert payload["handoff"]["context_refs"] == [{"key": "engram_context_compiler", "chunk_id": 0}]
+    assert payload["handoff"]["next_steps"] == ["add handoff generator", "run full validation"]
+    assert payload["handoff"]["write_performed"] is False
+    assert payload["error"] is None
+
+
+def test_make_handoff_returns_context_error_without_promoting(monkeypatch):
+    server = load_server_module()
+
+    async def fake_prepare_context(**kwargs):
+        return {
+            "task": kwargs["task"],
+            "profile": kwargs["profile"],
+            "packet": None,
+            "write_performed": False,
+            "error": {"code": "runtime_error", "message": "context unavailable"},
+        }
+
+    monkeypatch.setattr(server, "prepare_context", fake_prepare_context)
+
+    payload = asyncio.run(server.make_handoff(task="continue", project="C:/Dev/Engram"))
+
+    assert payload["handoff"] is None
+    assert payload["write_performed"] is False
+    assert payload["error"]["message"] == "context unavailable"
+
+
 def test_usage_tools_delegate_to_usage_meter(isolated_usage_meter, monkeypatch):
     server = load_server_module()
     monkeypatch.setattr(server, "usage_meter", isolated_usage_meter.usage_meter)

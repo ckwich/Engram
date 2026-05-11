@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.context_compiler import compile_context_packet, list_context_profiles
+from core.context_compiler import build_handoff_packet, compile_context_packet, list_context_profiles
 
 
 def test_list_context_profiles_exposes_agent_workflow_defaults():
@@ -62,3 +62,43 @@ def test_compile_context_packet_preserves_receipts_and_review_warnings():
         }
     ]
     assert packet["next_actions"][0]["tool"] == "retrieve_chunk"
+
+
+def test_build_handoff_packet_turns_context_into_resume_artifact():
+    context_packet = {
+        "record_type": "context_packet",
+        "task": "continue Engram rebuild",
+        "project": "C:/Dev/Engram",
+        "profile": {"id": "repo_resume"},
+        "context": {
+            "chunks": [
+                {
+                    "key": "engram_context_compiler",
+                    "chunk_id": 0,
+                    "title": "Context compiler",
+                }
+            ],
+            "citations": [{"citation_id": "engram:engram_context_compiler#0"}],
+            "omitted": [],
+        },
+        "warnings": [{"code": "stale_excluded", "message": "Stale memories excluded."}],
+    }
+
+    handoff = build_handoff_packet(
+        task="continue Engram rebuild",
+        project="C:/Dev/Engram",
+        branch="codex/memory-os-migration-kernel",
+        status="context compiler committed",
+        next_steps=["add handoff generator", "run full validation"],
+        validation=["pytest -q"],
+        blockers=[],
+        context_packet=context_packet,
+    )
+
+    assert handoff["schema_version"] == "2026-05-11.handoff-packet.v1"
+    assert handoff["record_type"] == "handoff_packet"
+    assert handoff["write_performed"] is False
+    assert handoff["context_refs"] == [{"key": "engram_context_compiler", "chunk_id": 0}]
+    assert handoff["citations"] == [{"citation_id": "engram:engram_context_compiler#0"}]
+    assert "continue Engram rebuild" in handoff["resume_prompt"]
+    assert handoff["next_steps"][0] == "add handoff generator"
