@@ -341,6 +341,7 @@ def prepare_document_extraction_result(
     media_type: str,
     metadata: dict[str, Any] | None = None,
     image_refs: list[dict[str, Any]] | None = None,
+    requested_visual_capabilities: list[str] | None = None,
 ) -> dict[str, Any]:
     """Prepare a reviewable external parser result without writing memory."""
     if not isinstance(extraction_request, dict):
@@ -355,6 +356,11 @@ def prepare_document_extraction_result(
     normalized_metadata = _normalize_metadata(metadata)
     normalized_metadata["extraction_request_id"] = request_id
     normalized_images = _normalize_optional_source_refs(image_refs)
+    normalized_visual_capabilities = (
+        _normalize_visual_capabilities(requested_visual_capabilities)
+        if requested_visual_capabilities is not None
+        else []
+    )
     content_hash = "sha256:" + hashlib.sha256(normalized_content.encode("utf-8")).hexdigest()
     document_record = prepare_document_record(
         title=normalized_title,
@@ -375,6 +381,17 @@ def prepare_document_extraction_result(
     requires_visual_review = bool(normalized_images) or _normalize_bool(
         extraction_request.get("image_recognition_may_be_required")
     )
+    visual_request_arguments = None
+    if normalized_images and normalized_visual_capabilities:
+        visual_request_arguments = {
+            "document_record": document_record,
+            "image_refs": normalized_images,
+            "requested_capabilities": normalized_visual_capabilities,
+            "extractor_id": "engram-visual-request",
+            "extractor_kind": "ocr_vision",
+            "instructions": "Review image-derived text, diagrams, tables, or figures before any memory promotion.",
+        }
+
     return {
         "schema_version": DOCUMENT_EXTRACTION_RESULT_SCHEMA_VERSION,
         "record_type": "document_extraction_result",
@@ -388,6 +405,7 @@ def prepare_document_extraction_result(
         "content_hash": content_hash,
         "image_refs": normalized_images,
         "requires_visual_review": requires_visual_review,
+        "visual_extraction_request_arguments": visual_request_arguments,
         "document_extraction_arguments": {
             "title": normalized_title,
             "source_uri": source_uri,

@@ -931,6 +931,7 @@ async def prepare_document_extraction_result(
     media_type: str,
     metadata: dict[str, Any] | None = None,
     image_refs: list[dict[str, Any]] | None = None,
+    requested_visual_capabilities: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Normalize external parser output into a no-write document extraction result.
@@ -938,7 +939,8 @@ async def prepare_document_extraction_result(
     This tool does not run a parser and does not store memory. Use it after an
     external PDF/DOCX/OCR parser returns text and optional image refs. The result
     preserves the extraction request provenance and returns arguments for
-    preview_document_extraction plus visual-review guidance.
+    preview_document_extraction. When image refs and requested visual capabilities
+    are provided, it also returns prepare_visual_extraction_request arguments.
     """
     started_at = time.perf_counter()
     input_payload = {
@@ -948,6 +950,7 @@ async def prepare_document_extraction_result(
         "media_type": media_type,
         "metadata": metadata,
         "image_refs": image_refs,
+        "requested_visual_capabilities": requested_visual_capabilities,
     }
     try:
         payload = {
@@ -958,6 +961,7 @@ async def prepare_document_extraction_result(
                 media_type=media_type,
                 metadata=metadata,
                 image_refs=image_refs,
+                requested_visual_capabilities=requested_visual_capabilities,
             ),
             "error": None,
         }

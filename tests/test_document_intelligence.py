@@ -322,6 +322,7 @@ def test_prepare_document_extraction_result_links_parser_output_to_review_tools(
                 "image_hash": "sha256:" + "e" * 64,
             }
         ],
+        requested_visual_capabilities=["ocr_text", "diagram_description"],
     )
 
     assert result["schema_version"] == "2026-05-11.document-intelligence.extraction-result.v1"
@@ -338,6 +339,12 @@ def test_prepare_document_extraction_result_links_parser_output_to_review_tools(
     assert result["document_extraction_arguments"]["metadata"]["project"] == "Engram"
     assert result["document_extraction_arguments"]["metadata"]["extraction_request_id"] == request["request_id"]
     assert result["image_refs"][0]["page"] == 1
+    assert result["visual_extraction_request_arguments"]["document_record"] == result["document_record"]
+    assert result["visual_extraction_request_arguments"]["image_refs"] == result["image_refs"]
+    assert result["visual_extraction_request_arguments"]["requested_capabilities"] == [
+        "diagram_description",
+        "ocr_text",
+    ]
     assert "preview_document_extraction" in result["promotion_guidance"]["next_tools"]
     assert "prepare_visual_extraction_request" in result["promotion_guidance"]["next_tools"]
 

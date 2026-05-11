@@ -1409,6 +1409,7 @@ def test_prepare_document_extraction_result_tool_returns_no_write_result():
             media_type="text/markdown",
             metadata={"project": "Engram"},
             image_refs=[{"source_uri": "file:///docs/architecture.pdf", "page": 1}],
+            requested_visual_capabilities=["ocr_text"],
         )
     )
 
@@ -1416,6 +1417,7 @@ def test_prepare_document_extraction_result_tool_returns_no_write_result():
     assert payload["result"]["record_type"] == "document_extraction_result"
     assert payload["result"]["write_performed"] is False
     assert payload["result"]["requires_visual_review"] is True
+    assert payload["result"]["visual_extraction_request_arguments"]["requested_capabilities"] == ["ocr_text"]
 
 
 def test_prepare_document_extraction_result_tool_returns_structured_invalid_request():
