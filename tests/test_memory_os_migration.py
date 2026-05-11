@@ -204,6 +204,60 @@ def test_legacy_related_to_links_import_as_stable_graph_edge_records(tmp_path):
     assert restored.read_graph_edge_records() == edges
 
 
+def test_legacy_graph_edge_document_imports_generic_refs_and_restores_bundle(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    graph_path = tmp_path / "edges.json"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "content": "Alpha content",
+        },
+    )
+    graph_edge = {
+        "edge_id": "sha256:external-edge",
+        "from_ref": {"kind": "source", "key": "design-doc"},
+        "to_ref": {"kind": "memory", "key": "alpha"},
+        "edge_type": "supports",
+        "confidence": 0.8,
+        "evidence": "Design doc supports alpha.",
+        "source": "legacy_graph",
+        "status": "active",
+        "created_by": "agent",
+        "created_at": "2026-05-05T00:00:00+00:00",
+        "updated_at": "2026-05-05T00:00:00+00:00",
+    }
+    graph_path.write_text(
+        json.dumps({"schema_version": "2026-04-27", "edges": [graph_edge]}, indent=2),
+        encoding="utf-8",
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    kernel.import_legacy_json(legacy_dir)
+    import_report = kernel.import_legacy_graph_edges(graph_path)
+    edges = kernel.read_graph_edge_records()
+
+    assert import_report == {
+        "schema_version": "2026-05-11.memory_os_migration.v4",
+        "source_count": 1,
+        "imported_count": 1,
+        "invalid_count": 0,
+        "edge_ids": ["sha256:external-edge"],
+        "invalid": [],
+    }
+    assert edges == [graph_edge]
+
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+
+    assert restored.read_graph_edge_records() == [graph_edge]
+
+
 def test_chunk_ledger_exports_vector_source_records_with_metadata_and_citations(tmp_path):
     legacy_dir = tmp_path / "legacy"
     store_root = tmp_path / "store"

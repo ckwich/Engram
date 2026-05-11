@@ -22,7 +22,7 @@ from typing import Any
 from core.chunker import chunk_content_with_metadata
 from core.vector_index import VectorIndexDocument
 
-SCHEMA_VERSION = "2026-05-11.memory_os_migration.v3"
+SCHEMA_VERSION = "2026-05-11.memory_os_migration.v4"
 LEDGER_FILENAME = "ledger.sqlite3"
 LEGACY_RELATED_TO_EDGE_SOURCE = "legacy_related_to"
 
@@ -89,6 +89,10 @@ def _graph_edge_id(edge: dict[str, Any]) -> str:
         "source": edge["source"],
     }
     return f"sha256:{hashlib.sha256(_json_dumps(base).encode('utf-8')).hexdigest()}"
+
+
+def _ref_key(ref: dict[str, Any]) -> str:
+    return str(ref.get("key") or _json_dumps(ref))
 
 
 def _now() -> str:
@@ -239,6 +243,35 @@ class MemoryOSMigrationKernel:
             imported_count=len(records),
         )
 
+    def import_legacy_graph_edges(self, graph_path: str | Path) -> dict[str, Any]:
+        graph_path = Path(graph_path)
+        data = json.loads(graph_path.read_text(encoding="utf-8"))
+        raw_edges = data.get("edges") if isinstance(data, dict) else None
+        if not isinstance(raw_edges, list):
+            raise ValueError("legacy graph document must contain an edges list")
+
+        edges: list[dict[str, Any]] = []
+        invalid: list[dict[str, Any]] = []
+        for index, raw_edge in enumerate(raw_edges):
+            try:
+                edges.append(self._normalize_bundle_graph_edge(raw_edge))
+            except ValueError as error:
+                invalid.append({"edge_index": index, "message": str(error)})
+
+        self.store_root.mkdir(parents=True, exist_ok=True)
+        with self._connection() as conn:
+            self._upsert_graph_edges(conn, edges)
+            conn.commit()
+
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "source_count": len(raw_edges),
+            "imported_count": len(edges),
+            "invalid_count": len(invalid),
+            "edge_ids": [edge["edge_id"] for edge in edges],
+            "invalid": invalid,
+        }
+
     def export_bundle(self) -> dict[str, Any]:
         with self._connection(initialize=False) as conn:
             rows = conn.execute(
@@ -272,6 +305,7 @@ class MemoryOSMigrationKernel:
             "exported_at": _now(),
             "memory_count": len(memories),
             "memories": memories,
+            "graph_edges": self.read_graph_edge_records(),
         }
 
     def restore_bundle(self, bundle: dict[str, Any]) -> dict[str, Any]:
@@ -289,6 +323,14 @@ class MemoryOSMigrationKernel:
                 self._write_artifact(record)
                 self._upsert_memory(conn, record)
                 restored.append(record["key"])
+            graph_edges = bundle.get("graph_edges")
+            if isinstance(graph_edges, list):
+                conn.execute("DELETE FROM graph_edges")
+                self._upsert_graph_edges(
+                    conn,
+                    [self._normalize_bundle_graph_edge(edge) for edge in graph_edges],
+                )
+                conn.commit()
 
         restored.sort()
         return {
@@ -463,8 +505,7 @@ class MemoryOSMigrationKernel:
                 status TEXT NOT NULL,
                 created_by TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(from_key) REFERENCES memories(key) ON DELETE CASCADE
+                updated_at TEXT NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_graph_edges_from_key
@@ -585,6 +626,10 @@ class MemoryOSMigrationKernel:
             ],
         )
         conn.execute("DELETE FROM graph_edges WHERE from_key = ?", (record["key"],))
+        self._upsert_graph_edges(conn, record["graph_edges"])
+        conn.commit()
+
+    def _upsert_graph_edges(self, conn: sqlite3.Connection, edges: list[dict[str, Any]]) -> None:
         conn.executemany(
             """
             INSERT INTO graph_edges (
@@ -593,12 +638,25 @@ class MemoryOSMigrationKernel:
                 created_at, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(edge_id) DO UPDATE SET
+                from_key = excluded.from_key,
+                to_key = excluded.to_key,
+                from_ref_json = excluded.from_ref_json,
+                to_ref_json = excluded.to_ref_json,
+                edge_type = excluded.edge_type,
+                confidence = excluded.confidence,
+                evidence = excluded.evidence,
+                source = excluded.source,
+                status = excluded.status,
+                created_by = excluded.created_by,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
             """,
             [
                 (
                     edge["edge_id"],
-                    edge["from_ref"]["key"],
-                    edge["to_ref"]["key"],
+                    _ref_key(edge["from_ref"]),
+                    _ref_key(edge["to_ref"]),
                     _json_dumps(edge["from_ref"]),
                     _json_dumps(edge["to_ref"]),
                     edge["edge_type"],
@@ -610,10 +668,9 @@ class MemoryOSMigrationKernel:
                     edge["created_at"],
                     edge["updated_at"],
                 )
-                for edge in record["graph_edges"]
+                for edge in edges
             ],
         )
-        conn.commit()
 
     def _scan_legacy_dir(self, legacy_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         records: list[dict[str, Any]] = []
