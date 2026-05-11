@@ -52,6 +52,8 @@ Agents should always start at tier 1 and escalate only when needed.
 | `memory_protocol` | `()` | Current retrieval ladder, aliases, and warnings | Very low |
 | `search_memories` | `(query, limit=5, project=None, domain=None, tags=None, retrieval_mode='semantic', ...)` | Scored snippet per chunk match | Low |
 | `context_pack` | `(query, max_chunks=5, budget_chars=6000, retrieval_mode='semantic', ...)` | Bounded retrieved chunks, citations, and receipt after search/dedupe | Medium |
+| `list_context_profiles` | `()` | No-write context profile catalog for task-focused retrieval | Very low |
+| `prepare_context` | `(task, profile='repo_resume', project=None, ...)` | No-write cited context packet with profile receipt, warnings, and next actions | Medium |
 | `list_memories` | `(limit=50, offset=0, project=None, domain=None, tags=None)` | Paginated metadata directory | Very low |
 | `retrieve_chunk` | `(key, chunk_id)` | Full text of one chunk | Medium |
 | `retrieve_memory` | `(key)` | Full memory and metadata | High (intentional) |

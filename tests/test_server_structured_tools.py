@@ -1947,6 +1947,85 @@ def test_context_pack_records_privacy_safe_usage(isolated_usage_meter, monkeypat
     assert "full retrieved context body" not in serialized
 
 
+def test_list_context_profiles_returns_no_write_catalog():
+    server = load_server_module()
+
+    payload = asyncio.run(server.list_context_profiles())
+
+    assert payload["write_performed"] is False
+    assert payload["profiles"]["repo_resume"]["use_graph"] is True
+    assert payload["profiles"]["document_review"]["retrieval_mode"] == "hybrid"
+    assert payload["error"] is None
+
+
+def test_prepare_context_uses_profile_defaults_and_returns_context_packet(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_context_pack(query: str, **kwargs):
+        observed["query"] = query
+        observed["kwargs"] = kwargs
+        return {
+            "query": query,
+            "count": 1,
+            "chunks": [
+                {
+                    "key": "engram_rebuild_checkpoint",
+                    "chunk_id": 0,
+                    "title": "Engram rebuild checkpoint",
+                    "text": "Use the context compiler next.",
+                    "citation": {"citation_id": "engram:engram_rebuild_checkpoint#0"},
+                }
+            ],
+            "citations": [{"citation_id": "engram:engram_rebuild_checkpoint#0"}],
+            "omitted": [],
+            "budget_chars": kwargs["budget_chars"],
+            "used_chars": 30,
+            "receipt": {
+                "semantic_candidate_count": 2,
+                "graph_candidate_count": 1,
+                "selected_chunk_count": 1,
+                "omitted_count": 0,
+                "stale_policy": "excluded",
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "context_pack", fake_context_pack)
+
+    payload = asyncio.run(
+        server.prepare_context(
+            task="resume Engram rebuild",
+            project="C:/Dev/Engram",
+            profile="repo_resume",
+        )
+    )
+
+    assert "resume Engram rebuild" in observed["query"]
+    assert "handoff" in observed["query"]
+    assert observed["kwargs"]["max_chunks"] == 8
+    assert observed["kwargs"]["budget_chars"] == 10000
+    assert observed["kwargs"]["use_graph"] is True
+    assert payload["packet"]["profile"]["id"] == "repo_resume"
+    assert payload["packet"]["context"]["chunks"][0]["key"] == "engram_rebuild_checkpoint"
+    assert payload["packet"]["write_performed"] is False
+    assert payload["error"] is None
+
+
+def test_prepare_context_rejects_unknown_profile_before_retrieval(monkeypatch):
+    server = load_server_module()
+
+    async def fail_context_pack(*args, **kwargs):
+        raise AssertionError("unknown profiles must not run retrieval")
+
+    monkeypatch.setattr(server, "context_pack", fail_context_pack)
+
+    payload = asyncio.run(server.prepare_context(task="resume work", profile="missing-profile"))
+
+    assert payload["packet"] is None
+    assert payload["error"]["code"] == "invalid_profile"
+
+
 def test_usage_tools_delegate_to_usage_meter(isolated_usage_meter, monkeypatch):
     server = load_server_module()
     monkeypatch.setattr(server, "usage_meter", isolated_usage_meter.usage_meter)

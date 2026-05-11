@@ -67,6 +67,9 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "preview_document_source_connector" in payload["tool_groups"]["document_intelligence"]["tools"]
     assert "preview_document_extraction" in payload["tool_groups"]["document_intelligence"]["tools"]
     assert "preview_visual_extraction" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert payload["tool_groups"]["agent_workflows"]["stability"] == "beta"
+    assert "prepare_context" in payload["tool_groups"]["agent_workflows"]["tools"]
+    assert "list_context_profiles" in payload["tool_groups"]["agent_workflows"]["tools"]
     assert payload["tool_groups"]["usage"]["stability"] == "beta"
     assert payload["progressive_discovery"]["start_here"] == "memory_protocol"
     assert payload["progressive_discovery"]["load_next"]["source ingestion"] == "prepare_source_memory"
@@ -79,6 +82,8 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert payload["progressive_discovery"]["load_next"]["document promotion"] == "prepare_document_promotion_transaction"
     assert payload["progressive_discovery"]["load_next"]["visual extraction request"] == "prepare_visual_extraction_request"
     assert payload["progressive_discovery"]["load_next"]["visual extraction"] == "preview_visual_extraction"
+    assert payload["progressive_discovery"]["load_next"]["context compiler"] == "prepare_context"
+    assert payload["progressive_discovery"]["load_next"]["retrieval profiles"] == "list_context_profiles"
     assert payload["progressive_discovery"]["load_next"]["usage review"] == "usage_summary"
     assert "preview_document_extraction" in payload["canonical_tools"]
     assert "list_document_extractors" in payload["canonical_tools"]
@@ -89,6 +94,8 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "prepare_document_promotion_transaction" in payload["canonical_tools"]
     assert "prepare_visual_extraction_request" in payload["canonical_tools"]
     assert "preview_visual_extraction" in payload["canonical_tools"]
+    assert "prepare_context" in payload["canonical_tools"]
+    assert "list_context_profiles" in payload["canonical_tools"]
     assert payload["warnings"][0].startswith("Do not call retrieve_memory")
 
 
@@ -101,6 +108,7 @@ def test_memory_protocol_marks_new_v06_surfaces_as_beta_or_stable():
     assert payload["tool_groups"]["graph"]["stability"] == "beta"
     assert payload["tool_groups"]["source_intake"]["stability"] == "beta"
     assert payload["tool_groups"]["document_intelligence"]["stability"] == "beta"
+    assert payload["tool_groups"]["agent_workflows"]["stability"] == "beta"
     assert payload["tool_groups"]["usage"]["stability"] == "beta"
     assert payload["tool_groups"]["operations"]["stability"] == "beta"
 

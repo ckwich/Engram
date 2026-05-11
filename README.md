@@ -47,6 +47,7 @@ The result is a practical intersession memory layer for coding agents, research 
 
 - **Three-tier retrieval**: search snippets, retrieve chunks, then read full memories only when necessary.
 - **Context packs** that search, dedupe, and retrieve a bounded working set in one call.
+- **Context profiles and packets** that compile task-focused, cited working context without writing memory.
 - **Protocol discovery** so an agent can ask Engram how to use the memory ladder.
 - **Session pins** that temporarily promote known memories without changing stored metadata.
 - **Token-use estimates** for Engram-attributed calls.
@@ -118,6 +119,8 @@ and protocol `schema_version: "2026-04-27"`.
 | `search_memories` | Semantic or hybrid memory search with filters and scored snippets. |
 | `find_memories` | Alias for agents looking for a find verb. |
 | `context_pack` | Search, dedupe, and retrieve a bounded chunk working set. |
+| `list_context_profiles` | List no-write retrieval profiles for task-focused context compilation. |
+| `prepare_context` | Compile a no-write, cited context packet for an agent task. |
 | `retrieve_chunk` | Retrieve one chunk by memory key and chunk ID. |
 | `retrieve_chunks` | Retrieve several known chunks in one call. |
 | `retrieve_memory` | Retrieve a full memory intentionally. |

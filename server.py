@@ -25,6 +25,12 @@ from fastmcp import FastMCP
 from core.chunk_preview import preview_memory_chunks as build_chunk_preview
 from core.codebase_mapper import codebase_mapping_manager
 from core.context_builder import build_context_receipt, make_filters, merge_graph_candidates
+from core.context_compiler import (
+    build_context_query,
+    compile_context_packet,
+    get_context_profile,
+    list_context_profiles as build_context_profile_catalog,
+)
 from core.document_intelligence import (
     list_document_extractors as build_document_extractor_catalog,
     prepare_document_draft as build_document_draft,
@@ -373,6 +379,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "graph": "beta",
             "source_intake": "beta",
             "document_intelligence": "beta",
+            "agent_workflows": "beta",
             "review_helpers": "beta",
             "retrieval_quality": "beta",
             "usage": "beta",
@@ -470,6 +477,12 @@ async def memory_protocol() -> MemoryProtocolPayload:
                     "preview_visual_extraction",
                 ],
             },
+            "agent_workflows": {
+                "purpose": "Compile task-focused, cited context packets without writing memory.",
+                "stability": "beta",
+                "cost_class": "medium",
+                "tools": ["list_context_profiles", "prepare_context"],
+            },
             "retrieval_quality": {
                 "purpose": "Inspect retrieval cost, quality, citations, and workflow recipes before scaling memory.",
                 "stability": "beta",
@@ -527,6 +540,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "load_next": {
                 "topic lookup": "search_memories",
                 "compact working set": "context_pack",
+                "context compiler": "prepare_context",
+                "retrieval profiles": "list_context_profiles",
                 "relationship inspection": "impact_scan",
                 "source ingestion": "prepare_source_memory",
                 "source ingestion setup": "list_ingestion_pipelines",
@@ -551,6 +566,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
         "canonical_tools": {
             "search_memories": "Structured semantic search with optional project/domain/tag/staleness filters.",
             "context_pack": "Search, dedupe, and retrieve a bounded set of chunks in one call.",
+            "list_context_profiles": "List no-write retrieval profiles for context compilation.",
+            "prepare_context": "Compile a no-write, cited context packet for a task using retrieval profiles.",
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
@@ -600,6 +617,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "search_memories(query='scheduler bug', limit=5)",
             "retrieve_chunk(key='example_project_notes', chunk_id=3)",
             "context_pack(query='agent memory protocol', project='engram', max_chunks=5)",
+            "prepare_context(task='resume repository work', project='C:/Dev/Engram', profile='repo_resume') for a cited working packet",
             "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
             "list_document_extractors() before choosing a local parser, OCR/vision adapter, or agent-native preview path",
@@ -2228,6 +2246,145 @@ async def retrieve_chunks(requests: list[dict]) -> dict[str, Any]:
         "error": None,
     }
     _record_usage_for_payload("retrieve_chunks", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def list_context_profiles() -> dict[str, Any]:
+    """
+    List no-write retrieval profiles for task-focused context compilation.
+
+    Profiles tune prepare_context() defaults such as max chunks, budget,
+    retrieval mode, graph expansion, and workflow-oriented query terms. Listing
+    profiles does not search, read, write, or promote memory.
+    """
+    try:
+        payload = build_context_profile_catalog()
+        payload["error"] = None
+        return payload
+    except Exception as e:
+        return {
+            "schema_version": "2026-05-11.context-profiles.v1",
+            "count": 0,
+            "profiles": {},
+            "write_performed": False,
+            "error": _tool_error("runtime_error", str(e)),
+        }
+
+
+@mcp.tool()
+async def prepare_context(
+    task: str,
+    project: str | None = None,
+    profile: str = "repo_resume",
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    max_chunks: int | None = None,
+    budget_chars: int | None = None,
+    include_stale: bool | None = None,
+    canonical_only: bool | None = None,
+    retrieval_mode: str | None = None,
+    use_graph: bool | None = None,
+    max_hops: int | None = None,
+) -> dict[str, Any]:
+    """
+    Compile a no-write, cited context packet for an agent task.
+
+    This is an agent-workflow helper on top of context_pack(). It selects a
+    retrieval profile, builds a task-focused query, returns bounded cited
+    chunks plus warnings/next actions, and never writes or promotes memory.
+    """
+    started_at = time.perf_counter()
+    normalized_tags = _normalize_string_list(tags)
+    input_payload = {
+        "task": task,
+        "project": project,
+        "profile": profile,
+        "domain": domain,
+        "tags": normalized_tags,
+        "max_chunks": max_chunks,
+        "budget_chars": budget_chars,
+        "include_stale": include_stale,
+        "canonical_only": canonical_only,
+        "retrieval_mode": retrieval_mode,
+        "use_graph": use_graph,
+        "max_hops": max_hops,
+    }
+
+    task_error = _validate_search_query(task)
+    if task_error:
+        payload = {
+            "task": task,
+            "profile": profile,
+            "packet": None,
+            "write_performed": False,
+            "error": _tool_error("invalid_task", task_error),
+        }
+        _record_usage_for_payload("prepare_context", input_payload, payload, started_at)
+        return payload
+
+    try:
+        profile_payload = get_context_profile(profile)
+    except ValueError as e:
+        payload = {
+            "task": task,
+            "profile": profile,
+            "packet": None,
+            "write_performed": False,
+            "error": _tool_error("invalid_profile", str(e)),
+        }
+        _record_usage_for_payload("prepare_context", input_payload, payload, started_at)
+        return payload
+
+    selected_max_chunks = int(max_chunks if max_chunks is not None else profile_payload["max_chunks"])
+    selected_budget_chars = int(budget_chars if budget_chars is not None else profile_payload["budget_chars"])
+    selected_include_stale = (
+        bool(include_stale) if include_stale is not None else bool(profile_payload["include_stale"])
+    )
+    selected_canonical_only = (
+        bool(canonical_only) if canonical_only is not None else bool(profile_payload["canonical_only"])
+    )
+    selected_retrieval_mode = str(retrieval_mode or profile_payload["retrieval_mode"])
+    selected_use_graph = bool(use_graph) if use_graph is not None else bool(profile_payload["use_graph"])
+    selected_max_hops = int(max_hops if max_hops is not None else profile_payload["max_hops"])
+    query = build_context_query(task, profile_payload, project=project)
+
+    metering_token = _USAGE_METERING_ENABLED.set(False)
+    try:
+        context_payload = await context_pack(
+            query=query,
+            project=project,
+            domain=domain,
+            tags=normalized_tags,
+            max_chunks=selected_max_chunks,
+            budget_chars=selected_budget_chars,
+            include_stale=selected_include_stale,
+            canonical_only=selected_canonical_only,
+            retrieval_mode=selected_retrieval_mode,
+            use_graph=selected_use_graph,
+            max_hops=selected_max_hops,
+        )
+    finally:
+        _USAGE_METERING_ENABLED.reset(metering_token)
+
+    packet = compile_context_packet(
+        task=task,
+        profile_id=profile_payload["id"],
+        profile=profile_payload,
+        context_payload=context_payload,
+        project=project,
+        domain=domain,
+        tags=normalized_tags,
+        query=query,
+    )
+    payload = {
+        "task": task,
+        "profile": profile_payload["id"],
+        "packet": packet,
+        "write_performed": False,
+        "error": context_payload.get("error"),
+    }
+    _record_usage_for_payload("prepare_context", input_payload, payload, started_at)
     return payload
 
 
