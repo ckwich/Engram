@@ -570,3 +570,109 @@ def test_round_trip_cli_writes_durable_parity_report(tmp_path):
     assert (work_root / "store" / "ledger.sqlite3").exists()
     assert (work_root / "restored_store" / "ledger.sqlite3").exists()
     assert (work_root / "restored_json").is_dir()
+
+
+def test_migration_cli_import_export_restore_bundle_commands(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    import_report_path = tmp_path / "import_report.json"
+    restore_report_path = tmp_path / "restore_report.json"
+    bundle_path = tmp_path / "bundle.json"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "content": "Alpha content",
+            "tags": ["one"],
+            "related_to": ["beta"],
+            "chunk_count": 1,
+        },
+    )
+    _write_memory(
+        legacy_dir / "beta.json",
+        {
+            "key": "beta",
+            "title": "Beta",
+            "content": "Beta content",
+            "tags": ["two"],
+            "related_to": [],
+            "chunk_count": 1,
+        },
+    )
+
+    import_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "core.memory_os_migration",
+            "import-legacy",
+            "--legacy-dir",
+            str(legacy_dir),
+            "--store-root",
+            str(store_root),
+            "--report",
+            str(import_report_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert import_result.returncode == 0, import_result.stderr
+    import_report = json.loads(import_report_path.read_text(encoding="utf-8"))
+    assert json.loads(import_result.stdout) == import_report
+    assert import_report["imported_count"] == 2
+    assert import_report["key_set"] == ["alpha", "beta"]
+
+    export_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "core.memory_os_migration",
+            "export-bundle",
+            "--store-root",
+            str(store_root),
+            "--bundle",
+            str(bundle_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert export_result.returncode == 0, export_result.stderr
+    export_report = json.loads(export_result.stdout)
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    assert export_report["bundle_path"] == str(bundle_path)
+    assert export_report["memory_count"] == 2
+    assert bundle["memory_count"] == 2
+    assert bundle["document_evidence_count"] == 0
+
+    restore_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "core.memory_os_migration",
+            "restore-bundle",
+            "--store-root",
+            str(restore_root),
+            "--bundle",
+            str(bundle_path),
+            "--report",
+            str(restore_report_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert restore_result.returncode == 0, restore_result.stderr
+    restore_report = json.loads(restore_report_path.read_text(encoding="utf-8"))
+    assert json.loads(restore_result.stdout) == restore_report
+    assert restore_report["restored_count"] == 2
+    assert restore_report["key_set"] == ["alpha", "beta"]
+    assert MemoryOSMigrationKernel(restore_root).read_graph_edge_records("alpha")[0]["to_ref"]["key"] == "beta"

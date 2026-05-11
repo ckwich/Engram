@@ -451,6 +451,12 @@ python server.py --agent-eval
 
 # Generate MCP client config
 python server.py --generate-config
+
+# Memory OS migration utilities
+python -m core.memory_os_migration import-legacy --legacy-dir data/memories --store-root .engram-migration/store
+python -m core.memory_os_migration export-bundle --store-root .engram-migration/store --bundle .engram-migration/bundle.json
+python -m core.memory_os_migration restore-bundle --store-root .engram-migration/restored --bundle .engram-migration/bundle.json
+python -m core.memory_os_migration round-trip --legacy-dir data/memories --work-root .engram-migration/round-trip
 ```
 
 ---

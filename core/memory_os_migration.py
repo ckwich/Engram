@@ -1264,10 +1264,58 @@ def run_round_trip_check(
     }
 
     if report_path is not None:
-        encoded = (json.dumps(report, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-        _atomic_write(Path(report_path), encoded)
+        _write_json_file(Path(report_path), report)
 
     return report
+
+
+def run_import_legacy(
+    legacy_dir: str | Path,
+    store_root: str | Path,
+    *,
+    report_path: str | Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Import legacy JSON memories into a Memory OS migration store."""
+    report = MemoryOSMigrationKernel(store_root).import_legacy_json(legacy_dir, dry_run=dry_run)
+    if report_path is not None:
+        _write_json_file(Path(report_path), report)
+    return report
+
+
+def run_export_bundle(store_root: str | Path, bundle_path: str | Path) -> dict[str, Any]:
+    """Export a Memory OS migration store to a portable JSON bundle."""
+    bundle_path = Path(bundle_path)
+    bundle = MemoryOSMigrationKernel(store_root).export_bundle()
+    _write_json_file(bundle_path, bundle)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "bundle_path": str(bundle_path),
+        "memory_count": bundle["memory_count"],
+        "graph_edge_count": len(bundle.get("graph_edges", [])),
+        "document_evidence_count": bundle.get("document_evidence_count", 0),
+    }
+
+
+def run_restore_bundle(
+    store_root: str | Path,
+    bundle_path: str | Path,
+    *,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Restore a Memory OS migration store from a portable JSON bundle."""
+    bundle_path = Path(bundle_path)
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    report = MemoryOSMigrationKernel(store_root).restore_bundle(bundle)
+    report["bundle_path"] = str(bundle_path)
+    if report_path is not None:
+        _write_json_file(Path(report_path), report)
+    return report
+
+
+def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    encoded = (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    _atomic_write(path, encoded)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1284,6 +1332,30 @@ def _build_parser() -> argparse.ArgumentParser:
     round_trip.add_argument("--legacy-dir", required=True, help="Legacy data/memories directory.")
     round_trip.add_argument("--work-root", required=True, help="Empty output directory for check artifacts.")
     round_trip.add_argument("--report", help="Optional JSON report path.")
+
+    import_legacy = subparsers.add_parser(
+        "import-legacy",
+        help="Import legacy JSON memories into a migration store.",
+    )
+    import_legacy.add_argument("--legacy-dir", required=True, help="Legacy data/memories directory.")
+    import_legacy.add_argument("--store-root", required=True, help="Memory OS migration store root.")
+    import_legacy.add_argument("--report", help="Optional JSON report path.")
+    import_legacy.add_argument("--dry-run", action="store_true", help="Validate import without writing the store.")
+
+    export_bundle = subparsers.add_parser(
+        "export-bundle",
+        help="Export a migration store to a portable JSON bundle.",
+    )
+    export_bundle.add_argument("--store-root", required=True, help="Memory OS migration store root.")
+    export_bundle.add_argument("--bundle", required=True, help="Output bundle JSON path.")
+
+    restore_bundle = subparsers.add_parser(
+        "restore-bundle",
+        help="Restore a migration store from a portable JSON bundle.",
+    )
+    restore_bundle.add_argument("--store-root", required=True, help="Target Memory OS migration store root.")
+    restore_bundle.add_argument("--bundle", required=True, help="Input bundle JSON path.")
+    restore_bundle.add_argument("--report", help="Optional JSON restore report path.")
     return parser
 
 
@@ -1299,6 +1371,33 @@ def main(argv: list[str] | None = None) -> int:
         )
         sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
         return 0 if report["status"] == "pass" else 1
+
+    if args.command == "import-legacy":
+        report = run_import_legacy(
+            legacy_dir=args.legacy_dir,
+            store_root=args.store_root,
+            report_path=args.report,
+            dry_run=args.dry_run,
+        )
+        sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        return 0
+
+    if args.command == "export-bundle":
+        report = run_export_bundle(
+            store_root=args.store_root,
+            bundle_path=args.bundle,
+        )
+        sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        return 0
+
+    if args.command == "restore-bundle":
+        report = run_restore_bundle(
+            store_root=args.store_root,
+            bundle_path=args.bundle,
+            report_path=args.report,
+        )
+        sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        return 0
 
     parser.error(f"unsupported command: {args.command}")
     return 2
