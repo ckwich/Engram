@@ -1400,6 +1400,61 @@ def test_prepare_document_draft_tool_returns_structured_invalid_request():
     }
 
 
+def test_prepare_document_promotion_transaction_tool_returns_no_write_plan():
+    server = load_server_module()
+    draft = {
+        "draft_id": "doc_draft_architecture",
+        "document_id": "doc_architecture",
+        "record_type": "document_draft",
+        "proposed_memories": [
+            {
+                "key": "engram_architecture_note",
+                "title": "Architecture Note",
+                "content": "Reviewed document fact.",
+                "tags": ["document-intelligence"],
+                "status": "draft",
+                "canonical": False,
+            }
+        ],
+        "proposed_edges": [],
+        "active_memory_write_performed": False,
+    }
+
+    payload = asyncio.run(
+        server.prepare_document_promotion_transaction(
+            document_draft=draft,
+            selected_memory_indexes=[0],
+            selected_edge_indexes=[],
+            approved_by="agent-review",
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["transaction"]["record_type"] == "document_promotion_transaction"
+    assert payload["transaction"]["write_performed"] is False
+    assert payload["transaction"]["operations"][0]["tool"] == "write_memory"
+    assert payload["transaction"]["operations"][0]["payload"]["status"] == "active"
+
+
+def test_prepare_document_promotion_transaction_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.prepare_document_promotion_transaction(
+            document_draft={"draft_id": "doc_draft_architecture", "proposed_memories": []},
+            approved_by="",
+        )
+    )
+
+    assert payload == {
+        "transaction": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "approved_by is required",
+        },
+    }
+
+
 def test_preview_visual_extraction_tool_returns_no_write_preview():
     server = load_server_module()
 

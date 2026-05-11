@@ -5,6 +5,7 @@ import pytest
 from core.document_intelligence import (
     prepare_document_record,
     prepare_document_draft,
+    prepare_document_promotion_transaction,
     prepare_extractor_receipt,
     prepare_visual_extraction_request,
     prepare_visual_artifact_record,
@@ -345,6 +346,87 @@ def test_prepare_document_draft_validates_reviewable_evidence_boundary():
             document_record=document,
             analysis={"claims": ["Claim"]},
             visual_artifacts=[other_artifact],
+        )
+
+
+def test_prepare_document_promotion_transaction_returns_no_write_operations():
+    document = prepare_document_record(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content_hash="sha256:" + "c" * 64,
+        media_type="text/markdown",
+    )
+    draft = prepare_document_draft(
+        document_record=document,
+        analysis={"decisions": ["Promote reviewed document facts explicitly."]},
+        candidate_graph_edges=[
+            {
+                "from_ref": {"kind": "document", "key": document["document_id"]},
+                "to_ref": {"kind": "memory", "key": "engram_document_promotion"},
+                "edge_type": "supports",
+                "confidence": 0.8,
+                "evidence": "Document draft supports the promotion boundary.",
+            }
+        ],
+    )
+
+    transaction = prepare_document_promotion_transaction(
+        document_draft=draft,
+        selected_memory_indexes=[0],
+        selected_edge_indexes=[0],
+        approved_by="agent-review",
+        notes="Reviewed in test.",
+    )
+    duplicate = prepare_document_promotion_transaction(
+        document_draft=draft,
+        selected_memory_indexes=[0],
+        selected_edge_indexes=[0],
+        approved_by="agent-review",
+        notes="Reviewed in test.",
+    )
+
+    assert duplicate["transaction_id"] == transaction["transaction_id"]
+    assert transaction["schema_version"] == "2026-05-11.document-intelligence.promotion.v1"
+    assert transaction["record_type"] == "document_promotion_transaction"
+    assert transaction["status"] == "prepared"
+    assert transaction["write_performed"] is False
+    assert transaction["active_memory_write_performed"] is False
+    assert transaction["draft_id"] == draft["draft_id"]
+    assert [operation["kind"] for operation in transaction["operations"]] == ["memory", "graph_edge"]
+    assert transaction["operations"][0]["tool"] == "write_memory"
+    assert transaction["operations"][0]["payload"]["status"] == "active"
+    assert transaction["operations"][1]["tool"] == "add_graph_edge"
+    assert transaction["operations"][1]["target_status"] == "active"
+    assert transaction["operations"][1]["payload"]["source"] == "document_intelligence"
+    assert transaction["receipt"] == {
+        "selected_memory_count": 1,
+        "selected_edge_count": 1,
+        "operation_count": 2,
+    }
+
+
+def test_prepare_document_promotion_transaction_validates_review_selection():
+    document = prepare_document_record(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content_hash="sha256:" + "c" * 64,
+        media_type="text/markdown",
+    )
+    draft = prepare_document_draft(
+        document_record=document,
+        analysis={"claims": ["Claim"]},
+    )
+
+    with pytest.raises(ValueError, match="approved_by is required"):
+        prepare_document_promotion_transaction(document_draft=draft, approved_by="")
+
+    with pytest.raises(ValueError, match="selected memory index out of range"):
+        prepare_document_promotion_transaction(
+            document_draft=draft,
+            selected_memory_indexes=[1],
+            approved_by="agent-review",
         )
 
 

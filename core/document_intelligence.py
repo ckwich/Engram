@@ -12,6 +12,7 @@ DOCUMENT_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.preview.v1"
 VISUAL_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-preview.v1"
 VISUAL_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-request.v1"
 DOCUMENT_DRAFT_SCHEMA_VERSION = "2026-05-11.document-intelligence.draft.v1"
+DOCUMENT_PROMOTION_SCHEMA_VERSION = "2026-05-11.document-intelligence.promotion.v1"
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
 DOCUMENT_ANALYSIS_SECTIONS = {
     "summary": "Summary",
@@ -331,6 +332,89 @@ def prepare_document_draft(
     }
 
 
+def prepare_document_promotion_transaction(
+    *,
+    document_draft: dict[str, Any],
+    approved_by: str,
+    selected_memory_indexes: list[int] | None = None,
+    selected_edge_indexes: list[int] | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Prepare a no-write transaction plan for promoting reviewed document drafts."""
+    normalized_approved_by = _require_text(approved_by, "approved_by")
+    if not isinstance(document_draft, dict):
+        raise ValueError("document_draft must be an object")
+    if _normalize_bool(document_draft.get("active_memory_write_performed")):
+        raise ValueError("document_draft must not already be an active memory write")
+
+    draft_id = _require_text(document_draft.get("draft_id"), "document_draft.draft_id")
+    document_id = _optional_text(document_draft.get("document_id"), "document_draft.document_id")
+    proposed_memories = _normalize_proposed_items(document_draft.get("proposed_memories", []), "proposed_memories")
+    proposed_edges = _normalize_proposed_items(document_draft.get("proposed_edges", []), "proposed_edges")
+    memory_indexes = _normalize_selected_indexes(
+        selected_memory_indexes,
+        len(proposed_memories),
+        "memory",
+    )
+    edge_indexes = _normalize_selected_indexes(
+        selected_edge_indexes,
+        len(proposed_edges),
+        "edge",
+    )
+    if not memory_indexes and not edge_indexes:
+        raise ValueError("at least one memory or graph edge must be selected")
+
+    operations: list[dict[str, Any]] = []
+    for index in memory_indexes:
+        operations.append(
+            {
+                "kind": "memory",
+                "tool": "write_memory",
+                "source_index": index,
+                "target_status": "active",
+                "payload": _promoted_memory_payload(proposed_memories[index]),
+            }
+        )
+    for index in edge_indexes:
+        operations.append(
+            {
+                "kind": "graph_edge",
+                "tool": "add_graph_edge",
+                "source_index": index,
+                "target_status": "active",
+                "payload": _promoted_graph_edge_payload(proposed_edges[index], normalized_approved_by),
+            }
+        )
+
+    transaction_seed = "|".join(
+        [
+            draft_id,
+            _stable_repr(memory_indexes),
+            _stable_repr(edge_indexes),
+            normalized_approved_by,
+            _optional_text(notes, "notes") or "",
+        ]
+    )
+    return {
+        "schema_version": DOCUMENT_PROMOTION_SCHEMA_VERSION,
+        "record_type": "document_promotion_transaction",
+        "transaction_id": _stable_id("doc_promote", transaction_seed),
+        "draft_id": draft_id,
+        "document_id": document_id,
+        "status": "prepared",
+        "approved_by": normalized_approved_by,
+        "notes": _optional_text(notes, "notes"),
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "operations": operations,
+        "receipt": {
+            "selected_memory_count": len(memory_indexes),
+            "selected_edge_count": len(edge_indexes),
+            "operation_count": len(operations),
+        },
+    }
+
+
 def preview_document_extraction(
     *,
     title: str,
@@ -602,6 +686,60 @@ def _normalize_candidate_graph_edges(value: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def _normalize_proposed_items(value: Any, field_name: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"document_draft.{field_name} must be a list")
+    normalized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(f"document_draft.{field_name} entries must be objects")
+        normalized.append(dict(item))
+    return normalized
+
+
+def _normalize_selected_indexes(value: Any, total: int, label: str) -> list[int]:
+    if value is None:
+        return list(range(total))
+    if not isinstance(value, list):
+        raise ValueError(f"selected {label} indexes must be a list")
+    indexes: list[int] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise ValueError(f"selected {label} indexes must be integers")
+        if item < 0 or item >= total:
+            raise ValueError(f"selected {label} index out of range")
+        if item not in indexes:
+            indexes.append(item)
+    return indexes
+
+
+def _promoted_memory_payload(memory: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(memory)
+    payload["status"] = "active"
+    source_document = payload.get("source_document")
+    if isinstance(source_document, dict):
+        payload["source_document"] = {
+            **source_document,
+            "review_status": "approved",
+            "promotion_required": False,
+        }
+    return payload
+
+
+def _promoted_graph_edge_payload(edge: dict[str, Any], approved_by: str) -> dict[str, Any]:
+    return {
+        "from_ref": dict(edge["from_ref"]),
+        "to_ref": dict(edge["to_ref"]),
+        "edge_type": _require_text(edge.get("edge_type"), "proposed_edge.edge_type"),
+        "confidence": _normalize_confidence(edge.get("confidence", 0.5)),
+        "evidence": _require_text(edge.get("evidence"), "proposed_edge.evidence"),
+        "source": _optional_text(edge.get("source"), "proposed_edge.source") or "document_intelligence",
+        "created_by": approved_by,
+    }
+
+
 def _normalize_extractor_kind(value: Any) -> str:
     text = _require_text(value, "extractor_kind")
     if text not in VALID_EXTRACTOR_KINDS:
@@ -618,6 +756,14 @@ def _optional_positive_int(value: Any, field_name: str) -> int | None:
     if value < 1:
         raise ValueError(f"{field_name} must be positive")
     return value
+
+
+def _normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
 
 
 def _normalize_confidence(value: Any) -> float | None:

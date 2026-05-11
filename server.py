@@ -27,6 +27,7 @@ from core.codebase_mapper import codebase_mapping_manager
 from core.context_builder import build_context_receipt, make_filters, merge_graph_candidates
 from core.document_intelligence import (
     prepare_document_draft as build_document_draft,
+    prepare_document_promotion_transaction as build_document_promotion_transaction,
     prepare_visual_extraction_request as build_visual_extraction_request,
     preview_document_extraction as build_document_extraction_preview,
     preview_visual_extraction as build_visual_extraction_preview,
@@ -455,6 +456,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "cost_class": "medium",
                 "tools": [
                     "prepare_document_draft",
+                    "prepare_document_promotion_transaction",
                     "prepare_visual_extraction_request",
                     "preview_document_extraction",
                     "preview_visual_extraction",
@@ -523,6 +525,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "chunk boundary review": "preview_memory_chunks",
                 "document extraction": "preview_document_extraction",
                 "document draft": "prepare_document_draft",
+                "document promotion": "prepare_document_promotion_transaction",
                 "visual extraction request": "prepare_visual_extraction_request",
                 "visual extraction": "preview_visual_extraction",
                 "retrieval quality": "retrieval_eval",
@@ -541,6 +544,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
             "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
             "prepare_document_draft": "Prepare a no-write document draft with proposed memories and graph edges.",
+            "prepare_document_promotion_transaction": "Prepare a no-write operation plan for reviewed document draft promotion.",
             "prepare_visual_extraction_request": "Prepare a no-write OCR/vision work request for image-bearing documents.",
             "preview_visual_extraction": "Preview caller-supplied OCR or vision observations as visual evidence without writing memory.",
             "retrieval_eval": "Run deterministic retrieval quality checks and report pass/fail scenarios.",
@@ -583,6 +587,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
             "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
+            "prepare_document_promotion_transaction(document_draft=draft, approved_by='agent-review') before executing writes",
             "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
             "preview_visual_extraction(document_record=doc, observations=vision_notes) before promoting image-derived claims",
             "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
@@ -901,6 +906,50 @@ async def prepare_document_draft(
             "error": _tool_error("runtime_error", f"Unexpected document draft failure: {e}"),
         }
     _record_usage_for_payload("prepare_document_draft", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_promotion_transaction(
+    document_draft: dict[str, Any],
+    approved_by: str,
+    selected_memory_indexes: list[int] | None = None,
+    selected_edge_indexes: list[int] | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write operation plan for reviewed document draft promotion.
+
+    The returned operations are explicit memory and graph write payloads. This
+    tool does not execute them; agents must review the transaction first.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_draft": document_draft,
+        "selected_memory_indexes": selected_memory_indexes,
+        "selected_edge_indexes": selected_edge_indexes,
+        "approved_by": approved_by,
+        "notes": notes,
+    }
+    try:
+        payload = {
+            "transaction": build_document_promotion_transaction(
+                document_draft=document_draft,
+                selected_memory_indexes=selected_memory_indexes,
+                selected_edge_indexes=selected_edge_indexes,
+                approved_by=approved_by,
+                notes=notes,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"transaction": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "transaction": None,
+            "error": _tool_error("runtime_error", f"Unexpected document promotion failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_promotion_transaction", input_payload, payload, started_at)
     return payload
 
 
