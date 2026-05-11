@@ -1283,6 +1283,19 @@ def run_import_legacy(
     return report
 
 
+def run_import_graph_edges(
+    store_root: str | Path,
+    graph_path: str | Path,
+    *,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Import legacy graph edge documents into a Memory OS migration store."""
+    report = MemoryOSMigrationKernel(store_root).import_legacy_graph_edges(graph_path)
+    if report_path is not None:
+        _write_json_file(Path(report_path), report)
+    return report
+
+
 def run_export_bundle(store_root: str | Path, bundle_path: str | Path) -> dict[str, Any]:
     """Export a Memory OS migration store to a portable JSON bundle."""
     bundle_path = Path(bundle_path)
@@ -1342,6 +1355,14 @@ def _build_parser() -> argparse.ArgumentParser:
     import_legacy.add_argument("--report", help="Optional JSON report path.")
     import_legacy.add_argument("--dry-run", action="store_true", help="Validate import without writing the store.")
 
+    import_graph_edges = subparsers.add_parser(
+        "import-graph-edges",
+        help="Import a legacy graph edges JSON document into a migration store.",
+    )
+    import_graph_edges.add_argument("--store-root", required=True, help="Memory OS migration store root.")
+    import_graph_edges.add_argument("--graph-path", required=True, help="Legacy graph edges JSON path.")
+    import_graph_edges.add_argument("--report", help="Optional JSON report path.")
+
     export_bundle = subparsers.add_parser(
         "export-bundle",
         help="Export a migration store to a portable JSON bundle.",
@@ -1378,6 +1399,15 @@ def main(argv: list[str] | None = None) -> int:
             store_root=args.store_root,
             report_path=args.report,
             dry_run=args.dry_run,
+        )
+        sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        return 0
+
+    if args.command == "import-graph-edges":
+        report = run_import_graph_edges(
+            store_root=args.store_root,
+            graph_path=args.graph_path,
+            report_path=args.report,
         )
         sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
         return 0

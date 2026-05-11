@@ -676,3 +676,58 @@ def test_migration_cli_import_export_restore_bundle_commands(tmp_path):
     assert restore_report["restored_count"] == 2
     assert restore_report["key_set"] == ["alpha", "beta"]
     assert MemoryOSMigrationKernel(restore_root).read_graph_edge_records("alpha")[0]["to_ref"]["key"] == "beta"
+
+
+def test_migration_cli_imports_legacy_graph_edge_documents(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    graph_path = tmp_path / "edges.json"
+    report_path = tmp_path / "graph_import_report.json"
+    legacy_dir.mkdir()
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {"key": "alpha", "title": "Alpha", "content": "Alpha content", "chunk_count": 1},
+    )
+    graph_edge = {
+        "edge_id": "sha256:graph-cli-edge",
+        "from_ref": {"kind": "source", "key": "design-doc"},
+        "to_ref": {"kind": "memory", "key": "alpha"},
+        "edge_type": "supports",
+        "confidence": 0.75,
+        "evidence": "Design doc supports alpha.",
+        "source": "legacy_graph",
+        "status": "active",
+        "created_by": "agent",
+        "created_at": "2026-05-06T00:00:00+00:00",
+        "updated_at": "2026-05-06T00:00:00+00:00",
+    }
+    graph_path.write_text(
+        json.dumps({"schema_version": "2026-04-27", "edges": [graph_edge]}, indent=2),
+        encoding="utf-8",
+    )
+    MemoryOSMigrationKernel(store_root).import_legacy_json(legacy_dir)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "core.memory_os_migration",
+            "import-graph-edges",
+            "--store-root",
+            str(store_root),
+            "--graph-path",
+            str(graph_path),
+            "--report",
+            str(report_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert json.loads(result.stdout) == report
+    assert report["imported_count"] == 1
+    assert report["edge_ids"] == ["sha256:graph-cli-edge"]
+    assert MemoryOSMigrationKernel(store_root).read_graph_edge_records()[0] == graph_edge
