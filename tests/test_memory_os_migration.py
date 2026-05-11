@@ -12,6 +12,7 @@ import pytest
 from core.document_intelligence import (
     prepare_document_record,
     prepare_document_draft,
+    prepare_document_promotion_transaction,
     prepare_extractor_receipt,
     prepare_visual_artifact_record,
     prepare_visual_extraction_request,
@@ -250,7 +251,7 @@ def test_legacy_graph_edge_document_imports_generic_refs_and_restores_bundle(tmp
     edges = kernel.read_graph_edge_records()
 
     assert import_report == {
-        "schema_version": "2026-05-11.memory_os_migration.v6",
+        "schema_version": "2026-05-11.memory_os_migration.v7",
         "source_count": 1,
         "imported_count": 1,
         "invalid_count": 0,
@@ -315,7 +316,7 @@ def test_document_intelligence_evidence_records_round_trip_without_promoting_mem
         record_type="visual_artifact",
     )
 
-    assert report["schema_version"] == "2026-05-11.memory_os_migration.v6"
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v7"
     assert report["stored_count"] == 4
     assert report["record_ids"] == [
         document["document_id"],
@@ -377,10 +378,46 @@ def test_document_draft_records_persist_and_restore_with_evidence_records(tmp_pa
     restored = MemoryOSMigrationKernel(restore_root)
     restored.restore_bundle(kernel.export_bundle())
 
-    assert report["schema_version"] == "2026-05-11.memory_os_migration.v6"
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v7"
     assert report["record_ids"] == [document["document_id"], draft["draft_id"]]
     assert draft_records == [draft]
     assert restored.read_document_evidence_records(record_type="document_draft") == [draft]
+
+
+def test_document_promotion_transaction_records_persist_and_restore(tmp_path):
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    document = prepare_document_record(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content_hash="sha256:" + "c" * 64,
+        media_type="text/markdown",
+    )
+    draft = prepare_document_draft(
+        document_record=document,
+        analysis={"claims": ["Reviewed claim"]},
+    )
+    transaction = prepare_document_promotion_transaction(
+        document_draft=draft,
+        selected_memory_indexes=[0],
+        selected_edge_indexes=[],
+        approved_by="agent-review",
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    report = kernel.store_document_evidence_records([document, draft, transaction])
+    transaction_records = kernel.read_document_evidence_records(
+        document_id=document["document_id"],
+        record_type="document_promotion_transaction",
+    )
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v7"
+    assert report["record_ids"] == [document["document_id"], draft["draft_id"], transaction["transaction_id"]]
+    assert transaction_records == [transaction]
+    assert restored.read_document_evidence_records(record_type="document_promotion_transaction") == [transaction]
 
 
 def test_chunk_ledger_exports_vector_source_records_with_metadata_and_citations(tmp_path):
