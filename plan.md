@@ -162,8 +162,11 @@ Agents should always start at tier 1 and escalate only when needed.
 
 Engram 1.0 is the public, generic, local-first memory substrate release. The separate collaboration product should build on Engram through stable adapters, not inside this repository.
 
+Status update, 2026-05-11: the old 1.0 finish-line track is paused in favor of the Memory OS rebuild direction. Do not continue Track 4-6 implementation until the rebuild spec and migration-first plan are reviewed. The current JSON memory corpus must be easy to import into the new system before storage, graph, retrieval, or hosted-edition work proceeds.
+
 Tracked planning docs:
 
+- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence, and optional hosted-edition direction.
 - `docs/ENGRAM_1_0_RELEASE_SPEC.md` — binding Engram 1.0 scope, invariants, release tracks, and validation gate.
 - `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md` — execution plan for finishing 1.0 in small, validated commits.
 - `docs/ENGRAM_1_0_TRACK_0_AUDIT.md` — repo/branch hygiene audit and evidence.
