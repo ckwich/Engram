@@ -58,6 +58,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "discard_source_draft" in payload["tool_groups"]["source_intake"]["tools"]
     assert "store_prepared_memory" in payload["tool_groups"]["source_intake"]["tools"]
     assert payload["tool_groups"]["document_intelligence"]["stability"] == "beta"
+    assert "list_document_extractors" in payload["tool_groups"]["document_intelligence"]["tools"]
     assert "prepare_document_draft" in payload["tool_groups"]["document_intelligence"]["tools"]
     assert "prepare_document_extraction_request" in payload["tool_groups"]["document_intelligence"]["tools"]
     assert "prepare_document_extraction_result" in payload["tool_groups"]["document_intelligence"]["tools"]
@@ -70,6 +71,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert payload["progressive_discovery"]["start_here"] == "memory_protocol"
     assert payload["progressive_discovery"]["load_next"]["source ingestion"] == "prepare_source_memory"
     assert payload["progressive_discovery"]["load_next"]["document extraction"] == "preview_document_extraction"
+    assert payload["progressive_discovery"]["load_next"]["document extractor discovery"] == "list_document_extractors"
     assert payload["progressive_discovery"]["load_next"]["document source connector"] == "preview_document_source_connector"
     assert payload["progressive_discovery"]["load_next"]["document extraction request"] == "prepare_document_extraction_request"
     assert payload["progressive_discovery"]["load_next"]["document extraction result"] == "prepare_document_extraction_result"
@@ -79,6 +81,7 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert payload["progressive_discovery"]["load_next"]["visual extraction"] == "preview_visual_extraction"
     assert payload["progressive_discovery"]["load_next"]["usage review"] == "usage_summary"
     assert "preview_document_extraction" in payload["canonical_tools"]
+    assert "list_document_extractors" in payload["canonical_tools"]
     assert "preview_document_source_connector" in payload["canonical_tools"]
     assert "prepare_document_extraction_request" in payload["canonical_tools"]
     assert "prepare_document_extraction_result" in payload["canonical_tools"]

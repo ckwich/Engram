@@ -26,6 +26,7 @@ from core.chunk_preview import preview_memory_chunks as build_chunk_preview
 from core.codebase_mapper import codebase_mapping_manager
 from core.context_builder import build_context_receipt, make_filters, merge_graph_candidates
 from core.document_intelligence import (
+    list_document_extractors as build_document_extractor_catalog,
     prepare_document_draft as build_document_draft,
     prepare_document_extraction_request as build_document_extraction_request,
     prepare_document_extraction_result as build_document_extraction_result,
@@ -458,6 +459,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "stability": "beta",
                 "cost_class": "medium",
                 "tools": [
+                    "list_document_extractors",
                     "prepare_document_draft",
                     "prepare_document_extraction_request",
                     "prepare_document_extraction_result",
@@ -530,6 +532,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "source ingestion setup": "list_ingestion_pipelines",
                 "chunk boundary review": "preview_memory_chunks",
                 "document extraction": "preview_document_extraction",
+                "document extractor discovery": "list_document_extractors",
                 "document extraction request": "prepare_document_extraction_request",
                 "document extraction result": "prepare_document_extraction_result",
                 "document source connector": "preview_document_source_connector",
@@ -551,6 +554,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
+            "list_document_extractors": "List bundled and external document extraction capabilities without running providers.",
             "preview_document_source_connector": "Preview local Markdown/text/HTML extraction arguments and external parser request arguments without writing memory.",
             "prepare_document_extraction_request": "Prepare a no-write external document parsing request for PDF/DOCX/image-bearing sources.",
             "prepare_document_extraction_result": "Normalize external parser output into no-write preview arguments and provenance.",
@@ -598,6 +602,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "context_pack(query='agent memory protocol', project='engram', max_chunks=5)",
             "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
+            "list_document_extractors() before choosing a local parser, OCR/vision adapter, or agent-native preview path",
             "preview_document_source_connector(connector_type='local_path', target='docs') before document extraction",
             "prepare_document_extraction_request(source_ref={'source_uri': 'file:///notes.pdf'}, source_type='pdf', requested_outputs=['markdown', 'page_images']) before running a local parser",
             "prepare_document_extraction_result(extraction_request=req, title='Notes', content=markdown, media_type='text/markdown') before preview_document_extraction",
@@ -870,6 +875,27 @@ async def preview_document_source_connector(
             "error": _tool_error("invalid_request", str(e)),
         }
     _record_usage_for_payload("preview_document_source_connector", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def list_document_extractors() -> dict[str, Any]:
+    """
+    List document extraction capabilities without running parsers or providers.
+
+    This no-write catalog distinguishes Engram's bundled text/markup preview path
+    from external PDF/DOCX and OCR/vision frameworks. Use it before selecting a
+    connector, parser, or visual extraction route.
+    """
+    started_at = time.perf_counter()
+    try:
+        payload = {"catalog": build_document_extractor_catalog(), "error": None}
+    except Exception as e:
+        payload = {
+            "catalog": None,
+            "error": _tool_error("runtime_error", f"Unexpected document extractor catalog failure: {e}"),
+        }
+    _record_usage_for_payload("list_document_extractors", {}, payload, started_at)
     return payload
 
 

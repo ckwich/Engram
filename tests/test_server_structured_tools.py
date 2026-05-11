@@ -1347,6 +1347,20 @@ def test_preview_document_source_connector_tool_returns_structured_invalid_reque
     }
 
 
+def test_list_document_extractors_tool_returns_no_write_catalog():
+    server = load_server_module()
+
+    payload = asyncio.run(server.list_document_extractors())
+
+    assert payload["error"] is None
+    assert payload["catalog"]["write_performed"] is False
+    assert any(
+        extractor["id"] == "external-ocr-vision"
+        and extractor["external_framework_required"] is True
+        for extractor in payload["catalog"]["extractors"]
+    )
+
+
 def test_prepare_document_extraction_request_tool_returns_no_write_request():
     server = load_server_module()
 

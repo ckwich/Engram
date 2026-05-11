@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from core.document_intelligence import (
+    list_document_extractors,
     prepare_document_record,
     prepare_document_draft,
     prepare_document_extraction_request,
@@ -14,6 +15,22 @@ from core.document_intelligence import (
     preview_document_extraction,
     preview_visual_extraction,
 )
+
+
+def test_list_document_extractors_reports_bundled_and_external_boundaries():
+    payload = list_document_extractors()
+
+    assert payload["schema_version"] == "2026-05-11.document-intelligence.extractors.v1"
+    assert payload["write_performed"] is False
+    extractor_ids = {extractor["id"] for extractor in payload["extractors"]}
+    assert {"engram-text-preview", "external-document-parser", "external-ocr-vision"} <= extractor_ids
+    external = next(
+        extractor for extractor in payload["extractors"] if extractor["id"] == "external-document-parser"
+    )
+    assert external["runs_inside_engram"] is False
+    assert external["external_framework_required"] is True
+    assert external["source_types"] == ["docx", "pdf"]
+    assert "prepare_document_extraction_request" in external["next_tools"]
 
 
 def test_prepare_document_record_is_stable_reviewable_evidence_without_writes():

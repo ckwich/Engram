@@ -8,6 +8,7 @@ from core.chunker import chunk_content_with_metadata
 
 
 DOCUMENT_INTELLIGENCE_SCHEMA_VERSION = "2026-05-11.document-intelligence.v1"
+DOCUMENT_EXTRACTOR_CATALOG_SCHEMA_VERSION = "2026-05-11.document-intelligence.extractors.v1"
 DOCUMENT_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.preview.v1"
 VISUAL_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-preview.v1"
 VISUAL_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-request.v1"
@@ -85,6 +86,54 @@ EXPECTED_DOCUMENT_EXTRACTION_FIELDS = [
     "metadata",
     "image_refs",
 ]
+
+
+def list_document_extractors() -> dict[str, Any]:
+    """List provider-neutral document extraction capabilities without running providers."""
+    return {
+        "schema_version": DOCUMENT_EXTRACTOR_CATALOG_SCHEMA_VERSION,
+        "write_performed": False,
+        "extractors": [
+            {
+                "id": "engram-text-preview",
+                "kind": "agent_native",
+                "label": "Bundled text/markup preview",
+                "source_types": ["html", "markdown", "text"],
+                "requested_outputs": ["markdown", "metadata", "chunks"],
+                "runs_inside_engram": True,
+                "external_framework_required": False,
+                "next_tools": ["preview_document_extraction"],
+            },
+            {
+                "id": "external-document-parser",
+                "kind": "external_document",
+                "label": "External PDF/DOCX parser",
+                "source_types": ["docx", "pdf"],
+                "requested_outputs": ["markdown", "metadata", "page_images"],
+                "runs_inside_engram": False,
+                "external_framework_required": True,
+                "next_tools": [
+                    "prepare_document_extraction_request",
+                    "prepare_document_extraction_result",
+                    "preview_document_extraction",
+                ],
+            },
+            {
+                "id": "external-ocr-vision",
+                "kind": "ocr_vision",
+                "label": "External OCR/vision analyzer",
+                "source_types": ["image", "pdf", "scan", "screenshot"],
+                "requested_outputs": ["visual_artifacts"],
+                "requested_capabilities": sorted(VALID_VISUAL_CAPABILITIES),
+                "runs_inside_engram": False,
+                "external_framework_required": True,
+                "next_tools": [
+                    "prepare_visual_extraction_request",
+                    "preview_visual_extraction",
+                ],
+            },
+        ],
+    }
 
 
 def prepare_document_record(
