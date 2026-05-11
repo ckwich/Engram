@@ -7,10 +7,12 @@ ledger and content-addressed artifact store without touching ChromaDB.
 from __future__ import annotations
 
 import base64
+import argparse
 import hashlib
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -584,3 +586,125 @@ class MemoryOSMigrationKernel:
             },
             "invalid": invalid,
         }
+
+
+def run_round_trip_check(
+    legacy_dir: str | Path,
+    work_root: str | Path,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Run a full legacy import/export/restore parity check."""
+    work_root = Path(work_root)
+    store_root = work_root / "store"
+    restored_store_root = work_root / "restored_store"
+    restored_json_dir = work_root / "restored_json"
+
+    for path in (store_root, restored_store_root, restored_json_dir):
+        if path.exists():
+            raise FileExistsError(f"round-trip work path already exists: {path}")
+
+    work_root.mkdir(parents=True, exist_ok=True)
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    dry_run = kernel.import_legacy_json(legacy_dir, dry_run=True)
+    imported = kernel.import_legacy_json(legacy_dir)
+    bundle = kernel.export_bundle()
+    restored = MemoryOSMigrationKernel(restored_store_root)
+    restore = restored.restore_bundle(bundle)
+    legacy_json_restore = restored.restore_legacy_json(restored_json_dir)
+
+    key_sets_match = (
+        imported["key_set"]
+        == restore["key_set"]
+        == legacy_json_restore["key_set"]
+    )
+    count_parity = (
+        dry_run["valid_count"]
+        == imported["imported_count"]
+        == bundle["memory_count"]
+        == restore["restored_count"]
+        == legacy_json_restore["restored_count"]
+    )
+    status = "pass" if key_sets_match and count_parity and dry_run["invalid_count"] == 0 else "fail"
+
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": _now(),
+        "status": status,
+        "paths": {
+            "legacy_dir": str(Path(legacy_dir)),
+            "work_root": str(work_root),
+            "store_root": str(store_root),
+            "restored_store_root": str(restored_store_root),
+            "restored_json_dir": str(restored_json_dir),
+        },
+        "dry_run": {
+            "source_count": dry_run["source_count"],
+            "valid_count": dry_run["valid_count"],
+            "invalid_count": dry_run["invalid_count"],
+            "chunk_count_total": dry_run["chunk_count_total"],
+            "related_to_count": dry_run["related_to_count"],
+            "unsupported_fields": dry_run["unsupported_fields"],
+            "invalid": dry_run["invalid"],
+        },
+        "import": {
+            "imported_count": imported["imported_count"],
+        },
+        "bundle": {
+            "memory_count": bundle["memory_count"],
+        },
+        "restore": {
+            "restored_count": restore["restored_count"],
+        },
+        "legacy_json_restore": {
+            "restored_count": legacy_json_restore["restored_count"],
+        },
+        "parity": {
+            "key_sets_match": key_sets_match,
+            "count_parity": count_parity,
+        },
+    }
+
+    if report_path is not None:
+        encoded = (json.dumps(report, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+        _atomic_write(Path(report_path), encoded)
+
+    return report
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m core.memory_os_migration",
+        description="Engram Memory OS migration utilities.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    round_trip = subparsers.add_parser(
+        "round-trip",
+        help="Run legacy JSON import/export/restore parity checks.",
+    )
+    round_trip.add_argument("--legacy-dir", required=True, help="Legacy data/memories directory.")
+    round_trip.add_argument("--work-root", required=True, help="Empty output directory for check artifacts.")
+    round_trip.add_argument("--report", help="Optional JSON report path.")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "round-trip":
+        report = run_round_trip_check(
+            legacy_dir=args.legacy_dir,
+            work_root=args.work_root,
+            report_path=args.report,
+        )
+        sys.stdout.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        return 0 if report["status"] == "pass" else 1
+
+    parser.error(f"unsupported command: {args.command}")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

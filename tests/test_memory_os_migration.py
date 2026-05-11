@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from core.memory_os_migration import MemoryOSMigrationKernel, legacy_json_filename
@@ -136,3 +138,66 @@ def test_legacy_import_exports_bundle_and_restores_legacy_json_artifacts(tmp_pat
 
     shutil.rmtree(store_root)
     shutil.rmtree(restore_root)
+
+
+def test_round_trip_cli_writes_durable_parity_report(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    work_root = tmp_path / "migration_work"
+    report_path = tmp_path / "migration_report.json"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "content": "Alpha content",
+            "tags": ["one"],
+            "related_to": ["beta"],
+            "chunk_count": 1,
+        },
+    )
+    _write_memory(
+        legacy_dir / "beta.json",
+        {
+            "key": "beta",
+            "title": "Beta",
+            "content": "Beta content",
+            "tags": ["two"],
+            "related_to": [],
+            "chunk_count": 1,
+        },
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "core.memory_os_migration",
+            "round-trip",
+            "--legacy-dir",
+            str(legacy_dir),
+            "--work-root",
+            str(work_root),
+            "--report",
+            str(report_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    stdout_report = json.loads(result.stdout)
+    assert stdout_report == report
+    assert report["status"] == "pass"
+    assert report["dry_run"]["valid_count"] == 2
+    assert report["import"]["imported_count"] == 2
+    assert report["bundle"]["memory_count"] == 2
+    assert report["restore"]["restored_count"] == 2
+    assert report["legacy_json_restore"]["restored_count"] == 2
+    assert report["parity"]["key_sets_match"] is True
+    assert (work_root / "store" / "ledger.sqlite3").exists()
+    assert (work_root / "restored_store" / "ledger.sqlite3").exists()
+    assert (work_root / "restored_json").is_dir()
