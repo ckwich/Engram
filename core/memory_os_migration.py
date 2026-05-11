@@ -22,9 +22,21 @@ from typing import Any
 from core.chunker import chunk_content_with_metadata
 from core.vector_index import VectorIndexDocument
 
-SCHEMA_VERSION = "2026-05-11.memory_os_migration.v4"
+SCHEMA_VERSION = "2026-05-11.memory_os_migration.v5"
 LEDGER_FILENAME = "ledger.sqlite3"
 LEGACY_RELATED_TO_EDGE_SOURCE = "legacy_related_to"
+DOCUMENT_EVIDENCE_ID_FIELDS = {
+    "document": "document_id",
+    "visual_extraction_request": "request_id",
+    "visual_artifact": "artifact_id",
+    "extractor_receipt": "receipt_id",
+}
+DOCUMENT_EVIDENCE_RECORD_ORDER = {
+    "document": 0,
+    "visual_extraction_request": 1,
+    "visual_artifact": 2,
+    "extractor_receipt": 3,
+}
 
 KNOWN_LEGACY_FIELDS = {
     "key",
@@ -109,6 +121,10 @@ def _sha256_text(text: str) -> str:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _pretty_json_bytes(value: Any) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
 
 def _normalize_optional_text(value: Any) -> str | None:
@@ -272,6 +288,55 @@ class MemoryOSMigrationKernel:
             "invalid": invalid,
         }
 
+    def store_document_evidence_records(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+        """Store no-write document intelligence evidence records in the migration ledger."""
+        if not isinstance(records, list) or not records:
+            raise ValueError("document evidence records must include at least one item")
+        normalized_records = [self._normalize_document_evidence_record(record) for record in records]
+
+        self.store_root.mkdir(parents=True, exist_ok=True)
+        with self._connection() as conn:
+            self._upsert_document_evidence_records(conn, normalized_records)
+            conn.commit()
+
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "stored_count": len(normalized_records),
+            "record_ids": [record["record_id"] for record in normalized_records],
+        }
+
+    def read_document_evidence_records(
+        self,
+        document_id: str | None = None,
+        record_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM document_evidence_records"
+        conditions: list[str] = []
+        params: list[Any] = []
+        if document_id is not None:
+            conditions.append("document_id = ?")
+            params.append(document_id)
+        if record_type is not None:
+            conditions.append("record_type = ?")
+            params.append(record_type)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY document_id, record_order, record_id"
+
+        try:
+            with self._connection(initialize=False) as conn:
+                rows = conn.execute(query, tuple(params)).fetchall()
+        except sqlite3.OperationalError as error:
+            if "no such table: document_evidence_records" in str(error):
+                return []
+            raise
+
+        records: list[dict[str, Any]] = []
+        for row in rows:
+            artifact_path = self._artifact_path(row["artifact_sha256"])
+            records.append(json.loads(artifact_path.read_text(encoding="utf-8")))
+        return records
+
     def export_bundle(self) -> dict[str, Any]:
         with self._connection(initialize=False) as conn:
             rows = conn.execute(
@@ -300,12 +365,15 @@ class MemoryOSMigrationKernel:
                 }
             )
 
+        document_evidence_records = self.read_document_evidence_records()
         return {
             "schema_version": SCHEMA_VERSION,
             "exported_at": _now(),
             "memory_count": len(memories),
             "memories": memories,
             "graph_edges": self.read_graph_edge_records(),
+            "document_evidence_count": len(document_evidence_records),
+            "document_evidence_records": document_evidence_records,
         }
 
     def restore_bundle(self, bundle: dict[str, Any]) -> dict[str, Any]:
@@ -330,7 +398,17 @@ class MemoryOSMigrationKernel:
                     conn,
                     [self._normalize_bundle_graph_edge(edge) for edge in graph_edges],
                 )
-                conn.commit()
+            document_evidence_records = bundle.get("document_evidence_records")
+            if isinstance(document_evidence_records, list):
+                conn.execute("DELETE FROM document_evidence_records")
+                self._upsert_document_evidence_records(
+                    conn,
+                    [
+                        self._normalize_document_evidence_record(record)
+                        for record in document_evidence_records
+                    ],
+                )
+            conn.commit()
 
         restored.sort()
         return {
@@ -510,6 +588,25 @@ class MemoryOSMigrationKernel:
 
             CREATE INDEX IF NOT EXISTS idx_graph_edges_from_key
             ON graph_edges(from_key);
+
+            CREATE TABLE IF NOT EXISTS document_evidence_records (
+                record_id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                record_type TEXT NOT NULL,
+                record_order INTEGER NOT NULL,
+                artifact_sha256 TEXT NOT NULL,
+                record_hash TEXT NOT NULL,
+                review_status TEXT,
+                active_memory_write_performed INTEGER NOT NULL DEFAULT 0,
+                promotion_required INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_document_evidence_document_id
+            ON document_evidence_records(document_id);
+
+            CREATE INDEX IF NOT EXISTS idx_document_evidence_record_type
+            ON document_evidence_records(record_type);
             """
         )
         conn.execute(
@@ -669,6 +766,51 @@ class MemoryOSMigrationKernel:
                     edge["updated_at"],
                 )
                 for edge in edges
+            ],
+        )
+
+    def _upsert_document_evidence_records(
+        self,
+        conn: sqlite3.Connection,
+        records: list[dict[str, Any]],
+    ) -> None:
+        for record in records:
+            path = self._artifact_path(record["artifact_sha256"])
+            if not path.exists():
+                _atomic_write(path, record["artifact_bytes"])
+        conn.executemany(
+            """
+            INSERT INTO document_evidence_records (
+                record_id, document_id, record_type, record_order,
+                artifact_sha256, record_hash, review_status,
+                active_memory_write_performed, promotion_required, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(record_id) DO UPDATE SET
+                document_id = excluded.document_id,
+                record_type = excluded.record_type,
+                record_order = excluded.record_order,
+                artifact_sha256 = excluded.artifact_sha256,
+                record_hash = excluded.record_hash,
+                review_status = excluded.review_status,
+                active_memory_write_performed = excluded.active_memory_write_performed,
+                promotion_required = excluded.promotion_required,
+                created_at = excluded.created_at
+            """,
+            [
+                (
+                    record["record_id"],
+                    record["document_id"],
+                    record["record_type"],
+                    record["record_order"],
+                    record["artifact_sha256"],
+                    record["record_hash"],
+                    record["review_status"],
+                    1 if record["active_memory_write_performed"] else 0,
+                    1 if record["promotion_required"] else 0,
+                    record["created_at"],
+                )
+                for record in records
             ],
         )
 
@@ -923,6 +1065,45 @@ class MemoryOSMigrationKernel:
             edge["edge_id"] = _graph_edge_id(edge)
             edges.append(edge)
         return edges
+
+    def _normalize_document_evidence_record(self, record: Any) -> dict[str, Any]:
+        if not isinstance(record, dict):
+            raise ValueError("document evidence record must be an object")
+        if _normalize_bool(record.get("active_memory_write_performed")):
+            raise ValueError("document evidence records must not be active memory writes")
+
+        record_type = _normalize_optional_text(record.get("record_type"))
+        if not record_type or record_type not in DOCUMENT_EVIDENCE_ID_FIELDS:
+            valid = ", ".join(sorted(DOCUMENT_EVIDENCE_ID_FIELDS))
+            raise ValueError(f"document evidence record_type must be one of: {valid}")
+
+        id_field = DOCUMENT_EVIDENCE_ID_FIELDS[record_type]
+        record_id = _normalize_optional_text(record.get(id_field))
+        if not record_id:
+            raise ValueError(f"document evidence record is missing {id_field}")
+
+        if record_type == "document":
+            document_id = record_id
+        else:
+            document_id = _normalize_optional_text(record.get("document_id"))
+            if not document_id:
+                raise ValueError("document evidence record is missing document_id")
+
+        artifact_bytes = _pretty_json_bytes(record)
+        artifact_sha = _sha256_bytes(artifact_bytes)
+        return {
+            "record_id": record_id,
+            "document_id": document_id,
+            "record_type": record_type,
+            "record_order": DOCUMENT_EVIDENCE_RECORD_ORDER.get(record_type, 99),
+            "artifact_sha256": artifact_sha,
+            "artifact_bytes": artifact_bytes,
+            "record_hash": _sha256_text(_json_dumps(record)),
+            "review_status": _normalize_optional_text(record.get("review_status")),
+            "active_memory_write_performed": False,
+            "promotion_required": _normalize_bool(record.get("promotion_required", True)),
+            "created_at": _now(),
+        }
 
     def _normalize_bundle_graph_edge(self, edge: Any) -> dict[str, Any]:
         if not isinstance(edge, dict):

@@ -9,6 +9,12 @@ from pathlib import Path
 
 import pytest
 
+from core.document_intelligence import (
+    prepare_document_record,
+    prepare_extractor_receipt,
+    prepare_visual_artifact_record,
+    prepare_visual_extraction_request,
+)
 from core.memory_os_migration import (
     MemoryOSMigrationKernel,
     build_vector_index_documents,
@@ -243,7 +249,7 @@ def test_legacy_graph_edge_document_imports_generic_refs_and_restores_bundle(tmp
     edges = kernel.read_graph_edge_records()
 
     assert import_report == {
-        "schema_version": "2026-05-11.memory_os_migration.v4",
+        "schema_version": "2026-05-11.memory_os_migration.v5",
         "source_count": 1,
         "imported_count": 1,
         "invalid_count": 0,
@@ -256,6 +262,90 @@ def test_legacy_graph_edge_document_imports_generic_refs_and_restores_bundle(tmp
     restored.restore_bundle(kernel.export_bundle())
 
     assert restored.read_graph_edge_records() == [graph_edge]
+
+
+def test_document_intelligence_evidence_records_round_trip_without_promoting_memory(tmp_path):
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    document = prepare_document_record(
+        title="Architecture Scan",
+        source_uri="file:///docs/architecture.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "a" * 64,
+        media_type="application/pdf",
+    )
+    request = prepare_visual_extraction_request(
+        document_record=document,
+        image_refs=[
+            {
+                "source_uri": "file:///docs/architecture.pdf",
+                "page": 3,
+                "image_hash": "sha256:" + "b" * 64,
+            }
+        ],
+        requested_capabilities=["ocr_text", "diagram_description"],
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+    )
+    artifact = prepare_visual_artifact_record(
+        document_id=document["document_id"],
+        artifact_type="diagram",
+        source_ref={"source_uri": "file:///docs/architecture.pdf", "page": 3},
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+        text="Agent memory OS",
+        description="A diagram showing source to memory promotion.",
+        page_number=3,
+        bounding_box={"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
+        confidence=0.91,
+    )
+    receipt = prepare_extractor_receipt(
+        document_record=document,
+        visual_artifacts=[artifact],
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    report = kernel.store_document_evidence_records([document, request, artifact, receipt])
+    records = kernel.read_document_evidence_records(document_id=document["document_id"])
+    visual_records = kernel.read_document_evidence_records(
+        document_id=document["document_id"],
+        record_type="visual_artifact",
+    )
+
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v5"
+    assert report["stored_count"] == 4
+    assert report["record_ids"] == [
+        document["document_id"],
+        request["request_id"],
+        artifact["artifact_id"],
+        receipt["receipt_id"],
+    ]
+    assert records == [document, request, artifact, receipt]
+    assert visual_records == [artifact]
+    assert all(record["active_memory_write_performed"] is False for record in records)
+
+    bundle = kernel.export_bundle()
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(bundle)
+
+    assert bundle["document_evidence_count"] == 4
+    assert restored.read_document_evidence_records(document_id=document["document_id"]) == records
+
+
+def test_document_evidence_store_rejects_active_memory_records(tmp_path):
+    document = prepare_document_record(
+        title="Architecture Scan",
+        source_uri="file:///docs/architecture.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "a" * 64,
+        media_type="application/pdf",
+    )
+    document["active_memory_write_performed"] = True
+
+    with pytest.raises(ValueError, match="document evidence records must not be active memory writes"):
+        MemoryOSMigrationKernel(tmp_path / "store").store_document_evidence_records([document])
 
 
 def test_chunk_ledger_exports_vector_source_records_with_metadata_and_citations(tmp_path):
