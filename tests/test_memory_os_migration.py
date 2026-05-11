@@ -155,6 +155,55 @@ def test_bundle_restore_preserves_chunk_records(tmp_path):
     assert restored.read_chunk_records("alpha") == kernel.read_chunk_records("alpha")
 
 
+def test_legacy_related_to_links_import_as_stable_graph_edge_records(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "content": "Alpha content",
+            "related_to": ["beta", "gamma"],
+            "created_at": "2026-05-01T00:00:00+00:00",
+            "updated_at": "2026-05-02T00:00:00+00:00",
+        },
+    )
+    _write_memory(
+        legacy_dir / "beta.json",
+        {
+            "key": "beta",
+            "title": "Beta",
+            "content": "Beta content",
+            "related_to": ["alpha"],
+            "created_at": "2026-05-03T00:00:00+00:00",
+            "updated_at": "2026-05-04T00:00:00+00:00",
+        },
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    kernel.import_legacy_json(legacy_dir)
+    edges = kernel.read_graph_edge_records()
+
+    assert [(edge["from_ref"]["key"], edge["to_ref"]["key"]) for edge in edges] == [
+        ("alpha", "beta"),
+        ("alpha", "gamma"),
+        ("beta", "alpha"),
+    ]
+    assert {edge["edge_type"] for edge in edges} == {"related_to"}
+    assert {edge["source"] for edge in edges} == {"legacy_related_to"}
+    assert all(edge["edge_id"].startswith("sha256:") for edge in edges)
+    assert all("content" not in edge for edge in edges)
+
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+
+    assert restored.read_graph_edge_records() == edges
+
+
 def test_chunk_ledger_exports_vector_source_records_with_metadata_and_citations(tmp_path):
     legacy_dir = tmp_path / "legacy"
     store_root = tmp_path / "store"

@@ -22,8 +22,9 @@ from typing import Any
 from core.chunker import chunk_content_with_metadata
 from core.vector_index import VectorIndexDocument
 
-SCHEMA_VERSION = "2026-05-11.memory_os_migration.v2"
+SCHEMA_VERSION = "2026-05-11.memory_os_migration.v3"
 LEDGER_FILENAME = "ledger.sqlite3"
+LEGACY_RELATED_TO_EDGE_SOURCE = "legacy_related_to"
 
 KNOWN_LEGACY_FIELDS = {
     "key",
@@ -78,6 +79,16 @@ def legacy_chunk_document_id(key: str, chunk_id: int) -> str:
     """Return the legacy Engram vector document ID for a memory chunk."""
     digest = hashlib.md5(key.encode("utf-8"), usedforsecurity=False).hexdigest()
     return f"{digest}_{chunk_id}"
+
+
+def _graph_edge_id(edge: dict[str, Any]) -> str:
+    base = {
+        "from_ref": edge["from_ref"],
+        "to_ref": edge["to_ref"],
+        "edge_type": edge["edge_type"],
+        "source": edge["source"],
+    }
+    return f"sha256:{hashlib.sha256(_json_dumps(base).encode('utf-8')).hexdigest()}"
 
 
 def _now() -> str:
@@ -252,6 +263,7 @@ class MemoryOSMigrationKernel:
                     "legacy_filename": row["legacy_filename"],
                     "artifact_sha256": artifact_sha,
                     "artifact_base64": base64.b64encode(artifact_raw).decode("ascii"),
+                    "graph_edges": self.read_graph_edge_records(row["key"]),
                 }
             )
 
@@ -352,6 +364,18 @@ class MemoryOSMigrationKernel:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_vector_source(row) for row in rows]
 
+    def read_graph_edge_records(self, key: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM graph_edges"
+        params: tuple[Any, ...] = ()
+        if key is not None:
+            query += " WHERE from_key = ?"
+            params = (key,)
+        query += " ORDER BY from_key, to_key, edge_id"
+
+        with self._connection(initialize=False) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._row_to_graph_edge(row) for row in rows]
+
     def _connect(self, initialize: bool = True) -> sqlite3.Connection:
         if initialize:
             self.store_root.mkdir(parents=True, exist_ok=True)
@@ -425,6 +449,26 @@ class MemoryOSMigrationKernel:
 
             CREATE INDEX IF NOT EXISTS idx_chunks_memory_key
             ON chunks(memory_key);
+
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                edge_id TEXT PRIMARY KEY,
+                from_key TEXT NOT NULL,
+                to_key TEXT NOT NULL,
+                from_ref_json TEXT NOT NULL,
+                to_ref_json TEXT NOT NULL,
+                edge_type TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                evidence TEXT NOT NULL,
+                source TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(from_key) REFERENCES memories(key) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_graph_edges_from_key
+            ON graph_edges(from_key);
             """
         )
         conn.execute(
@@ -540,6 +584,35 @@ class MemoryOSMigrationKernel:
                 for chunk in record["chunks"]
             ],
         )
+        conn.execute("DELETE FROM graph_edges WHERE from_key = ?", (record["key"],))
+        conn.executemany(
+            """
+            INSERT INTO graph_edges (
+                edge_id, from_key, to_key, from_ref_json, to_ref_json,
+                edge_type, confidence, evidence, source, status, created_by,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    edge["edge_id"],
+                    edge["from_ref"]["key"],
+                    edge["to_ref"]["key"],
+                    _json_dumps(edge["from_ref"]),
+                    _json_dumps(edge["to_ref"]),
+                    edge["edge_type"],
+                    edge["confidence"],
+                    edge["evidence"],
+                    edge["source"],
+                    edge["status"],
+                    edge["created_by"],
+                    edge["created_at"],
+                    edge["updated_at"],
+                )
+                for edge in record["graph_edges"]
+            ],
+        )
         conn.commit()
 
     def _scan_legacy_dir(self, legacy_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -586,13 +659,14 @@ class MemoryOSMigrationKernel:
             raise ValueError("legacy memory is missing text content")
 
         imported_at = _now()
-        return {
+        related_to = _normalize_string_list(data.get("related_to"))
+        record = {
             "key": key,
             "title": _normalize_optional_text(data.get("title")) or key,
             "content_hash": _sha256_text(content),
             "artifact_sha256": _sha256_bytes(raw_bytes),
             "tags": _normalize_string_list(data.get("tags")),
-            "related_to": _normalize_string_list(data.get("related_to")),
+            "related_to": related_to,
             "project": _normalize_optional_text(data.get("project")),
             "domain": _normalize_optional_text(data.get("domain")),
             "status": _normalize_optional_text(data.get("status")),
@@ -610,6 +684,8 @@ class MemoryOSMigrationKernel:
             "unsupported_fields": sorted(set(data) - KNOWN_LEGACY_FIELDS),
             "imported_at": imported_at,
         }
+        record["graph_edges"] = self._derive_related_to_edges(record)
+        return record
 
     def _record_from_bundle_item(self, item: Any) -> dict[str, Any]:
         if not isinstance(item, dict):
@@ -636,13 +712,14 @@ class MemoryOSMigrationKernel:
         if not isinstance(content, str):
             raise ValueError(f"bundle artifact is missing text content for {key}")
 
-        return {
+        related_to = _normalize_string_list(ledger.get("related_to"))
+        record = {
             "key": key,
             "title": _normalize_optional_text(ledger.get("title")) or key,
             "content_hash": ledger["content_hash"],
             "artifact_sha256": artifact_sha,
             "tags": _normalize_string_list(ledger.get("tags")),
-            "related_to": _normalize_string_list(ledger.get("related_to")),
+            "related_to": related_to,
             "project": _normalize_optional_text(ledger.get("project")),
             "domain": _normalize_optional_text(ledger.get("domain")),
             "status": _normalize_optional_text(ledger.get("status")),
@@ -660,6 +737,12 @@ class MemoryOSMigrationKernel:
             "unsupported_fields": [],
             "imported_at": _now(),
         }
+        graph_edges = item.get("graph_edges")
+        if isinstance(graph_edges, list):
+            record["graph_edges"] = [self._normalize_bundle_graph_edge(edge) for edge in graph_edges]
+        else:
+            record["graph_edges"] = self._derive_related_to_edges(record)
+        return record
 
     def _row_to_memory(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -725,6 +808,21 @@ class MemoryOSMigrationKernel:
             },
         }
 
+    def _row_to_graph_edge(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "edge_id": row["edge_id"],
+            "from_ref": json.loads(row["from_ref_json"]),
+            "to_ref": json.loads(row["to_ref_json"]),
+            "edge_type": row["edge_type"],
+            "confidence": float(row["confidence"]),
+            "evidence": row["evidence"],
+            "source": row["source"],
+            "status": row["status"],
+            "created_by": row["created_by"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
     def _derive_chunk_records(self, key: str, content: str) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         for chunk in chunk_content_with_metadata(content):
@@ -745,6 +843,62 @@ class MemoryOSMigrationKernel:
                 }
             )
         return records
+
+    def _derive_related_to_edges(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        edges: list[dict[str, Any]] = []
+        from_ref = {"kind": "memory", "key": record["key"]}
+        timestamp = record.get("created_at") or record.get("imported_at") or _now()
+        updated_at = record.get("updated_at") or timestamp
+        for related_key in record.get("related_to", []):
+            to_ref = {"kind": "memory", "key": related_key}
+            edge = {
+                "from_ref": from_ref,
+                "to_ref": to_ref,
+                "edge_type": "related_to",
+                "confidence": 1.0,
+                "evidence": f"Legacy related_to metadata on memory '{record['key']}'.",
+                "source": LEGACY_RELATED_TO_EDGE_SOURCE,
+                "status": "active",
+                "created_by": "migration",
+                "created_at": timestamp,
+                "updated_at": updated_at,
+            }
+            edge["edge_id"] = _graph_edge_id(edge)
+            edges.append(edge)
+        return edges
+
+    def _normalize_bundle_graph_edge(self, edge: Any) -> dict[str, Any]:
+        if not isinstance(edge, dict):
+            raise ValueError("bundle graph edge must be an object")
+        required = {
+            "edge_id",
+            "from_ref",
+            "to_ref",
+            "edge_type",
+            "confidence",
+            "evidence",
+            "source",
+            "status",
+            "created_by",
+            "created_at",
+            "updated_at",
+        }
+        missing = sorted(required - set(edge))
+        if missing:
+            raise ValueError(f"bundle graph edge is missing field: {missing[0]}")
+        return {
+            "edge_id": str(edge["edge_id"]),
+            "from_ref": dict(edge["from_ref"]),
+            "to_ref": dict(edge["to_ref"]),
+            "edge_type": str(edge["edge_type"]),
+            "confidence": float(edge["confidence"]),
+            "evidence": str(edge["evidence"]),
+            "source": str(edge["source"]),
+            "status": str(edge["status"]),
+            "created_by": str(edge["created_by"]),
+            "created_at": str(edge["created_at"]),
+            "updated_at": str(edge["updated_at"]),
+        }
 
     def _build_import_report(
         self,
