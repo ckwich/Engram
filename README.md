@@ -122,6 +122,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `list_context_profiles` | List no-write retrieval profiles for task-focused context compilation. |
 | `prepare_context` | Compile a no-write, cited context packet for an agent task. |
 | `make_handoff` | Generate a no-write handoff packet with context refs, citations, next steps, and validation notes. |
+| `prepare_project_capsule` | Prepare a no-write project capsule draft from context refs and quality signals. |
 | `retrieve_chunk` | Retrieve one chunk by memory key and chunk ID. |
 | `retrieve_chunks` | Retrieve several known chunks in one call. |
 | `retrieve_memory` | Retrieve a full memory intentionally. |

@@ -49,6 +49,7 @@ from core.ingestion_pipelines import list_ingestion_pipelines as build_ingestion
 from core.memory_manager import memory_manager, DuplicateMemoryError, _config
 from core.memory_quality import audit_memory_quality as build_memory_quality_audit
 from core.operation_log import operation_log
+from core.project_capsule import build_project_capsule_draft
 from core.reliability_harness import run_agent_reliability_harness
 from core.retrieval_eval import run_retrieval_eval
 from core.session_pins import SessionPinStore
@@ -484,7 +485,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "purpose": "Compile task-focused, cited context packets without writing memory.",
                 "stability": "beta",
                 "cost_class": "medium",
-                "tools": ["list_context_profiles", "prepare_context", "make_handoff"],
+                "tools": ["list_context_profiles", "prepare_context", "make_handoff", "prepare_project_capsule"],
             },
             "retrieval_quality": {
                 "purpose": "Inspect retrieval cost, quality, citations, and workflow recipes before scaling memory.",
@@ -546,6 +547,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "context compiler": "prepare_context",
                 "retrieval profiles": "list_context_profiles",
                 "handoff generator": "make_handoff",
+                "project capsule": "prepare_project_capsule",
                 "relationship inspection": "impact_scan",
                 "conflict inspection": "conflict_scan",
                 "source ingestion": "prepare_source_memory",
@@ -575,6 +577,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "list_context_profiles": "List no-write retrieval profiles for context compilation.",
             "prepare_context": "Compile a no-write, cited context packet for a task using retrieval profiles.",
             "make_handoff": "Generate a no-write handoff packet with context refs, citations, next steps, and validation notes.",
+            "prepare_project_capsule": "Prepare a no-write project capsule draft from context refs and quality signals.",
             "audit_memory_quality": "Read-only metadata quality audit for scope, lifecycle, chunking, and retrieval risk signals.",
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "conflict_scan": "List active contradiction, invalidation, and supersession graph edges without loading memory bodies.",
@@ -2574,6 +2577,95 @@ async def make_handoff(
         "error": None,
     }
     _record_usage_for_payload("make_handoff", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_project_capsule(
+    project: str,
+    task: str = "prepare project capsule",
+    profile: str = "repo_resume",
+    summary: str | None = None,
+    must_read_keys: str | list[str] | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    max_chunks: int | None = None,
+    budget_chars: int | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write project capsule draft from context and quality signals.
+
+    Capsules are reviewable "read this first" packets for agents. This tool
+    compiles context refs and metadata quality summaries, but it does not store
+    or refresh durable memory. Use write_memory only after reviewing the draft.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "project": project,
+        "task": task,
+        "profile": profile,
+        "summary": summary,
+        "must_read_keys": must_read_keys,
+        "domain": domain,
+        "tags": tags,
+        "max_chunks": max_chunks,
+        "budget_chars": budget_chars,
+    }
+
+    metering_token = _USAGE_METERING_ENABLED.set(False)
+    try:
+        context_payload = await prepare_context(
+            task=task,
+            project=project,
+            profile=profile,
+            domain=domain,
+            tags=tags,
+            max_chunks=max_chunks,
+            budget_chars=budget_chars,
+        )
+        quality_payload = await audit_memory_quality(
+            project=project,
+            domain=domain,
+            tags=tags,
+            limit=0,
+        )
+    finally:
+        _USAGE_METERING_ENABLED.reset(metering_token)
+
+    if context_payload.get("error") is not None:
+        payload = {
+            "project": project,
+            "capsule": None,
+            "write_performed": False,
+            "error": context_payload["error"],
+        }
+        _record_usage_for_payload("prepare_project_capsule", input_payload, payload, started_at)
+        return payload
+    if quality_payload.get("error") is not None:
+        payload = {
+            "project": project,
+            "capsule": None,
+            "write_performed": False,
+            "error": quality_payload["error"],
+        }
+        _record_usage_for_payload("prepare_project_capsule", input_payload, payload, started_at)
+        return payload
+
+    capsule = build_project_capsule_draft(
+        project=project,
+        task=task,
+        summary=summary,
+        must_read_keys=must_read_keys,
+        context_packet=context_payload.get("packet") or {},
+        quality_payload=quality_payload,
+    )
+    payload = {
+        "project": project,
+        "capsule": capsule,
+        "write_performed": False,
+        "error": None,
+    }
+    _record_usage_for_payload("prepare_project_capsule", input_payload, payload, started_at)
     return payload
 
 

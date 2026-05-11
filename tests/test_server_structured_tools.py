@@ -2186,6 +2186,68 @@ def test_make_handoff_returns_context_error_without_promoting(monkeypatch):
     assert payload["error"]["message"] == "context unavailable"
 
 
+def test_prepare_project_capsule_combines_context_and_quality_without_writes(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_prepare_context(**kwargs):
+        observed["context_kwargs"] = kwargs
+        return {
+            "task": kwargs["task"],
+            "profile": kwargs["profile"],
+            "packet": {
+                "record_type": "context_packet",
+                "task": kwargs["task"],
+                "project": kwargs["project"],
+                "profile": {"id": kwargs["profile"]},
+                "context": {
+                    "chunks": [
+                        {
+                            "key": "engram_rebuild_plan",
+                            "chunk_id": 0,
+                            "title": "Engram rebuild plan",
+                        }
+                    ],
+                    "citations": [{"citation_id": "engram:engram_rebuild_plan#0"}],
+                    "omitted": [],
+                },
+                "warnings": [],
+            },
+            "write_performed": False,
+            "error": None,
+        }
+
+    async def fake_audit_memory_quality(**kwargs):
+        observed["quality_kwargs"] = kwargs
+        return {
+            "summary": {"low_risk_count": 4, "medium_risk_count": 1, "high_risk_count": 0},
+            "issue_count": 2,
+            "memories": [],
+            "write_performed": False,
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "prepare_context", fake_prepare_context)
+    monkeypatch.setattr(server, "audit_memory_quality", fake_audit_memory_quality)
+
+    payload = asyncio.run(
+        server.prepare_project_capsule(
+            project="C:/Dev/Engram",
+            task="prepare capsule",
+            summary="Memory OS rebuild.",
+            must_read_keys="engram_rebuild_plan",
+        )
+    )
+
+    assert observed["context_kwargs"]["profile"] == "repo_resume"
+    assert observed["quality_kwargs"]["project"] == "C:/Dev/Engram"
+    assert payload["capsule"]["record_type"] == "project_capsule_draft"
+    assert payload["capsule"]["must_read"][0]["source"] == "context"
+    assert payload["capsule"]["quality_summary"]["medium_risk_count"] == 1
+    assert payload["capsule"]["write_performed"] is False
+    assert payload["error"] is None
+
+
 def test_usage_tools_delegate_to_usage_meter(isolated_usage_meter, monkeypatch):
     server = load_server_module()
     monkeypatch.setattr(server, "usage_meter", isolated_usage_meter.usage_meter)

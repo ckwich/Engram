@@ -74,6 +74,7 @@ where typed, and focused tests.
 | `list_context_profiles` | beta | `dict{schema_version, count, profiles, write_performed, error}` | No-write retrieval profile catalog for task-focused context compilation. |
 | `prepare_context` | beta | `dict{task, profile, packet, write_performed, error}` | No-write context compiler that wraps `context_pack` with profile defaults, citations, warnings, and next actions. |
 | `make_handoff` | beta | `dict{task, profile, handoff, write_performed, error}` | No-write resume handoff packet with context refs, citations, next steps, validation notes, and blockers. |
+| `prepare_project_capsule` | beta | `dict{project, capsule, write_performed, error}` | No-write project capsule draft from context refs and memory quality signals; does not store capsule memory. |
 | `audit_memory_metadata` | beta | `dict{count, total, scanned_count, issue_count, repairable_count, limit, offset, has_more, memories, error}` | Read-only metadata hygiene audit. |
 | `repair_memory_metadata` | beta | `dict{requested_count, repaired_count, dry_run, repairs, error}` | Dry-run by default; writes must preserve JSON-first ordering. |
 | `add_graph_edge` | beta | `dict{edge, error}` | Stores compact graph edge records. |

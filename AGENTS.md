@@ -29,6 +29,7 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 | `core/workflow_templates.py` | Static agent workflow recipes | Keep compact and action-oriented |
 | `core/usage_meter.py` | Token estimate telemetry | Privacy-safe estimates only, no raw tool bodies |
 | `core/operation_log.py` | Job/event receipts | Status records, not schedulers or triggers |
+| `core/project_capsule.py` | No-write project capsule drafts | Reviewable read-this-first packets from context refs and quality summaries; must not store durable memory |
 | `core/reliability_harness.py` | Deterministic agent retrieval quality checks | Seeds temporary eval memories and cleans them up |
 | `core/codebase_mapper.py` | Agent-native codebase mapping jobs | Scans repos, tracks source drift, and stores agent-authored mapping results; no provider-specific model subprocess |
 | `core/context_compiler.py` | No-write agent context packets | Static retrieval profiles plus packet assembly on top of context_pack; must not write or promote memory |
@@ -65,7 +66,7 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 - Product version and MCP protocol version are separate contracts. Keep the product identity in `server.py`, `memory_protocol()`, README, and release docs aligned, while preserving protocol `version` / `schema_version` compatibility unless an explicit migration is planned.
 - `memory_protocol()` is the discoverability entry point for agents that need the current retrieval ladder, aliases, and token-safety rules.
 - `context_pack(query, ...)` is the preferred compact working-set helper when snippets are too small but full memories would be wasteful.
-- `list_context_profiles()`, `prepare_context(task, ...)`, and `make_handoff(task, ...)` are no-write agent workflow helpers for task-focused context packets and resume handoffs. They wrap context-pack retrieval with profile defaults, receipts, warnings, next actions, and citation refs; they must not promote memory or hide citations.
+- `list_context_profiles()`, `prepare_context(task, ...)`, `make_handoff(task, ...)`, and `prepare_project_capsule(project, ...)` are no-write agent workflow helpers for task-focused context packets, resume handoffs, and reviewable project capsules. They wrap context-pack retrieval with profile defaults, receipts, warnings, next actions, and citation refs; they must not promote memory or hide citations.
 - `retrieval_mode="semantic"` is the stable default. Use `retrieval_mode="hybrid"` only for identifier-heavy queries where exact symbols, filenames, class names, or domain terms should influence ranking.
 - `context_pack()` returns grounded citation entries for every returned chunk. Use citations to justify which memory/chunk shaped an answer; do not treat citations as permission to load full memories automatically.
 - `list_ingestion_pipelines()`, `preview_memory_chunks()`, `preview_source_connector()`, and `list_workflow_templates()` are review/helper surfaces. They must remain no-write.

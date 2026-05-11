@@ -55,6 +55,7 @@ Agents should always start at tier 1 and escalate only when needed.
 | `list_context_profiles` | `()` | No-write context profile catalog for task-focused retrieval | Very low |
 | `prepare_context` | `(task, profile='repo_resume', project=None, ...)` | No-write cited context packet with profile receipt, warnings, and next actions | Medium |
 | `make_handoff` | `(task, project=None, next_steps=None, validation=None, ...)` | No-write handoff packet with context refs, citations, resume prompt, and validation notes | Medium |
+| `prepare_project_capsule` | `(project, task='prepare project capsule', ...)` | No-write project capsule draft from context refs and quality signals | Medium |
 | `list_memories` | `(limit=50, offset=0, project=None, domain=None, tags=None)` | Paginated metadata directory | Very low |
 | `audit_memory_quality` | `(limit=100, offset=0, project=None, domain=None, tags=None)` | Metadata-only quality/risk signals without memory bodies | Very low |
 | `retrieve_chunk` | `(key, chunk_id)` | Full text of one chunk | Medium |
