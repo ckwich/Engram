@@ -7,6 +7,7 @@ from core.document_intelligence import (
     prepare_extractor_receipt,
     prepare_visual_artifact_record,
     preview_document_extraction,
+    preview_visual_extraction,
 )
 
 
@@ -217,4 +218,74 @@ def test_preview_document_extraction_rejects_blank_content():
             source_type="plain_text",
             content="   ",
             media_type="text/plain",
+        )
+
+
+def test_preview_visual_extraction_normalizes_caller_supplied_ocr_vision_observations():
+    document = prepare_document_record(
+        title="Architecture Notes",
+        source_uri="file:///docs/architecture.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "c" * 64,
+        media_type="application/pdf",
+    )
+
+    preview = preview_visual_extraction(
+        document_record=document,
+        observations=[
+            {
+                "artifact_type": "diagram",
+                "source_ref": {
+                    "source_uri": "file:///docs/architecture.pdf",
+                    "page": 4,
+                    "image_hash": "sha256:" + "d" * 64,
+                },
+                "text": "Graph store",
+                "description": "A graph store diagram with entity and claim nodes.",
+                "page_number": 4,
+                "bounding_box": {"x": 0.2, "y": 0.25, "width": 0.4, "height": 0.3},
+                "confidence": 0.74,
+            }
+        ],
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+    )
+
+    assert preview["schema_version"] == "2026-05-11.document-intelligence.visual-preview.v1"
+    assert preview["write_performed"] is False
+    assert preview["active_memory_write_performed"] is False
+    assert preview["review_required"] is True
+    assert preview["document_id"] == document["document_id"]
+    assert preview["receipt"] == {
+        "observation_count": 1,
+        "visual_artifact_count": 1,
+        "extractor_kind": "ocr_vision",
+        "external_framework_required": True,
+    }
+    assert len(preview["visual_artifacts"]) == 1
+    artifact = preview["visual_artifacts"][0]
+    assert artifact["document_id"] == document["document_id"]
+    assert artifact["artifact_type"] == "diagram"
+    assert artifact["extractor"]["external_framework_required"] is True
+    assert artifact["trusted_memory"] is False
+    assert preview["extractor_receipt"]["visual_artifact_ids"] == [artifact["artifact_id"]]
+    assert preview["extractor_receipt"]["image_recognition_used"] is True
+    assert preview["extractor_receipt"]["external_framework_required"] is True
+
+
+def test_preview_visual_extraction_requires_observations():
+    document = prepare_document_record(
+        title="Architecture Notes",
+        source_uri="file:///docs/architecture.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "c" * 64,
+        media_type="application/pdf",
+    )
+
+    with pytest.raises(ValueError, match="observations must include at least one item"):
+        preview_visual_extraction(
+            document_record=document,
+            observations=[],
+            extractor_id="agent",
+            extractor_kind="agent_native",
         )

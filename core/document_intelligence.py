@@ -9,6 +9,7 @@ from core.chunker import chunk_content_with_metadata
 
 DOCUMENT_INTELLIGENCE_SCHEMA_VERSION = "2026-05-11.document-intelligence.v1"
 DOCUMENT_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.preview.v1"
+VISUAL_PREVIEW_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-preview.v1"
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
 PROMOTION_GUIDANCE = {
     "default_action": "review_before_promotion",
@@ -198,6 +199,57 @@ def preview_document_extraction(
             "chunk_count": len(chunks),
             "visual_artifact_count": 0,
             "extractor_kind": extractor_kind,
+        },
+    }
+
+
+def preview_visual_extraction(
+    *,
+    document_record: dict[str, Any],
+    observations: list[dict[str, Any]],
+    extractor_id: str,
+    extractor_kind: str,
+) -> dict[str, Any]:
+    """Preview caller-supplied OCR/vision observations as visual evidence."""
+    document_id = _require_text(document_record.get("document_id"), "document_record.document_id")
+    if not isinstance(observations, list) or not observations:
+        raise ValueError("observations must include at least one item")
+
+    artifacts = [
+        prepare_visual_artifact_record(
+            document_id=document_id,
+            artifact_type=observation.get("artifact_type"),
+            source_ref=observation.get("source_ref"),
+            extractor_id=extractor_id,
+            extractor_kind=extractor_kind,
+            text=observation.get("text"),
+            description=observation.get("description"),
+            page_number=observation.get("page_number"),
+            bounding_box=observation.get("bounding_box"),
+            confidence=observation.get("confidence"),
+            metadata=observation.get("metadata"),
+        )
+        for observation in observations
+    ]
+    extractor_receipt = prepare_extractor_receipt(
+        document_record=document_record,
+        visual_artifacts=artifacts,
+        extractor_id=extractor_id,
+        extractor_kind=extractor_kind,
+    )
+    return {
+        "schema_version": VISUAL_PREVIEW_SCHEMA_VERSION,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "review_required": True,
+        "document_id": document_id,
+        "visual_artifacts": artifacts,
+        "extractor_receipt": extractor_receipt,
+        "receipt": {
+            "observation_count": len(observations),
+            "visual_artifact_count": len(artifacts),
+            "extractor_kind": extractor_kind,
+            "external_framework_required": extractor_receipt["external_framework_required"],
         },
     }
 
