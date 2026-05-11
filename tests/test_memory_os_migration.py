@@ -12,6 +12,7 @@ import pytest
 from core.document_intelligence import (
     prepare_document_record,
     prepare_document_draft,
+    prepare_document_extraction_request,
     prepare_document_promotion_transaction,
     prepare_extractor_receipt,
     prepare_visual_artifact_record,
@@ -336,6 +337,34 @@ def test_document_intelligence_evidence_records_round_trip_without_promoting_mem
 
     assert bundle["document_evidence_count"] == 4
     assert restored.read_document_evidence_records(document_id=document["document_id"]) == records
+
+
+def test_document_extraction_request_records_round_trip_before_document_exists(tmp_path):
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    request = prepare_document_extraction_request(
+        source_ref={
+            "source_uri": "file:///docs/architecture.pdf",
+            "content_hash": "sha256:" + "d" * 64,
+        },
+        source_type="pdf",
+        requested_outputs=["markdown", "metadata", "page_images"],
+        extractor_id="local-pdf-extractor",
+        extractor_kind="external_document",
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    report = kernel.store_document_evidence_records([request])
+    stored_requests = kernel.read_document_evidence_records(
+        document_id=request["request_id"],
+        record_type="document_extraction_request",
+    )
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+
+    assert report["record_ids"] == [request["request_id"]]
+    assert stored_requests == [request]
+    assert restored.read_document_evidence_records(record_type="document_extraction_request") == [request]
 
 
 def test_document_evidence_store_rejects_active_memory_records(tmp_path):

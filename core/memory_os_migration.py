@@ -27,6 +27,7 @@ LEDGER_FILENAME = "ledger.sqlite3"
 LEGACY_RELATED_TO_EDGE_SOURCE = "legacy_related_to"
 DOCUMENT_EVIDENCE_ID_FIELDS = {
     "document": "document_id",
+    "document_extraction_request": "request_id",
     "visual_extraction_request": "request_id",
     "visual_artifact": "artifact_id",
     "extractor_receipt": "receipt_id",
@@ -35,11 +36,12 @@ DOCUMENT_EVIDENCE_ID_FIELDS = {
 }
 DOCUMENT_EVIDENCE_RECORD_ORDER = {
     "document": 0,
-    "visual_extraction_request": 1,
-    "visual_artifact": 2,
-    "extractor_receipt": 3,
-    "document_draft": 4,
-    "document_promotion_transaction": 5,
+    "document_extraction_request": 1,
+    "visual_extraction_request": 2,
+    "visual_artifact": 3,
+    "extractor_receipt": 4,
+    "document_draft": 5,
+    "document_promotion_transaction": 6,
 }
 
 KNOWN_LEGACY_FIELDS = {
@@ -1090,6 +1092,8 @@ class MemoryOSMigrationKernel:
 
         if record_type == "document":
             document_id = record_id
+        elif record_type == "document_extraction_request":
+            document_id = _normalize_optional_text(record.get("document_id")) or record_id
         else:
             document_id = _normalize_optional_text(record.get("document_id"))
             if not document_id:
