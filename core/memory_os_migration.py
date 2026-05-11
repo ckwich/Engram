@@ -22,7 +22,7 @@ from typing import Any
 from core.chunker import chunk_content_with_metadata
 from core.vector_index import VectorIndexDocument
 
-SCHEMA_VERSION = "2026-05-11.memory_os_migration.v5"
+SCHEMA_VERSION = "2026-05-11.memory_os_migration.v6"
 LEDGER_FILENAME = "ledger.sqlite3"
 LEGACY_RELATED_TO_EDGE_SOURCE = "legacy_related_to"
 DOCUMENT_EVIDENCE_ID_FIELDS = {
@@ -30,12 +30,14 @@ DOCUMENT_EVIDENCE_ID_FIELDS = {
     "visual_extraction_request": "request_id",
     "visual_artifact": "artifact_id",
     "extractor_receipt": "receipt_id",
+    "document_draft": "draft_id",
 }
 DOCUMENT_EVIDENCE_RECORD_ORDER = {
     "document": 0,
     "visual_extraction_request": 1,
     "visual_artifact": 2,
     "extractor_receipt": 3,
+    "document_draft": 4,
 }
 
 KNOWN_LEGACY_FIELDS = {
