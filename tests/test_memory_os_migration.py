@@ -16,6 +16,8 @@ from core.document_intelligence import (
     prepare_extractor_receipt,
     prepare_visual_artifact_record,
     prepare_visual_extraction_request,
+    preview_document_extraction,
+    preview_visual_extraction,
 )
 from core.memory_os_migration import (
     MemoryOSMigrationKernel,
@@ -875,3 +877,81 @@ def test_migration_cli_lists_document_intelligence_records(tmp_path):
     }
     assert report["count"] == 1
     assert report["records"] == [draft]
+
+
+def test_document_intelligence_review_first_workflow_round_trips_without_active_writes(tmp_path):
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    text_preview = preview_document_extraction(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content="# Architecture\n\nDecision: Keep document intelligence review-first.",
+        media_type="text/markdown",
+        metadata={"project": "Engram", "domain": "memory-os"},
+    )
+    visual_request = prepare_visual_extraction_request(
+        document_record=text_preview["document_record"],
+        image_refs=[{"source_uri": "file:///docs/architecture.png", "page": 1}],
+        requested_capabilities=["diagram_description", "ocr_text"],
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+    )
+    visual_preview = preview_visual_extraction(
+        document_record=text_preview["document_record"],
+        observations=[
+            {
+                "artifact_type": "diagram",
+                "source_ref": {"source_uri": "file:///docs/architecture.png", "page": 1},
+                "description": "Diagram says document evidence becomes drafts before memory.",
+                "page_number": 1,
+                "confidence": 0.9,
+            }
+        ],
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+    )
+    draft = prepare_document_draft(
+        document_record=text_preview["document_record"],
+        analysis={
+            "summary": "Architecture note about review-first document intelligence.",
+            "decisions": ["Keep document intelligence review-first."],
+            "claims": ["Visual artifacts stay evidence until promotion."],
+        },
+        chunk_refs=[text_preview["chunks"][0]["provenance"]],
+        visual_artifacts=visual_preview["visual_artifacts"],
+    )
+    transaction = prepare_document_promotion_transaction(
+        document_draft=draft,
+        selected_memory_indexes=[0],
+        selected_edge_indexes=[],
+        approved_by="agent-review",
+    )
+
+    records = [
+        text_preview["document_record"],
+        visual_request,
+        *visual_preview["visual_artifacts"],
+        visual_preview["extractor_receipt"],
+        draft,
+        transaction,
+    ]
+    kernel = MemoryOSMigrationKernel(store_root)
+    report = kernel.store_document_evidence_records(records)
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+    restored_records = restored.read_document_evidence_records(
+        document_id=text_preview["document_record"]["document_id"]
+    )
+
+    assert report["stored_count"] == len(records)
+    assert [record["record_type"] for record in restored_records] == [
+        "document",
+        "visual_extraction_request",
+        "visual_artifact",
+        "extractor_receipt",
+        "document_draft",
+        "document_promotion_transaction",
+    ]
+    assert all(record.get("active_memory_write_performed") is False for record in restored_records)
+    assert all(record.get("write_performed") is not True for record in restored_records)
