@@ -26,6 +26,7 @@ from core.memory_os_migration import (
     build_vector_index_documents,
     legacy_json_filename,
 )
+from core.source_connectors import preview_document_source_connector
 from core.vector_index import VectorIndexDocument
 
 
@@ -1010,6 +1011,117 @@ def test_document_intelligence_review_first_workflow_round_trips_without_active_
     assert report["stored_count"] == len(records)
     assert [record["record_type"] for record in restored_records] == [
         "document",
+        "visual_extraction_request",
+        "visual_artifact",
+        "extractor_receipt",
+        "document_draft",
+        "document_promotion_transaction",
+    ]
+    assert all(record.get("active_memory_write_performed") is False for record in restored_records)
+    assert all(record.get("write_performed") is not True for record in restored_records)
+
+
+def test_external_document_intelligence_workflow_round_trips_without_active_writes(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    pdf = docs / "architecture.pdf"
+    pdf.write_bytes(b"%PDF-1.4 architecture scan")
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+
+    connector = preview_document_source_connector(
+        connector_type="local_path",
+        target=str(docs),
+        include_globs=["*.pdf"],
+    )
+    extraction_request = prepare_document_extraction_request(
+        **connector["omitted"][0]["document_extraction_request_arguments"]
+    )
+    extraction_result = prepare_document_extraction_result(
+        extraction_request=extraction_request,
+        title="Architecture Scan",
+        content="# Architecture\n\nDecision: External document output remains review-first.",
+        media_type="text/markdown",
+        image_refs=[{"source_uri": pdf.resolve().as_uri(), "page": 1}],
+        requested_visual_capabilities=["ocr_text", "diagram_description"],
+    )
+    text_preview = preview_document_extraction(**extraction_result["document_extraction_arguments"])
+    visual_request = prepare_visual_extraction_request(
+        **extraction_result["visual_extraction_request_arguments"]
+    )
+    visual_preview = preview_visual_extraction(
+        document_record=text_preview["document_record"],
+        observations=[
+            {
+                "artifact_type": "diagram",
+                "source_ref": {"source_uri": pdf.resolve().as_uri(), "page": 1},
+                "description": "Diagram supports the review-first document pipeline.",
+                "page_number": 1,
+                "confidence": 0.87,
+            }
+        ],
+        extractor_id="local-vision-v1",
+        extractor_kind="ocr_vision",
+    )
+    draft = prepare_document_draft(
+        document_record=text_preview["document_record"],
+        analysis={
+            "summary": "External parser output about Engram document intelligence.",
+            "decisions": ["Keep external document output review-first."],
+            "claims": ["Image-derived observations remain evidence before promotion."],
+        },
+        chunk_refs=[text_preview["chunks"][0]["provenance"]],
+        visual_artifacts=visual_preview["visual_artifacts"],
+    )
+    transaction = prepare_document_promotion_transaction(
+        document_draft=draft,
+        selected_memory_indexes=[0],
+        selected_edge_indexes=[],
+        approved_by="agent-review",
+    )
+
+    records = [
+        extraction_request,
+        extraction_result,
+        text_preview["document_record"],
+        visual_request,
+        *visual_preview["visual_artifacts"],
+        visual_preview["extractor_receipt"],
+        draft,
+        transaction,
+    ]
+    kernel = MemoryOSMigrationKernel(store_root)
+    report = kernel.store_document_evidence_records(records)
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+    restored_records = restored.read_document_evidence_records()
+    document_records = restored.read_document_evidence_records(
+        document_id=text_preview["document_record"]["document_id"]
+    )
+    request_records = restored.read_document_evidence_records(
+        document_id=extraction_request["request_id"],
+        record_type="document_extraction_request",
+    )
+
+    assert connector["count"] == 0
+    assert connector["omitted"][0]["reason"] == "external_extractor_required"
+    assert text_preview["document_record"] == extraction_result["document_record"]
+    assert visual_request["requested_capabilities"] == ["diagram_description", "ocr_text"]
+    assert report["stored_count"] == len(records)
+    assert {record["record_type"] for record in restored_records} == {
+        "document",
+        "document_extraction_request",
+        "document_extraction_result",
+        "document_draft",
+        "document_promotion_transaction",
+        "extractor_receipt",
+        "visual_artifact",
+        "visual_extraction_request",
+    }
+    assert request_records == [extraction_request]
+    assert [record["record_type"] for record in document_records] == [
+        "document",
+        "document_extraction_result",
         "visual_extraction_request",
         "visual_artifact",
         "extractor_receipt",
