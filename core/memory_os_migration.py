@@ -22,7 +22,7 @@ from typing import Any
 from core.chunker import chunk_content_with_metadata
 from core.vector_index import VectorIndexDocument
 
-SCHEMA_VERSION = "2026-05-11.memory_os_migration.v7"
+SCHEMA_VERSION = "2026-05-11.memory_os_migration.v8"
 LEDGER_FILENAME = "ledger.sqlite3"
 LEGACY_RELATED_TO_EDGE_SOURCE = "legacy_related_to"
 DOCUMENT_EVIDENCE_ID_FIELDS = {
@@ -66,6 +66,8 @@ KNOWN_LEGACY_FIELDS = {
     "stale_type",
     "stale_reason",
     "stale_at",
+    "potentially_stale",
+    "stale_flagged_at",
     "reviewed_at",
 }
 
@@ -85,7 +87,16 @@ FIELD_MAPPINGS = {
     "chars": "memories.chars",
     "lines": "memories.lines",
     "chunk_count": "memories.chunk_count",
+    "potentially_stale": "memories.potentially_stale",
+    "stale_reason": "memories.stale_reason",
+    "stale_flagged_at": "memories.stale_flagged_at",
     "derived_chunks": "chunks",
+}
+
+MEMORY_SCHEMA_COLUMNS = {
+    "potentially_stale": "INTEGER NOT NULL DEFAULT 0",
+    "stale_reason": "TEXT",
+    "stale_flagged_at": "TEXT",
 }
 
 
@@ -478,7 +489,10 @@ class MemoryOSMigrationKernel:
                    memories.project,
                    memories.domain,
                    memories.status,
-                   memories.canonical
+                   memories.canonical,
+                   memories.potentially_stale,
+                   memories.stale_reason,
+                   memories.stale_flagged_at
             FROM chunks
             JOIN memories ON memories.key = chunks.memory_key
         """
@@ -547,6 +561,9 @@ class MemoryOSMigrationKernel:
                 chars INTEGER,
                 lines INTEGER,
                 chunk_count INTEGER,
+                potentially_stale INTEGER NOT NULL DEFAULT 0,
+                stale_reason TEXT,
+                stale_flagged_at TEXT,
                 imported_at TEXT NOT NULL
             );
 
@@ -617,6 +634,7 @@ class MemoryOSMigrationKernel:
             ON document_evidence_records(record_type);
             """
         )
+        self._ensure_memory_columns(conn)
         conn.execute(
             """
             INSERT INTO schema_info(key, value)
@@ -626,6 +644,12 @@ class MemoryOSMigrationKernel:
             (SCHEMA_VERSION,),
         )
         conn.commit()
+
+    def _ensure_memory_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(memories)").fetchall()}
+        for column, definition in MEMORY_SCHEMA_COLUMNS.items():
+            if column not in columns:
+                conn.execute(f"ALTER TABLE memories ADD COLUMN {column} {definition}")
 
     def _artifact_path(self, artifact_sha256: str) -> Path:
         return self.objects_dir / artifact_sha256[:2] / f"{artifact_sha256}.json"
@@ -643,9 +667,10 @@ class MemoryOSMigrationKernel:
                 key, title, content_hash, artifact_sha256, tags_json,
                 related_to_json, project, domain, status, canonical,
                 created_at, updated_at, last_accessed, chars, lines,
-                chunk_count, imported_at
+                chunk_count, potentially_stale, stale_reason, stale_flagged_at,
+                imported_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
                 title = excluded.title,
                 content_hash = excluded.content_hash,
@@ -662,6 +687,9 @@ class MemoryOSMigrationKernel:
                 chars = excluded.chars,
                 lines = excluded.lines,
                 chunk_count = excluded.chunk_count,
+                potentially_stale = excluded.potentially_stale,
+                stale_reason = excluded.stale_reason,
+                stale_flagged_at = excluded.stale_flagged_at,
                 imported_at = excluded.imported_at
             """,
             (
@@ -681,6 +709,9 @@ class MemoryOSMigrationKernel:
                 record["chars"],
                 record["lines"],
                 record["chunk_count"],
+                1 if record["potentially_stale"] else 0,
+                record["stale_reason"],
+                record["stale_flagged_at"],
                 record["imported_at"],
             ),
         )
@@ -884,6 +915,9 @@ class MemoryOSMigrationKernel:
             "chars": _optional_int(data.get("chars")),
             "lines": _optional_int(data.get("lines")),
             "chunk_count": _optional_int(data.get("chunk_count")),
+            "potentially_stale": _normalize_bool(data.get("potentially_stale")),
+            "stale_reason": _normalize_optional_text(data.get("stale_reason")),
+            "stale_flagged_at": _normalize_optional_text(data.get("stale_flagged_at")),
             "legacy_filename": path.name,
             "source_path": str(path),
             "raw_bytes": raw_bytes,
@@ -937,6 +971,9 @@ class MemoryOSMigrationKernel:
             "chars": _optional_int(ledger.get("chars")),
             "lines": _optional_int(ledger.get("lines")),
             "chunk_count": _optional_int(ledger.get("chunk_count")),
+            "potentially_stale": _normalize_bool(ledger.get("potentially_stale")),
+            "stale_reason": _normalize_optional_text(ledger.get("stale_reason")),
+            "stale_flagged_at": _normalize_optional_text(ledger.get("stale_flagged_at")),
             "legacy_filename": str(item.get("legacy_filename") or legacy_json_filename(key)),
             "source_path": None,
             "raw_bytes": raw_bytes,
@@ -969,6 +1006,9 @@ class MemoryOSMigrationKernel:
             "chars": row["chars"],
             "lines": row["lines"],
             "chunk_count": row["chunk_count"],
+            "potentially_stale": bool(row["potentially_stale"]),
+            "stale_reason": row["stale_reason"],
+            "stale_flagged_at": row["stale_flagged_at"],
             "imported_at": row["imported_at"],
         }
 
@@ -1000,6 +1040,9 @@ class MemoryOSMigrationKernel:
             "heading_path": heading_path,
             "chunk_kind": row["chunk_kind"],
             "text_hash": row["text_hash"],
+            "potentially_stale": bool(row["potentially_stale"]),
+            "stale_reason": row["stale_reason"],
+            "stale_flagged_at": row["stale_flagged_at"],
         }
         return {
             "document_id": row["document_id"],

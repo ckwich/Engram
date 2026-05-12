@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -143,6 +144,93 @@ def test_legacy_import_stores_queryable_chunk_records(tmp_path):
     assert chunks[1]["heading_path"] == ["Alpha", "Alpha"]
 
 
+def test_legacy_import_preserves_code_stale_metadata_in_ledger(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    legacy_dir.mkdir()
+
+    _write_memory(
+        legacy_dir / "stale.json",
+        {
+            "key": "stale-memory",
+            "title": "Stale Memory",
+            "content": "Code mapping content",
+            "chunk_count": 1,
+            "potentially_stale": True,
+            "stale_reason": "source files changed",
+            "stale_flagged_at": "2026-05-11T17:31:36.231238-07:00",
+        },
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    dry_run = kernel.import_legacy_json(legacy_dir, dry_run=True)
+    kernel.import_legacy_json(legacy_dir)
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+
+    assert dry_run["unsupported_fields"] == {}
+    assert dry_run["field_mappings"]["potentially_stale"] == "memories.potentially_stale"
+    assert kernel.read_memory_record("stale-memory")["potentially_stale"] is True
+    assert kernel.read_memory_record("stale-memory")["stale_reason"] == "source files changed"
+    assert (
+        kernel.read_memory_record("stale-memory")["stale_flagged_at"]
+        == "2026-05-11T17:31:36.231238-07:00"
+    )
+    assert restored.read_memory_record("stale-memory")["potentially_stale"] is True
+    assert restored.read_vector_source_records("stale-memory")[0]["metadata"]["potentially_stale"] is True
+
+
+def test_legacy_import_upgrades_existing_ledger_with_stale_metadata_columns(tmp_path):
+    legacy_dir = tmp_path / "legacy"
+    store_root = tmp_path / "store"
+    legacy_dir.mkdir()
+    store_root.mkdir()
+
+    with sqlite3.connect(store_root / "ledger.sqlite3") as conn:
+        conn.executescript(
+            """
+            CREATE TABLE memories (
+                key TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                artifact_sha256 TEXT NOT NULL,
+                tags_json TEXT NOT NULL,
+                related_to_json TEXT NOT NULL,
+                project TEXT,
+                domain TEXT,
+                status TEXT,
+                canonical INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT,
+                last_accessed TEXT,
+                chars INTEGER,
+                lines INTEGER,
+                chunk_count INTEGER,
+                imported_at TEXT NOT NULL
+            );
+            """
+        )
+
+    _write_memory(
+        legacy_dir / "stale.json",
+        {
+            "key": "stale-memory",
+            "title": "Stale Memory",
+            "content": "Code mapping content",
+            "chunk_count": 1,
+            "potentially_stale": True,
+            "stale_reason": "source files changed",
+            "stale_flagged_at": "2026-05-11T17:31:36.231238-07:00",
+        },
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    kernel.import_legacy_json(legacy_dir)
+
+    assert kernel.read_memory_record("stale-memory")["potentially_stale"] is True
+
+
 def test_bundle_restore_preserves_chunk_records(tmp_path):
     legacy_dir = tmp_path / "legacy"
     store_root = tmp_path / "store"
@@ -256,7 +344,7 @@ def test_legacy_graph_edge_document_imports_generic_refs_and_restores_bundle(tmp
     edges = kernel.read_graph_edge_records()
 
     assert import_report == {
-        "schema_version": "2026-05-11.memory_os_migration.v7",
+        "schema_version": "2026-05-11.memory_os_migration.v8",
         "source_count": 1,
         "imported_count": 1,
         "invalid_count": 0,
@@ -321,7 +409,7 @@ def test_document_intelligence_evidence_records_round_trip_without_promoting_mem
         record_type="visual_artifact",
     )
 
-    assert report["schema_version"] == "2026-05-11.memory_os_migration.v7"
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v8"
     assert report["stored_count"] == 4
     assert report["record_ids"] == [
         document["document_id"],
@@ -468,7 +556,7 @@ def test_document_draft_records_persist_and_restore_with_evidence_records(tmp_pa
     restored = MemoryOSMigrationKernel(restore_root)
     restored.restore_bundle(kernel.export_bundle())
 
-    assert report["schema_version"] == "2026-05-11.memory_os_migration.v7"
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v8"
     assert report["record_ids"] == [document["document_id"], draft["draft_id"]]
     assert draft_records == [draft]
     assert restored.read_document_evidence_records(record_type="document_draft") == [draft]
@@ -504,7 +592,7 @@ def test_document_promotion_transaction_records_persist_and_restore(tmp_path):
     restored = MemoryOSMigrationKernel(restore_root)
     restored.restore_bundle(kernel.export_bundle())
 
-    assert report["schema_version"] == "2026-05-11.memory_os_migration.v7"
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v8"
     assert report["record_ids"] == [document["document_id"], draft["draft_id"], transaction["transaction_id"]]
     assert transaction_records == [transaction]
     assert restored.read_document_evidence_records(record_type="document_promotion_transaction") == [transaction]
@@ -552,6 +640,9 @@ def test_chunk_ledger_exports_vector_source_records_with_metadata_and_citations(
         "heading_path": ["Alpha"],
         "chunk_kind": "section",
         "text_hash": hashlib.sha256("# Alpha\n\nAlpha content".encode("utf-8")).hexdigest(),
+        "potentially_stale": False,
+        "stale_reason": None,
+        "stale_flagged_at": None,
     }
     assert source["citation"] == {
         "source": "memory_os_migration",
@@ -934,7 +1025,7 @@ def test_migration_cli_lists_document_intelligence_records(tmp_path):
     assert result.returncode == 0, result.stderr
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert json.loads(result.stdout) == report
-    assert report["schema_version"] == "2026-05-11.memory_os_migration.v7"
+    assert report["schema_version"] == "2026-05-11.memory_os_migration.v8"
     assert report["filters"] == {
         "document_id": document["document_id"],
         "record_type": "document_draft",
