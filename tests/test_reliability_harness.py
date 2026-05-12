@@ -36,6 +36,8 @@ def test_agent_reliability_harness_reports_pass_for_expected_retrieval(isolated_
         "scenario_count": 1,
         "passed": 1,
         "failed": 0,
+        "workflow_check_count": 1,
+        "workflow_failed": 0,
     }
 
     scenario_report = report["scenarios"][0]
@@ -47,6 +49,14 @@ def test_agent_reliability_harness_reports_pass_for_expected_retrieval(isolated_
     assert scenario_report["context_pack"]["used_chars"] <= 600
     assert scenario_report["token_estimates"]["search_response_tokens"] > 0
     assert scenario_report["token_estimates"]["estimate_method"] == "chars_div_4"
+    assert report["workflow_checks"][0]["id"] == "agent_workflow_packets"
+    assert report["workflow_checks"][0]["status"] == "pass"
+    assert report["workflow_checks"][0]["artifacts"] == {
+        "context_packet": "2026-05-11.context-packet.v1",
+        "handoff_packet": "2026-05-11.handoff-packet.v1",
+        "project_capsule": "2026-05-11.project-capsule.v1",
+        "memory_quality": "2026-05-11.memory-quality.v1",
+    }
     assert manager.retrieve_memory("_engram_eval_context_budget_smoke") is None
 
 
@@ -73,6 +83,7 @@ def test_agent_reliability_harness_reports_findings_for_missing_expected_key(iso
 
     assert report["summary"]["status"] == "fail"
     assert report["summary"]["failed"] == 1
+    assert report["summary"]["workflow_failed"] == 0
     scenario_report = report["scenarios"][0]
     assert scenario_report["expected_key_found"] is False
     assert scenario_report["expected_key_rank"] is None

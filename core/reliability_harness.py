@@ -6,6 +6,14 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from core.context_builder import build_context_receipt, make_filters
+from core.context_compiler import (
+    build_context_query,
+    build_handoff_packet,
+    compile_context_packet,
+    get_context_profile,
+)
+from core.memory_quality import audit_memory_quality
+from core.project_capsule import build_project_capsule_draft
 from core.usage_meter import ESTIMATE_METHOD, estimate_tokens
 
 
@@ -74,16 +82,21 @@ def run_agent_reliability_harness(
 
     passed = sum(1 for report in reports if report["status"] == "pass")
     failed = len(reports) - passed
+    workflow_checks = [_run_workflow_primitive_check()]
+    workflow_failed = sum(1 for check in workflow_checks if check["status"] != "pass")
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
-            "status": "pass" if failed == 0 else "fail",
+            "status": "pass" if failed == 0 and workflow_failed == 0 else "fail",
             "scenario_count": len(reports),
             "passed": passed,
             "failed": failed,
+            "workflow_check_count": len(workflow_checks),
+            "workflow_failed": workflow_failed,
         },
         "scenarios": reports,
+        "workflow_checks": workflow_checks,
         "warnings": warnings,
     }
 
@@ -265,3 +278,121 @@ def _select_budgeted_chunks(chunks: list[dict[str, Any]], budget_chars: int) -> 
         selected.append(chunk)
         used_chars += len(text)
     return selected
+
+
+def _run_workflow_primitive_check() -> dict[str, Any]:
+    findings: list[dict[str, str]] = []
+    try:
+        profile = get_context_profile("repo_resume")
+        query = build_context_query("resume Engram workflow reliability", profile, project=DEFAULT_PROJECT)
+        context_payload = {
+            "query": query,
+            "count": 1,
+            "chunks": [
+                {
+                    "key": "_engram_eval_workflow_context",
+                    "chunk_id": 0,
+                    "title": "Workflow Context",
+                    "text": "Agents should compile context packets, handoffs, quality signals, and project capsules without writing memory.",
+                    "citation": {"citation_id": "engram:_engram_eval_workflow_context#0"},
+                }
+            ],
+            "citations": [{"citation_id": "engram:_engram_eval_workflow_context#0"}],
+            "omitted": [],
+            "budget_chars": 1000,
+            "used_chars": 105,
+            "receipt": build_context_receipt(
+                query=query,
+                filters=make_filters(project=DEFAULT_PROJECT, domain=DEFAULT_DOMAIN, tags=["agent-eval"]),
+                semantic_candidate_count=1,
+                graph_candidate_count=0,
+                selected_chunk_count=1,
+                omitted_count=0,
+                budget_chars=1000,
+                used_chars=105,
+                include_stale=False,
+                graph_enabled=False,
+                max_hops=0,
+            ),
+            "error": None,
+        }
+        context_packet = compile_context_packet(
+            task="resume Engram workflow reliability",
+            profile_id=profile["id"],
+            profile=profile,
+            context_payload=context_payload,
+            project=DEFAULT_PROJECT,
+            domain=DEFAULT_DOMAIN,
+            tags=["agent-eval"],
+            query=query,
+        )
+        handoff = build_handoff_packet(
+            task="resume Engram workflow reliability",
+            project=DEFAULT_PROJECT,
+            branch="agent-eval",
+            status="workflow primitives under test",
+            next_steps=["verify workflow packet schemas"],
+            validation=["python server.py --agent-eval"],
+            blockers=[],
+            context_packet=context_packet,
+        )
+        quality = audit_memory_quality(
+            [
+                {
+                    "key": "_engram_eval_workflow_context",
+                    "title": "Workflow Context",
+                    "project": DEFAULT_PROJECT,
+                    "domain": DEFAULT_DOMAIN,
+                    "tags": ["agent-eval"],
+                    "status": "active",
+                    "canonical": True,
+                    "chars": 512,
+                    "chunk_count": 1,
+                }
+            ],
+            limit=0,
+        )
+        capsule = build_project_capsule_draft(
+            project=DEFAULT_PROJECT,
+            task="resume Engram workflow reliability",
+            summary="Synthetic agent workflow reliability packet.",
+            must_read_keys=["_engram_eval_workflow_context"],
+            context_packet=context_packet,
+            quality_payload=quality,
+        )
+
+        artifacts = {
+            "context_packet": context_packet["schema_version"],
+            "handoff_packet": handoff["schema_version"],
+            "project_capsule": capsule["schema_version"],
+            "memory_quality": quality["schema_version"],
+        }
+        for name, artifact in [
+            ("context_packet", context_packet),
+            ("handoff_packet", handoff),
+            ("project_capsule", capsule),
+            ("memory_quality", quality),
+        ]:
+            if artifact.get("write_performed") is not False:
+                findings.append(
+                    {
+                        "code": "workflow_write_boundary_failed",
+                        "message": f"{name} did not report write_performed=false.",
+                    }
+                )
+
+        return {
+            "id": "agent_workflow_packets",
+            "description": "Verify no-write workflow packet builders produce stable schema identities.",
+            "status": "pass" if not findings else "fail",
+            "artifacts": artifacts,
+            "findings": findings,
+        }
+    except Exception as exc:
+        return {
+            "id": "agent_workflow_packets",
+            "description": "Verify no-write workflow packet builders produce stable schema identities.",
+            "status": "fail",
+            "artifacts": {},
+            "findings": [{"code": "workflow_runtime_error", "message": str(exc)}],
+        }
