@@ -45,6 +45,7 @@ from core.document_intelligence import (
     preview_visual_extraction as build_visual_extraction_preview,
 )
 from core.embedder import embedder
+from core.graph_backend_status import build_graph_backend_status
 from core.graph_manager import graph_manager
 from core.hybrid_retrieval import normalize_retrieval_mode
 from core.ingestion_pipelines import list_ingestion_pipelines as build_ingestion_pipeline_catalog
@@ -577,7 +578,14 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "purpose": "Inspect typed relationships without loading neighbor bodies.",
                 "stability": "beta",
                 "cost_class": "low",
-                "tools": ["add_graph_edge", "list_graph_edges", "impact_scan", "conflict_scan", "audit_graph"],
+                "tools": [
+                    "add_graph_edge",
+                    "list_graph_edges",
+                    "impact_scan",
+                    "conflict_scan",
+                    "audit_graph",
+                    "graph_backend_status",
+                ],
             },
             "source_intake": {
                 "purpose": "Prepare source drafts without promoting durable memories.",
@@ -690,6 +698,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "project capsule": "prepare_project_capsule",
                 "relationship inspection": "impact_scan",
                 "conflict inspection": "conflict_scan",
+                "graph backend status": "graph_backend_status",
                 "source ingestion": "prepare_source_memory",
                 "source ingestion setup": "list_ingestion_pipelines",
                 "chunk boundary review": "preview_memory_chunks",
@@ -750,6 +759,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "get_related_memories": "Traverse explicit related_to links without loading unrelated bodies.",
             "get_stale_memories": "Surface stale or potentially stale memories.",
             "delete_memory": "Delete a memory intentionally by key.",
+            "graph_backend_status": "Report JSON graph, optional Kuzu, and migrated graph-edge readiness without changing live graph storage.",
             "read_codebase_mapping_config": "Read a repo .engram/config.json when present.",
             "draft_codebase_mapping_config": "Draft a safe .engram/config.json for a repo without writing it.",
             "store_codebase_mapping_config": "Validate and write a repo .engram/config.json with overwrite protection.",
@@ -790,6 +800,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "migration_dry_run(legacy_dir='data/memories') before importing the current memory corpus into a Memory OS store",
             "memory_os_round_trip_check(legacy_dir='data/memories', work_root='.engram/migration-round-trip-check') for migration parity proof",
             "retrieval_backend_status(store_root='.engram/migration-round-trip-check/store', include_rebuild_probe=True) before considering a retrieval backend switch",
+            "graph_backend_status(store_root='.engram/migration-round-trip-check/store') before considering a graph backend switch",
             "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
         ],
         "warnings": [
@@ -1123,6 +1134,48 @@ async def audit_graph() -> dict[str, Any]:
             error=str(e),
         )
         return payload
+
+
+@mcp.tool()
+async def graph_backend_status(
+    store_root: str | None = None,
+    graph_path: str | None = "data/graph/edges.json",
+) -> dict[str, Any]:
+    """
+    Report graph backend readiness without changing live graph storage.
+
+    The current live graph path remains the JSON GraphStore. This tool reports
+    JSON graph edge counts, optional Kuzu availability, migrated ledger graph
+    edge counts, and the remaining promotion gates. It does not write graph
+    records, promote Kuzu, or load neighbor memory bodies.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"store_root": store_root, "graph_path": graph_path}
+    try:
+        resolved_store_root = None
+        resolved_graph_path = None
+        if store_root is not None:
+            resolved_store_root = _repo_path(store_root, store_root)
+        if graph_path is not None:
+            resolved_graph_path = _repo_path(graph_path, graph_path)
+        payload = await asyncio.to_thread(
+            build_graph_backend_status,
+            store_root=resolved_store_root,
+            graph_path=resolved_graph_path,
+        )
+    except Exception as e:
+        payload = {
+            "schema_version": None,
+            "operation": "graph_backend_status",
+            "store_root": store_root,
+            "graph_path": graph_path,
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "live_graph_backend_changed": False,
+            "error": _tool_error("runtime_error", f"Unexpected graph backend status failure: {e}"),
+        }
+    _record_usage_for_payload("graph_backend_status", input_payload, payload, started_at)
+    return payload
 
 
 @mcp.tool()

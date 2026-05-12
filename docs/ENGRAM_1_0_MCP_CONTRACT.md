@@ -82,6 +82,7 @@ where typed, and focused tests.
 | `impact_scan` | beta | `dict{root_ref, count, edges, error}` | Graph traversal returns refs/evidence, not neighbor bodies. |
 | `conflict_scan` | beta | `dict{schema_version, ref, status, edge_types, count, conflicts, error}` | Read-only contradiction, invalidation, and supersession scan; returns refs/evidence only. |
 | `audit_graph` | beta | `dict{issue_count, issues, error}` | Read-only graph hygiene check. |
+| `graph_backend_status` | beta | `dict{schema_version, operation, current_live_backend, candidate_backend, live_graph_probe, store_probe, readiness_gates, write_performed, active_memory_write_performed, live_graph_backend_changed, error}` | No-write readiness report for JSON graph storage, optional Kuzu, and migrated ledger graph edges. |
 | `list_ingestion_pipelines` | beta | `dict{pipelines, error}` | No-write source-intake preset catalog. |
 | `preview_memory_chunks` | beta | `dict{title, chunk_count, chunks, omitted, error}` | No-write chunk boundary preview. |
 | `preview_source_connector` | beta | `dict{connector_type, target, count, items, omitted, write_performed, error}` | No-write local source preview. |

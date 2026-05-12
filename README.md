@@ -185,6 +185,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `impact_scan` | Traverse graph relationships for impact analysis. |
 | `conflict_scan` | List contradiction, invalidation, and supersession graph edges without loading memory bodies. |
 | `audit_graph` | Inspect graph hygiene. |
+| `graph_backend_status` | Report JSON graph, optional Kuzu, and migrated graph-edge readiness without switching live graph storage. |
 | `usage_summary` | Summarize Engram-attributed token estimates. |
 | `list_usage_calls` | Inspect recent estimated usage calls. |
 | `retrieval_eval` | Run deterministic retrieval and no-write workflow-quality checks. |
@@ -498,6 +499,7 @@ Engram
 |   |-- codebase_mapper.py # Agent-native codebase mapping jobs
 |   |-- graph_manager.py   # Graph policy and traversal
 |   |-- graph_store.py     # Swappable graph persistence seam
+|   |-- graph_backend_status.py # No-write graph backend readiness report
 |   |-- retrieval_backend_status.py # No-write backend readiness report
 |   |-- usage_meter.py     # Privacy-safe token estimates
 |   |-- operation_log.py   # Job and event receipts

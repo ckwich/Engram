@@ -183,6 +183,69 @@ def test_retrieval_backend_status_tool_reports_no_write_backend_gate(tmp_path):
     assert payload["error"] is None
 
 
+def test_graph_backend_status_tool_reports_no_write_backend_gate(tmp_path):
+    server = load_server_module()
+    graph_path = tmp_path / "edges.json"
+    legacy_dir = tmp_path / "legacy"
+    work_root = tmp_path / "migration-work"
+    legacy_dir.mkdir()
+    _write_legacy_memory(
+        graph_path,
+        {
+            "schema_version": "2026-04-27",
+            "edges": [
+                {
+                    "edge_id": "sha256:edge",
+                    "from_ref": {"kind": "memory", "key": "alpha"},
+                    "to_ref": {"kind": "memory", "key": "beta"},
+                    "edge_type": "supports",
+                    "confidence": 0.8,
+                    "evidence": "Alpha supports beta.",
+                    "source": "test",
+                    "status": "active",
+                    "created_by": "pytest",
+                    "created_at": "2026-05-12T00:00:00-07:00",
+                    "updated_at": "2026-05-12T00:00:00-07:00",
+                }
+            ],
+        },
+    )
+    _write_legacy_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "content": "Alpha content",
+            "related_to": ["beta"],
+            "chunk_count": 1,
+        },
+    )
+    asyncio.run(
+        server.memory_os_round_trip_check(
+            legacy_dir=str(legacy_dir),
+            work_root=str(work_root),
+        )
+    )
+
+    payload = asyncio.run(
+        server.graph_backend_status(
+            store_root=str(work_root / "store"),
+            graph_path=str(graph_path),
+        )
+    )
+
+    assert payload["operation"] == "graph_backend_status"
+    assert payload["write_performed"] is False
+    assert payload["active_memory_write_performed"] is False
+    assert payload["live_graph_backend_changed"] is False
+    assert payload["current_live_backend"]["edge_count"] == 1
+    assert payload["candidate_backend"]["backend"] == "kuzu"
+    assert payload["candidate_backend"]["required"] is False
+    assert payload["candidate_backend"]["promotion_ready"] is False
+    assert payload["store_probe"]["graph_edge_count"] == 1
+    assert payload["error"] is None
+
+
 def test_prepare_codebase_mapping_tool_returns_manager_payload(monkeypatch):
     server = load_server_module()
     observed = {}

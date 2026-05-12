@@ -350,6 +350,13 @@ data science, visualization-heavy workflows, or shared deployments. Memgraph is
 interesting for real-time streaming graph workloads, but it should not be the
 default for a personal local-first memory OS.
 
+Implementation status, 2026-05-12: Engram now has a no-write
+`graph_backend_status` MCP gate that reports the JSON graph store as the live
+graph backend, Kuzu as an optional candidate, live JSON edge counts, and
+migrated ledger graph-edge counts. This is not a backend switch. Kuzu must
+still pass a real optional-dependency corpus spike before it can replace JSON
+graph storage in live traversal.
+
 ### Engram Daemon
 
 The rebuilt runtime should introduce `engramd`, a single local daemon that owns
