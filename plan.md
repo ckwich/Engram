@@ -175,6 +175,7 @@ Tracked planning docs:
 - `docs/ENGRAM_1_0_RELEASE_SPEC.md` — binding Engram 1.0 scope, invariants, release tracks, and validation gate.
 - `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md` — execution plan for finishing 1.0 in small, validated commits.
 - `docs/ENGRAM_1_0_TRACK_0_AUDIT.md` — repo/branch hygiene audit and evidence.
+- `docs/ENGRAM_HOSTED_SELLABLE_CHECKLIST.md` — optional hosted/self-hosted readiness and commercial packaging checklist for Engram without weakening local-first core boundaries.
 - `docs/POST_1_COLLABORATION_PRODUCT_HANDOFF.md` — boundary handoff for the separate collaboration product.
 - `docs/COLLABORATION_PRODUCT_PRD.md` — draft PRD for that separate product.
 
