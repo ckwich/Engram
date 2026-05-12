@@ -317,6 +317,43 @@ python server.py --transport sse --host 127.0.0.1 --port 5100
 
 Only bind to a non-loopback host when you have appropriate network controls in place.
 
+### Local Daemon Mode
+
+`engramd.py` starts an opt-in loopback daemon that owns the live Engram memory
+store and vector index. This lets MCP stdio sessions act as clients instead of
+each agent process trying to own embedded ChromaDB directly.
+
+Terminal 1:
+
+```bash
+python engramd.py --host 127.0.0.1 --port 8765
+```
+
+Terminal 2, before starting the MCP server process:
+
+```bash
+export ENGRAM_DAEMON_URL=http://127.0.0.1:8765
+python server.py
+```
+
+PowerShell:
+
+```powershell
+$env:ENGRAM_DAEMON_URL = "http://127.0.0.1:8765"
+python server.py
+```
+
+Health check:
+
+```bash
+python engramd.py --health --host 127.0.0.1 --port 8765
+```
+
+Daemon mode currently routes stable memory search, chunk/full reads, writes, and
+deletes through `engramd`. Direct in-process MCP mode remains the default unless
+`ENGRAM_DAEMON_URL` is set. This is not a LanceDB/Kuzu backend switch and does
+not add hosted tenant authorization.
+
 ---
 
 ## Web Dashboard
@@ -448,6 +485,10 @@ Rejected drafts cannot be promoted.
 ```bash
 # MCP server, stdio transport
 python server.py
+
+# Local daemon, then opt-in MCP daemon-client mode
+python engramd.py --host 127.0.0.1 --port 8765
+ENGRAM_DAEMON_URL=http://127.0.0.1:8765 python server.py
 
 # SSE transport
 python server.py --transport sse --port 5100

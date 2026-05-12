@@ -366,6 +366,20 @@ repair operations.
 MCP stdio servers should become thin clients that talk to `engramd`. This
 prevents every agent thread from owning the vector or graph backend directly.
 
+First implementation slice, 2026-05-12:
+
+- `engramd.py` now provides an opt-in loopback daemon over a small JSON HTTP
+  API.
+- The daemon owns the current live `memory_manager` path, including JSON memory
+  writes and legacy Chroma indexing.
+- MCP stdio sessions can set `ENGRAM_DAEMON_URL` to route stable memory search,
+  chunk/full reads, writes, and deletes through the daemon.
+- Direct in-process MCP mode remains the default while daemon mode is proven in
+  real sessions.
+- This slice does not switch live retrieval to LanceDB, switch graph storage to
+  Kuzu, add tenant authorization, or complete the full SQLite/content-addressed
+  Memory OS runtime.
+
 ## Agent-Facing MCP Surface
 
 The MCP surface should be workflow-oriented, not merely CRUD-oriented.
