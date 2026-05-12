@@ -23,7 +23,10 @@ import time
 from urllib.parse import urlsplit
 
 from core.chunk_preview import preview_memory_chunks
+from core.graph_manager import graph_manager
+from core.memory_quality import audit_memory_quality as build_memory_quality_audit
 from core.memory_manager import memory_manager, DuplicateMemoryError
+from core.operation_log import operation_log
 from core.retrieval_eval import run_retrieval_eval
 from core.source_connectors import preview_source_connector
 from core.usage_meter import usage_meter
@@ -442,6 +445,37 @@ def require_json_object_body() -> tuple[dict, object | None]:
     return body, None
 
 
+def _bounded_query_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    value = request.args.get(name, default, type=int)
+    return min(max(value, minimum), maximum)
+
+
+def _query_tags() -> list[str]:
+    raw_tags = request.args.get("tags", "")
+    return [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
+
+
+def _filter_memory_metadata(
+    memories: list[dict],
+    *,
+    project: str | None,
+    domain: str | None,
+    tags: list[str],
+) -> list[dict]:
+    filtered = memories
+    if project:
+        filtered = [memory for memory in filtered if memory.get("project") == project]
+    if domain:
+        filtered = [memory for memory in filtered if memory.get("domain") == domain]
+    if tags:
+        filtered = [
+            memory
+            for memory in filtered
+            if all(tag in set(memory.get("tags") or []) for tag in tags)
+        ]
+    return filtered
+
+
 @app.before_request
 def require_write_token_for_mutations():
     """Protect browser/API writes before they reach memory storage."""
@@ -631,6 +665,66 @@ def api_delete(key):
 @app.route("/api/stats")
 def api_stats():
     return jsonify(memory_manager.get_stats())
+
+
+@app.route("/api/inspector/memory-quality")
+def api_inspector_memory_quality():
+    limit = _bounded_query_int("limit", 100, 0, 500)
+    offset = _bounded_query_int("offset", 0, 0, 100000)
+    project = request.args.get("project") or None
+    domain = request.args.get("domain") or None
+    tags = _query_tags()
+    try:
+        memories = _filter_memory_metadata(
+            memory_manager.list_memories(),
+            project=project,
+            domain=domain,
+            tags=tags,
+        )
+        return jsonify(build_memory_quality_audit(memories, limit=limit, offset=offset))
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
+
+
+@app.route("/api/inspector/graph/edges")
+def api_inspector_graph_edges():
+    ref_kind = request.args.get("ref_kind") or None
+    ref_key = request.args.get("ref_key") or None
+    if bool(ref_kind) != bool(ref_key):
+        return jsonify({"error": "ref_kind and ref_key must be provided together"}), 400
+    ref = {"kind": ref_kind, "key": ref_key} if ref_kind and ref_key else None
+    edge_type = request.args.get("edge_type") or None
+    status_arg = request.args.get("status", "active")
+    status = None if status_arg == "all" else status_arg
+    try:
+        return jsonify(graph_manager.list_edges(ref=ref, edge_type=edge_type, status=status))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
+
+
+@app.route("/api/inspector/graph/audit")
+def api_inspector_graph_audit():
+    try:
+        return jsonify(graph_manager.audit_graph())
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
+
+
+@app.route("/api/inspector/operations/jobs")
+def api_inspector_operation_jobs():
+    operation_type = request.args.get("operation_type") or None
+    status = request.args.get("status") or None
+    limit = _bounded_query_int("limit", 50, 1, 500)
+    return jsonify(operation_log.list_jobs(operation_type=operation_type, status=status, limit=limit))
+
+
+@app.route("/api/inspector/operations/events")
+def api_inspector_operation_events():
+    event_type = request.args.get("event_type") or None
+    limit = _bounded_query_int("limit", 50, 1, 500)
+    return jsonify(operation_log.list_events(event_type=event_type, limit=limit))
 
 
 @app.route("/api/related/<path:key>")
