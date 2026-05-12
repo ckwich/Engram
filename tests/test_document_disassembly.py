@@ -79,6 +79,9 @@ def test_prepare_pdf_disassembly_uses_poppler_inventory_without_writes(tmp_path)
     assert payload["pages"][2]["image_count"] == 1
     assert payload["quality_seed"]["no_text_pages"] == [2]
     assert payload["quality_seed"]["image_pages"] == [2, 3]
+    assert payload["quality_report"]["record_type"] == "document_quality_report"
+    assert payload["quality_report"]["coverage"]["no_text_page_count"] == 1
+    assert "visual_review_needed" in {warning["code"] for warning in payload["quality_report"]["warnings"]}
     assert payload["promotion_guidance"]["auto_promote"] is False
     assert {receipt["tool"] for receipt in payload["extraction_receipts"]} == {
         "pdfinfo",

@@ -196,17 +196,21 @@ git commit -m "feat: add no-write PDF disassembly inventory"
 
 **Files:**
 - Create: `core/document_quality.py`
-- Modify: `core/document_intelligence.py`
+- Modify: `core/document_extractors.py`
+- Modify: `AGENTS.md`
+- Modify: `README.md`
+- Modify: `docs/ENGRAM_1_0_MCP_CONTRACT.md`
+- Modify: `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - Test: `tests/test_document_quality.py`
 - Test: `tests/test_document_disassembly.py`
 
-- [ ] **Step 1: Write failing tests for quality warnings.**
+- [x] **Step 1: Write failing tests for quality warnings.**
 
 Cover empty pages, low text coverage, image-heavy pages, missing OCR,
 table-candidate pages, duplicate chunks, failed pages, and unsupported
 extractor capabilities.
 
-- [ ] **Step 2: Verify red.**
+- [x] **Step 2: Verify red.**
 
 Run:
 
@@ -214,12 +218,12 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_document_quality.py -q
 ```
 
-- [ ] **Step 3: Implement quality scoring.**
+- [x] **Step 3: Implement quality scoring.**
 
 Return a deterministic quality report with page counts, coverage percentages,
 warning codes, and recommended next tools.
 
-- [ ] **Step 4: Verify.**
+- [x] **Step 4: Verify.**
 
 Run:
 
@@ -227,10 +231,10 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_document_quality.py tests/test_document_disassembly.py -q
 ```
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```powershell
-git add core/document_quality.py core/document_intelligence.py tests/test_document_quality.py tests/test_document_disassembly.py
+git add core/document_quality.py core/document_extractors.py tests/test_document_quality.py tests/test_document_disassembly.py AGENTS.md README.md docs/ENGRAM_1_0_MCP_CONTRACT.md docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
 git commit -m "feat: add document import quality reports"
 ```
 

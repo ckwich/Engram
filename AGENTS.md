@@ -25,6 +25,7 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 | `core/source_intake.py` | Reviewable source draft preparation | Draft-only until explicit promotion |
 | `core/document_intelligence.py` | Provider-neutral document evidence and draft records | Document extraction, visual/OCR evidence, drafts, and promotion plans stay no-write until explicit promotion |
 | `core/document_extractors.py` | Local no-write document disassembly adapters | PDF page/text/image inventory uses local tools when available and returns evidence, receipts, and quality seeds only |
+| `core/document_quality.py` | No-write document quality reports | Converts disassembly evidence into deterministic warnings and next-tool guidance; must not write repairs |
 | `core/hybrid_retrieval.py` | Lexical scoring helpers for opt-in hybrid retrieval | Semantic retrieval remains the default |
 | `core/memory_quality.py` | Metadata-only quality audit signals | Read-only scope/lifecycle/chunking risk report; must not load memory bodies or write repairs |
 | `core/retrieval_eval.py` | Agent/WebUI wrapper for deterministic retrieval evals | Delegates to the reliability harness |

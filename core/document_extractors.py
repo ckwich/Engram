@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from core.document_quality import build_document_quality_report
+
 
 DOCUMENT_DISASSEMBLY_SCHEMA_VERSION = "2026-05-12.document-disassembly.v1"
 PDF_MEDIA_TYPE = "application/pdf"
@@ -110,7 +112,7 @@ def prepare_document_disassembly(
     text_content = "\f".join(page_texts[:page_limit or len(page_texts)])
     title = info.get("title") or path.stem
 
-    return {
+    payload = {
         "schema_version": DOCUMENT_DISASSEMBLY_SCHEMA_VERSION,
         "record_type": "document_disassembly_preview",
         "write_performed": False,
@@ -164,6 +166,8 @@ def prepare_document_disassembly(
         },
         "error": None,
     }
+    payload["quality_report"] = build_document_quality_report(payload)
+    return payload
 
 
 def _run_command(args: list[str], timeout_seconds: int) -> ExtractorCommandResult:
