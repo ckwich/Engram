@@ -19,6 +19,7 @@ DOCUMENT_DRAFT_SCHEMA_VERSION = "2026-05-11.document-intelligence.draft.v1"
 DOCUMENT_UNDERSTANDING_SCHEMA_VERSION = "2026-05-12.document-intelligence.understanding.v1"
 DOCUMENT_PROMOTION_SCHEMA_VERSION = "2026-05-11.document-intelligence.promotion.v1"
 LOW_CONFIDENCE_THRESHOLD = 0.5
+AUTO_GRAPH_SOURCE = "document_intelligence.auto_graph"
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
 VALID_DOCUMENT_EXTRACTOR_KINDS = {
     "agent_native",
@@ -343,6 +344,8 @@ def prepare_visual_extraction_request(
             "external_framework_required": external_framework_required,
         },
         "image_recognition_required": True,
+        "visual_interpretation_required": True,
+        "coverage_required": True,
         "expected_observation_fields": list(EXPECTED_VISUAL_OBSERVATION_FIELDS),
         "visual_evidence_contract": _visual_evidence_contract(),
         "framework_strategy": _visual_framework_strategy(external_framework_required),
@@ -625,8 +628,15 @@ def prepare_document_understanding_packet(
     normalized_created_by = _require_text(created_by, "created_by")
     normalized_chunk_refs = _normalize_chunk_refs(chunk_refs or [])
     normalized_visuals = _normalize_visual_artifacts(visual_artifacts or [], document_id)
-    normalized_edges = _normalize_candidate_graph_edges(candidate_graph_edges or [])
+    supplied_edges = _normalize_candidate_graph_edges(candidate_graph_edges or [])
     normalized = _normalize_understanding_analysis(analysis, document_id)
+    auto_edges = _auto_document_understanding_edges(
+        document_id=document_id,
+        normalized=normalized,
+        chunk_refs=normalized_chunk_refs,
+        visual_artifacts=normalized_visuals,
+    )
+    normalized_edges = _dedupe_graph_edges([*supplied_edges, *auto_edges])
     if _understanding_item_count(normalized) == 0 and not normalized_edges:
         raise ValueError("analysis or candidate_graph_edges must include at least one item")
 
@@ -690,6 +700,8 @@ def prepare_document_understanding_packet(
             "high_value_section_count": len(normalized["high_value_sections"]),
             "low_confidence_warning_count": len(low_confidence_warnings),
             "candidate_graph_edge_count": len(normalized_edges),
+            "supplied_graph_edge_count": len(supplied_edges),
+            "auto_graph_edge_count": len(auto_edges),
             "chunk_ref_count": len(normalized_chunk_refs),
             "visual_artifact_count": len(normalized_visuals),
         },
@@ -835,11 +847,13 @@ def preview_visual_extraction(
     observations: list[dict[str, Any]],
     extractor_id: str,
     extractor_kind: str,
+    visual_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Preview caller-supplied OCR/vision observations as visual evidence."""
     document_id = _require_text(document_record.get("document_id"), "document_record.document_id")
     if not isinstance(observations, list) or not observations:
         raise ValueError("observations must include at least one item")
+    normalized_visual_request = _normalize_visual_request(visual_request, document_id)
 
     artifacts = [
         prepare_visual_artifact_record(
@@ -857,6 +871,12 @@ def preview_visual_extraction(
         )
         for observation in observations
     ]
+    visual_coverage = None
+    if normalized_visual_request is not None:
+        visual_coverage = _build_visual_coverage(normalized_visual_request, artifacts)
+        if not visual_coverage["coverage_complete"]:
+            raise ValueError("visual_request image_refs require observations for every requested image_ref")
+
     extractor_receipt = prepare_extractor_receipt(
         document_record=document_record,
         visual_artifacts=artifacts,
@@ -870,12 +890,18 @@ def preview_visual_extraction(
         "review_required": True,
         "document_id": document_id,
         "visual_artifacts": artifacts,
+        "visual_coverage": visual_coverage,
         "extractor_receipt": extractor_receipt,
         "receipt": {
             "observation_count": len(observations),
             "visual_artifact_count": len(artifacts),
             "extractor_kind": extractor_kind,
             "external_framework_required": extractor_receipt["external_framework_required"],
+            **(
+                {"visual_request_coverage_complete": visual_coverage["coverage_complete"]}
+                if visual_coverage is not None
+                else {}
+            ),
         },
     }
 
@@ -977,6 +1003,8 @@ def _visual_evidence_contract() -> dict[str, Any]:
         "artifact_record_type": "visual_artifact",
         "receipt_record_type": "extractor_receipt",
         "expected_observation_fields": list(EXPECTED_VISUAL_OBSERVATION_FIELDS),
+        "mandatory_interpretation": True,
+        "coverage_rule": "Every requested image_ref must return at least one reviewed visual artifact before draft promotion.",
         "trusted_memory": False,
         "promotion_required": True,
     }
@@ -989,6 +1017,101 @@ def _visual_framework_strategy(external_framework_required: bool) -> dict[str, A
         "return_tool": "preview_visual_extraction",
         "promotion_path": "review_visual_artifacts_before_document_draft",
     }
+
+
+def _normalize_visual_request(value: Any, document_id: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("visual_request must be an object")
+    request_id = _require_text(value.get("request_id"), "visual_request.request_id")
+    request_document_id = _require_text(value.get("document_id"), "visual_request.document_id")
+    if request_document_id != document_id:
+        raise ValueError("visual_request document_id does not match document_record.document_id")
+    return {
+        "request_id": request_id,
+        "image_refs": _normalize_image_refs(value.get("image_refs")),
+    }
+
+
+def _build_visual_coverage(visual_request: dict[str, Any], artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+    required_refs = [dict(ref) for ref in visual_request["image_refs"]]
+    observed_keys: set[str] = set()
+    for artifact in artifacts:
+        observed_keys.update(_visual_artifact_match_keys(artifact))
+
+    missing_refs = [
+        ref for ref in required_refs
+        if not (_visual_ref_match_keys(ref) & observed_keys)
+    ]
+    return {
+        "visual_request_id": visual_request["request_id"],
+        "required_image_ref_count": len(required_refs),
+        "covered_image_ref_count": len(required_refs) - len(missing_refs),
+        "missing_image_refs": missing_refs,
+        "coverage_complete": not missing_refs,
+    }
+
+
+def _visual_artifact_match_keys(artifact: dict[str, Any]) -> set[str]:
+    provenance = artifact.get("provenance") if isinstance(artifact.get("provenance"), dict) else {}
+    source_ref = dict(provenance.get("source_ref") or {})
+    source_artifact_id = provenance.get("source_artifact_id")
+    if source_artifact_id and "source_artifact_id" not in source_ref:
+        source_ref["source_artifact_id"] = source_artifact_id
+    page_number = provenance.get("page_number")
+    if page_number and "page_number" not in source_ref and "page" not in source_ref:
+        source_ref["page_number"] = page_number
+    return _visual_ref_match_keys(source_ref)
+
+
+def _visual_ref_match_keys(ref: dict[str, Any]) -> set[str]:
+    if not isinstance(ref, dict):
+        return set()
+    page_number = _optional_ref_page(ref.get("page_number") or ref.get("page"))
+    artifact_identifiers = [
+        _optional_ref_text(ref.get(field))
+        for field in (
+            "source_artifact_id",
+            "source_artifact_ref",
+            "artifact_id",
+            "ref",
+            "image_hash",
+        )
+    ]
+    keys: set[str] = set()
+    for identifier in artifact_identifiers:
+        if not identifier:
+            continue
+        keys.add(f"artifact:{identifier}|page:{page_number}" if page_number is not None else f"artifact:{identifier}")
+    if keys:
+        return keys
+
+    source_uri = _optional_ref_text(ref.get("source_uri"))
+    if source_uri:
+        keys.add(f"source:{source_uri}|page:{page_number}" if page_number is not None else f"source:{source_uri}")
+        return keys
+
+    if page_number is not None:
+        keys.add(f"page:{page_number}")
+    return keys
+
+
+def _optional_ref_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _optional_ref_page(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        page_number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return page_number if page_number > 0 else None
 
 
 def _normalize_document_outputs(value: Any) -> list[str]:
@@ -1232,6 +1355,215 @@ def _understanding_draft_analysis(value: dict[str, list[dict[str, Any]]]) -> dic
             for item in value["entity_candidates"]
         ],
     }
+
+
+def _auto_document_understanding_edges(
+    *,
+    document_id: str,
+    normalized: dict[str, list[dict[str, Any]]],
+    chunk_refs: list[dict[str, Any]],
+    visual_artifacts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    document_ref = {"kind": "document", "key": document_id}
+    visual_by_id = {
+        _require_text(artifact.get("artifact_id"), "visual_artifact.artifact_id"): artifact
+        for artifact in visual_artifacts
+    }
+    raw_edges: list[dict[str, Any]] = []
+
+    for section in normalized["high_value_sections"]:
+        section_ref = {"kind": "section", "key": section["section_id"]}
+        _append_auto_edge(
+            raw_edges,
+            from_ref=document_ref,
+            to_ref=section_ref,
+            edge_type="contains",
+            confidence=section.get("confidence"),
+            evidence=f"Document contains high-value section '{section['title']}'.",
+        )
+        page_ref = _page_ref(document_id, section.get("page_number"))
+        if page_ref is not None:
+            _append_auto_edge(
+                raw_edges,
+                from_ref=document_ref,
+                to_ref=page_ref,
+                edge_type="contains",
+                confidence=section.get("confidence"),
+                evidence=f"Document contains page {section['page_number']} for section '{section['title']}'.",
+            )
+        chunk_ref = _chunk_graph_ref(section.get("chunk_ref"), document_id)
+        if chunk_ref is not None:
+            _append_auto_edge(
+                raw_edges,
+                from_ref=section_ref,
+                to_ref=chunk_ref,
+                edge_type="contains",
+                confidence=section.get("confidence"),
+                evidence=f"Section '{section['title']}' contains cited chunk evidence.",
+            )
+
+    for concept in normalized["concept_candidates"]:
+        edge_type = "defines" if concept.get("description") else "mentions"
+        _append_auto_edge(
+            raw_edges,
+            from_ref=document_ref,
+            to_ref={"kind": "concept", "key": concept["concept_id"]},
+            edge_type=edge_type,
+            confidence=concept.get("confidence"),
+            evidence=f"Document {edge_type} concept '{concept['name']}'.",
+        )
+
+    for entity in normalized["entity_candidates"]:
+        _append_auto_edge(
+            raw_edges,
+            from_ref=document_ref,
+            to_ref={"kind": "entity", "key": entity["entity_id"]},
+            edge_type="mentions",
+            confidence=entity.get("confidence"),
+            evidence=f"Document mentions {entity['kind']} '{entity['name']}'.",
+        )
+
+    for claim in normalized["claim_candidates"]:
+        claim_ref = {"kind": "claim", "key": claim["claim_id"]}
+        _append_auto_edge(
+            raw_edges,
+            from_ref=document_ref,
+            to_ref=claim_ref,
+            edge_type="supports",
+            confidence=claim.get("confidence"),
+            evidence="Document is cited as evidence for a reviewed claim candidate.",
+        )
+        for evidence_ref in claim.get("evidence_refs", []):
+            chunk_ref = _chunk_graph_ref(evidence_ref, document_id)
+            if chunk_ref is not None:
+                _append_auto_edge(
+                    raw_edges,
+                    from_ref=chunk_ref,
+                    to_ref=claim_ref,
+                    edge_type="supports",
+                    confidence=claim.get("confidence"),
+                    evidence="Cited chunk supports a reviewed claim candidate.",
+                )
+                continue
+            if isinstance(evidence_ref, str) and evidence_ref in visual_by_id:
+                _append_auto_edge(
+                    raw_edges,
+                    from_ref={"kind": "visual_artifact", "key": evidence_ref},
+                    to_ref=claim_ref,
+                    edge_type="illustrates",
+                    confidence=visual_by_id[evidence_ref].get("confidence"),
+                    evidence="Visual artifact is cited as evidence for a reviewed claim candidate.",
+                )
+
+    for chunk_ref in chunk_refs:
+        graph_ref = _chunk_graph_ref(chunk_ref, document_id)
+        if graph_ref is not None:
+            _append_auto_edge(
+                raw_edges,
+                from_ref=document_ref,
+                to_ref=graph_ref,
+                edge_type="contains",
+                confidence=None,
+                evidence="Document contains cited chunk evidence.",
+            )
+
+    for artifact in visual_artifacts:
+        artifact_id = _require_text(artifact.get("artifact_id"), "visual_artifact.artifact_id")
+        visual_ref = {"kind": "visual_artifact", "key": artifact_id}
+        _append_auto_edge(
+            raw_edges,
+            from_ref=visual_ref,
+            to_ref=document_ref,
+            edge_type="derived_from",
+            confidence=artifact.get("confidence"),
+            evidence="Visual artifact is derived from the source document.",
+        )
+        provenance = artifact.get("provenance") if isinstance(artifact.get("provenance"), dict) else {}
+        page_ref = _page_ref(document_id, provenance.get("page_number"))
+        if page_ref is None:
+            continue
+        _append_auto_edge(
+            raw_edges,
+            from_ref=document_ref,
+            to_ref=page_ref,
+            edge_type="contains",
+            confidence=artifact.get("confidence"),
+            evidence=f"Document contains page {provenance['page_number']} for visual evidence.",
+        )
+        _append_auto_edge(
+            raw_edges,
+            from_ref=page_ref,
+            to_ref=visual_ref,
+            edge_type="contains",
+            confidence=artifact.get("confidence"),
+            evidence=f"Page {provenance['page_number']} contains visual artifact evidence.",
+        )
+
+    return _dedupe_graph_edges(
+        [
+            normalize_graph_edge_proposal(edge, default_source=AUTO_GRAPH_SOURCE)
+            for edge in raw_edges
+        ]
+    )
+
+
+def _append_auto_edge(
+    edges: list[dict[str, Any]],
+    *,
+    from_ref: dict[str, Any],
+    to_ref: dict[str, Any],
+    edge_type: str,
+    confidence: Any,
+    evidence: str,
+) -> None:
+    edges.append(
+        {
+            "from_ref": from_ref,
+            "to_ref": to_ref,
+            "edge_type": edge_type,
+            "confidence": _normalize_confidence(confidence) if confidence is not None else 0.6,
+            "evidence": evidence,
+            "source": AUTO_GRAPH_SOURCE,
+        }
+    )
+
+
+def _page_ref(document_id: str, page_number: Any) -> dict[str, str] | None:
+    normalized_page = _optional_ref_page(page_number)
+    if normalized_page is None:
+        return None
+    return {"kind": "page", "key": f"{document_id}:page:{normalized_page:05d}"}
+
+
+def _chunk_graph_ref(value: Any, document_id: str) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    key = _optional_ref_text(value.get("key"))
+    if key:
+        return {"kind": "chunk", "key": key}
+    if value.get("chunk_id") is None:
+        return None
+    chunk_document_id = _optional_ref_text(value.get("document_id")) or document_id
+    return {"kind": "chunk", "key": f"{chunk_document_id}:chunk:{value['chunk_id']}"}
+
+
+def _dedupe_graph_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for edge in edges:
+        signature = _stable_repr(
+            {
+                "from_ref": edge.get("from_ref"),
+                "to_ref": edge.get("to_ref"),
+                "edge_type": edge.get("edge_type"),
+                "source": edge.get("source"),
+            }
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(edge)
+    return deduped
 
 
 def _understanding_low_confidence_warnings(

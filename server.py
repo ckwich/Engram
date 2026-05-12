@@ -822,10 +822,10 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_extraction_result": "Normalize external parser output into no-write preview arguments and provenance.",
             "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
             "prepare_document_draft": "Prepare a no-write document draft with proposed memories and graph edges.",
-            "prepare_document_understanding_packet": "Normalize agent-supplied document understanding into reviewable summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and graph edge proposals.",
+            "prepare_document_understanding_packet": "Normalize agent-supplied document understanding into reviewable summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated coverage graph edge proposals.",
             "prepare_document_promotion_transaction": "Prepare a no-write operation plan for reviewed document draft promotion.",
-            "prepare_visual_extraction_request": "Prepare a no-write OCR/vision work request for image-bearing documents.",
-            "preview_visual_extraction": "Preview caller-supplied OCR or vision observations as visual evidence without writing memory.",
+            "prepare_visual_extraction_request": "Prepare a no-write OCR/vision work request for image-bearing documents; visual interpretation and per-image-ref coverage are required before draft promotion.",
+            "preview_visual_extraction": "Preview caller-supplied OCR or vision observations as visual evidence without writing memory; pass visual_request to enforce requested image-ref coverage.",
             "retrieval_eval": "Run deterministic retrieval quality checks and report pass/fail scenarios.",
             "list_workflow_templates": "List agent workflow recipes for common Engram usage patterns.",
             "list_memories": "Paginated structured directory metadata; no content.",
@@ -1840,7 +1840,8 @@ async def prepare_visual_extraction_request(
 
     This does not run an OCR or vision provider. It gives agents a stable request
     packet for external/local frameworks, whose observations should return through
-    preview_visual_extraction before any memory promotion.
+    preview_visual_extraction before any memory promotion. The request marks visual
+    interpretation and per-image-ref coverage as required for image-bearing sources.
     """
     started_at = time.perf_counter()
     input_payload = {
@@ -1880,13 +1881,16 @@ async def preview_visual_extraction(
     observations: list[dict[str, Any]],
     extractor_id: str = "engram-visual-preview",
     extractor_kind: str = "agent_native",
+    visual_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Preview caller-supplied OCR or vision observations as reviewable visual evidence.
 
     This is a no-write helper. Engram records provenance, confidence, and whether an
     external OCR/vision framework was used; it does not trust image-derived claims as
-    active memory until a later explicit promotion path reviews them.
+    active memory until a later explicit promotion path reviews them. When passed the
+    originating visual_request, every requested image_ref must have at least one
+    returned observation before a draft can claim visual coverage.
     """
     started_at = time.perf_counter()
     input_payload = {
@@ -1894,6 +1898,7 @@ async def preview_visual_extraction(
         "observations": observations,
         "extractor_id": extractor_id,
         "extractor_kind": extractor_kind,
+        "visual_request": visual_request,
     }
     try:
         payload = {
@@ -1902,6 +1907,7 @@ async def preview_visual_extraction(
                 observations=observations,
                 extractor_id=extractor_id,
                 extractor_kind=extractor_kind,
+                visual_request=visual_request,
             ),
             "error": None,
         }

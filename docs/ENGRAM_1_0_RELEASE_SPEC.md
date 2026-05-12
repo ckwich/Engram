@@ -177,10 +177,10 @@ Status: implemented during the 2026-05-12 document disassembly slices.
 Required outcomes:
 
 - Keep `server.py --agent-eval` as the deterministic reliability gate.
-- Add a no-write local PDF disassembly path that inventories pages, text coverage, image-bearing pages, extraction receipts, quality seeds, artifact manifests, visual candidates, and visual/OCR work requests.
+- Add a no-write local PDF disassembly path that inventories pages, text coverage, image-bearing pages, extraction receipts, quality seeds, artifact manifests, visual candidates, and mandatory visual/OCR work requests.
 - Add document quality reports that identify no-text pages, image-heavy pages, failed pages, and visual-review needs.
-- Add understanding packets that normalize connected-agent synthesis into summaries, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and graph proposals.
-- Add golden reliability scenarios for source intake, workflow packets, document disassembly, visual evidence requests, and the Book Dismantling Gate.
+- Add understanding packets that normalize connected-agent synthesis into summaries, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated graph coverage proposals.
+- Add golden reliability scenarios for source intake, workflow packets, document disassembly, mandatory visual evidence coverage, graph coverage proposals, and the Book Dismantling Gate.
 - Keep context-pack budget receipts and citations visible in eval output.
 - Treat usage telemetry as Engram-attributed estimates, not provider billing truth.
 - Document expected warnings from the embedding model load so they do not become false failures.

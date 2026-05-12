@@ -98,6 +98,33 @@ def test_add_edge_rejects_unknown_edge_type(isolated_graph_storage):
         raise AssertionError("unknown edge type should fail")
 
 
+def test_document_graph_edge_types_support_structure_and_visual_evidence(isolated_graph_storage):
+    gm = isolated_graph_storage.graph_manager
+    edge_types = ["contains", "defines", "explains", "cites", "illustrates", "example_of"]
+
+    for edge_type in edge_types:
+        edge = gm.add_edge(
+            from_ref={"kind": "document", "key": "doc_design_book"},
+            to_ref={"kind": "section", "key": f"section_{edge_type}"},
+            edge_type=edge_type,
+            confidence=0.82,
+            evidence=f"Document graph uses {edge_type} for book-scale provenance.",
+            source="document_intelligence",
+            created_by="test",
+        )
+
+        assert edge["edge_type"] == edge_type
+        assert edge["edge_id"].startswith("sha256:")
+
+    scan = gm.impact_scan(
+        root_ref={"kind": "document", "key": "doc_design_book"},
+        edge_types=edge_types,
+    )
+
+    assert scan["count"] == len(edge_types)
+    assert {edge["edge_type"] for edge in scan["edges"]} == set(edge_types)
+
+
 def test_add_edge_rejects_unknown_status(isolated_graph_storage):
     gm = isolated_graph_storage.graph_manager
 

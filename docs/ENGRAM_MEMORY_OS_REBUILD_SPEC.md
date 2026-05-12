@@ -607,14 +607,17 @@ Engram should allow provider-neutral local or external OCR/vision adapters, but
 the storage contract must not depend on one model vendor.
 
 Implementation status, 2026-05-12: visual extraction requests now always mark
-image recognition as required, including OCR-only and agent-native vision
-flows. Each request includes a `visual_evidence_contract` and
-`framework_strategy` so agents know whether native vision is enough, when an
-external OCR/vision framework is required, and that observations must return
-through `preview_visual_extraction` as reviewable visual artifacts. Visual
-artifact records now preserve source artifact id, page number, coordinates and
-bounding boxes when available, confidence, and extractor id for figure, table,
-caption, OCR block, page crop, and diagram evidence.
+image recognition and per-image-ref coverage as required, including OCR-only
+and agent-native vision flows. Each request includes a
+`visual_evidence_contract` and `framework_strategy` so agents know whether
+native vision is enough, when an external OCR/vision framework is required,
+and that observations must return through `preview_visual_extraction` as
+reviewable visual artifacts. When the originating visual request is passed
+back to `preview_visual_extraction`, every requested image ref must have a
+matching reviewed observation before the preview can claim complete coverage.
+Visual artifact records now preserve source artifact id, page number,
+coordinates and bounding boxes when available, confidence, and extractor id
+for figure, table, caption, OCR block, page crop, and diagram evidence.
 
 Document analysis should identify:
 
@@ -637,8 +640,11 @@ Implementation status, 2026-05-12: `prepare_document_understanding_packet`
 normalizes connected-agent synthesis into no-write summary slots, claim
 candidates, concept candidates, entity candidates, high-value sections,
 low-confidence warnings, draft memory proposals, and graph edge proposals.
-Engram validates graph proposal refs and edge types but does not perform the
-analysis itself and does not promote the packet into active memory.
+Engram validates supplied graph proposal refs and edge types, then adds
+reviewable automatic coverage proposals for document, page, section, chunk,
+concept, claim, and visual-artifact relationships. Engram still does not
+perform the analysis itself and does not promote the packet into active
+memory or graph storage.
 
 ### Book Dismantling Gate
 
@@ -1049,8 +1055,8 @@ Acceptance gates:
 ### Phase 4: Document Intelligence
 
 - Add source connectors and extractors.
-- Add optional OCR/vision extraction adapters for image-bearing documents when
-  native agent visual analysis is not enough.
+- Add provider-neutral OCR/vision extraction adapters for image-bearing
+  documents when native agent visual analysis is not enough.
 - Add normalized document store.
 - Add visual artifact records for scans, figures, diagrams, screenshots, tables,
   captions, coordinates, and confidence scores.

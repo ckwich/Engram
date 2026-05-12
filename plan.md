@@ -167,11 +167,11 @@ Agents should always start at tier 1 and escalate only when needed.
 
 Engram 1.0 is the public, generic, local-first memory substrate release. The separate collaboration product should build on Engram through stable adapters, not inside this repository.
 
-Status update, 2026-05-12: Engram 1.0 is the local agent-facing Memory OS core release. The release preserves the current JSON-first / Chroma-second runtime while adding migration dry runs, backend readiness reports, codebase mapping modernization, opt-in daemon routing, document disassembly, visual/OCR request contracts, document understanding packets, and reliability gates. Hosted operation, tenant auth, live backend switching, and the collaboration product remain post-1.0 work.
+Status update, 2026-05-12: Engram 1.0 is the local agent-facing Memory OS core release. The release preserves the current JSON-first / Chroma-second runtime while adding migration dry runs, backend readiness reports, codebase mapping modernization, opt-in daemon routing, document disassembly, mandatory visual/OCR coverage contracts, document understanding packets with auto graph coverage proposals, and reliability gates. Hosted operation, tenant auth, live backend switching, and the collaboration product remain post-1.0 work.
 
 Tracked planning docs:
 
-- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence including optional OCR/vision extraction, and optional hosted-edition direction.
+- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence including mandatory OCR/vision coverage for visual artifacts, and optional hosted-edition direction.
 - `docs/superpowers/specs/2026-05-12-engram-1-0-memory-os-document-disassembly-design.md` — binding 1.0 Memory OS and book-scale document disassembly design, including the Book Dismantling Gate, steelman review, and post-steelman addendums.
 - `docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md` — current executable implementation plan for getting Engram to 1.0 under the Memory OS/document-disassembly direction.
 - `docs/ENGRAM_1_0_RELEASE_SPEC.md` — binding Engram 1.0 scope, invariants, release tracks, and validation gate.
@@ -188,9 +188,9 @@ Tracked planning docs:
 - [x] Track 2: prove storage rebuild, import/export, backup/repair, JSON-first/Chroma-second ordering, migration round trip, and graph audit readiness.
 - [x] Track 3: harden source intake, lifecycle metadata, stale exclusion, explicit draft promotion, and daemon-routed source draft lifecycle.
 - [x] Track 4: modernize codebase mapping for the Memory OS runtime, including current daemon/document/migration/backend domains and data-root-aware mapping jobs.
-- [x] Track 5: implement book-scale document disassembly for the local core: PDF page/text/image inventory, quality reports, visual/OCR requests, artifact manifests, chunk provenance, no-write understanding packets, graph proposals, and review-first promotion plans.
+- [x] Track 5: implement book-scale document disassembly for the local core: PDF page/text/image inventory, quality reports, mandatory visual/OCR coverage requests, artifact manifests, chunk provenance, no-write understanding packets, auto document graph coverage proposals, and review-first promotion plans.
 - [x] Track 6: add opt-in daemon ownership for stable memory operations, source draft lifecycle operations, metadata updates/repair/delete, and no-write document disassembly preparation. Direct in-process mode remains supported; mapping jobs, import/export, rebuild, and live backend switching stay direct or operator-gated until a future durable job store.
-- [x] Track 8: expand release reliability coverage for source intake, workflow packets, retrieval receipts, document disassembly, visual evidence requests, and the Book Dismantling Gate.
+- [x] Track 8: expand release reliability coverage for source intake, workflow packets, retrieval receipts, document disassembly, mandatory visual evidence coverage, graph coverage proposals, and the Book Dismantling Gate.
 - [x] Track 10: publish release docs, checklist, migration notes, AGENTS.md updates, public README 1.0 framing, and the Book Dismantling Gate results.
 
 Post-1.0 tracks:

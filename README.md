@@ -67,8 +67,8 @@ The result is a practical intersession memory layer for coding agents, research 
 - **Local PDF disassembly** that inventories pages, text coverage, image-bearing pages, and extraction receipts without writing active memories.
 - **Quality reports** that flag no-text pages, image-heavy pages, failed pages, and visual-review needs.
 - **Portable artifact manifests** with page-level resume states and content-addressed source references.
-- **OCR/vision work requests** for pages or regions that need external analysis, including expected provenance contracts.
-- **Understanding packets** that normalize agent-supplied summaries, claims, concepts, entities, high-value sections, draft memory proposals, and graph proposals.
+- **Mandatory OCR/vision work requests** for image-bearing pages or regions, including per-artifact coverage requirements and expected provenance contracts.
+- **Understanding packets** that normalize agent-supplied summaries, claims, concepts, entities, high-value sections, draft memory proposals, and supplied plus auto-generated graph coverage proposals.
 - **Review-first promotion plans** so document evidence becomes durable memory or graph edges only after explicit review.
 
 ### Web Dashboard
@@ -184,16 +184,16 @@ and protocol `schema_version: "2026-04-27"`.
 | `prepare_document_extraction_request` | Prepare a no-write external parser request for PDF/DOCX/image-bearing sources. |
 | `prepare_document_extraction_result` | Normalize external parser output into no-write preview arguments. |
 | `preview_document_extraction` | Preview document evidence and chunks without writing. |
-| `prepare_document_understanding_packet` | Normalize agent-supplied summaries, claims, concepts, entities, sections, warnings, and graph proposals without writing. |
+| `prepare_document_understanding_packet` | Normalize agent-supplied summaries, claims, concepts, entities, sections, warnings, and supplied plus auto-generated graph coverage proposals without writing. |
 | `prepare_document_draft` | Prepare no-write document memory/graph proposals. |
 | `prepare_document_promotion_transaction` | Prepare no-write document promotion operations. |
-| `prepare_visual_extraction_request` | Prepare a no-write OCR/vision work request. |
-| `preview_visual_extraction` | Preview OCR/vision observations without writing. |
+| `prepare_visual_extraction_request` | Prepare a no-write OCR/vision work request with mandatory per-image-ref coverage. |
+| `preview_visual_extraction` | Preview OCR/vision observations without writing; pass the originating visual request to enforce coverage. |
 | `list_ingestion_pipelines` | List available source-intake pipelines. |
 | `migration_dry_run` | Validate legacy JSON memories against the Memory OS ledger schema without writing. |
 | `memory_os_round_trip_check` | Run Memory OS import/export/restore parity checks in a migration work directory. |
 | `retrieval_backend_status` | Report legacy Chroma, optional LanceDB, migrated-store, and rebuild-probe readiness without switching live retrieval. |
-| `add_graph_edge` | Store a typed relationship between refs. |
+| `add_graph_edge` | Store a typed relationship between refs, including document structure and visual evidence refs. |
 | `list_graph_edges` | List graph edges around refs. |
 | `impact_scan` | Traverse graph relationships for impact analysis. |
 | `conflict_scan` | List contradiction, invalidation, and supersession graph edges without loading memory bodies. |
@@ -513,7 +513,7 @@ The review flow is:
 prepare_source_memory -> inspect draft -> store_prepared_memory
 ```
 
-Use `preview_memory_chunks`, `preview_source_connector`, `list_document_extractors`, `preview_document_source_connector`, `prepare_document_disassembly`, `prepare_document_extraction_request`, `prepare_document_extraction_result`, `preview_document_extraction`, `prepare_document_understanding_packet`, `prepare_document_draft`, `prepare_document_promotion_transaction`, `prepare_visual_extraction_request`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any write happens. Document disassembly, extraction requests/results, understanding packets, draft proposals, promotion operation plans, and image/OCR requests or observations are evidence records, not trusted active memory, until a later explicit review path promotes them. Visual extraction requests include a `visual_evidence_contract` and `framework_strategy` so an agent can use native vision when available, or hand work to an external OCR/vision framework and return observations through `preview_visual_extraction`. Visual/table evidence records preserve page number, source artifact id, coordinates/bounding boxes when available, confidence, and extractor id. Understanding packets keep synthesis provider-neutral: the connected agent supplies analysis, and Engram normalizes it into summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and graph proposals.
+Use `preview_memory_chunks`, `preview_source_connector`, `list_document_extractors`, `preview_document_source_connector`, `prepare_document_disassembly`, `prepare_document_extraction_request`, `prepare_document_extraction_result`, `preview_document_extraction`, `prepare_document_understanding_packet`, `prepare_document_draft`, `prepare_document_promotion_transaction`, `prepare_visual_extraction_request`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any write happens. Document disassembly, extraction requests/results, understanding packets, draft proposals, promotion operation plans, and image/OCR requests or observations are evidence records, not trusted active memory, until a later explicit review path promotes them. Visual extraction requests include a `visual_evidence_contract`, per-image-ref coverage requirements, and `framework_strategy` so an agent can use native vision when available, or hand work to an external OCR/vision framework and return observations through `preview_visual_extraction`. Pass the originating visual request back into `preview_visual_extraction` when coverage matters; Engram then rejects incomplete visual observations instead of letting a draft claim full coverage. Visual/table evidence records preserve page number, source artifact id, coordinates/bounding boxes when available, confidence, and extractor id. Understanding packets keep synthesis provider-neutral: the connected agent supplies analysis, and Engram normalizes it into summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated graph proposals.
 
 Source intake never auto-promotes active memories. Drafts are review records with
 `status: "draft"`, `active_memory_write_performed: false`, and promotion guidance

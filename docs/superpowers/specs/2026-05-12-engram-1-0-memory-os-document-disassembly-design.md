@@ -213,6 +213,9 @@ The following fixes are binding:
 - Add a "lite extraction" mode for text/page inventory only.
 - Add a "full dismantle" mode for page images, visual artifacts, OCR requests,
   tables, figures, graph proposals, and quality audit.
+- Treat visual interpretation as mandatory for every requested image artifact;
+  a visual extraction preview can only claim complete coverage when every
+  requested image ref has a reviewed observation.
 - Add a per-import budget that limits rendered page DPI, max pages processed,
   max image artifacts, and OCR queue size while still recording skipped work.
 - Add import manifests so interrupted jobs resume from the last completed page.
@@ -223,6 +226,10 @@ The following fixes are binding:
   facts until reviewed.
 - Require every promoted claim from a visual artifact to retain the artifact id
   and page coordinate provenance.
+- Generate reviewable graph coverage proposals for document-to-page,
+  document-to-section, section-to-chunk, document-to-concept,
+  document-to-claim, page-to-visual-artifact, and visual-artifact-to-claim
+  relationships without auto-promoting them.
 
 ## Non-Goals For Engram 1.0
 
@@ -246,6 +253,8 @@ Engram 1.0 is ready when a fresh agent can:
 - map the Engram codebase with current Memory OS domains
 - dismantle a book-style PDF into evidence records, chunks, quality reports,
   and draft memory/graph proposals
+- prove that requested visual artifacts were interpreted before visual
+  coverage is treated as complete
 - retrieve cited chunks with source/page/artifact provenance
 - inspect graph evidence without surprise memory body loads
 - run release gates from README/AGENTS without hidden setup

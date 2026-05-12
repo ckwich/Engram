@@ -10,6 +10,10 @@ from core.graph_store import EDGES_PATH, GRAPH_DIR, GRAPH_SCHEMA_VERSION, GraphS
 GRAPH_EDGE_TYPES = {
     "related_to",
     "derived_from",
+    "contains",
+    "defines",
+    "explains",
+    "cites",
     "supersedes",
     "contradicts",
     "supports",
@@ -20,6 +24,8 @@ GRAPH_EDGE_TYPES = {
     "validates",
     "invalidates",
     "exemplifies",
+    "example_of",
+    "illustrates",
     "warns_against",
 }
 CONFLICT_EDGE_TYPES = {"contradicts", "invalidates", "supersedes"}

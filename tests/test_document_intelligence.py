@@ -330,6 +330,128 @@ def test_prepare_visual_extraction_request_allows_agent_native_vision_with_same_
     assert request["visual_evidence_contract"]["trusted_memory"] is False
 
 
+def test_preview_visual_extraction_requires_coverage_for_every_requested_image_ref():
+    document = prepare_document_record(
+        title="Design Book",
+        source_uri="file:///docs/design-book.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "a" * 64,
+        media_type="application/pdf",
+    )
+    request = prepare_visual_extraction_request(
+        document_record=document,
+        image_refs=[
+            {
+                "source_uri": "file:///docs/design-book.pdf",
+                "source_artifact_id": "document_artifacts/page_images/aa/page-002.png",
+                "page_number": 2,
+            },
+            {
+                "source_uri": "file:///docs/design-book.pdf",
+                "source_artifact_id": "document_artifacts/page_images/bb/page-003.png",
+                "page_number": 3,
+            },
+        ],
+        requested_capabilities=["figure_description", "caption_alt_text"],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    with pytest.raises(ValueError, match="visual_request image_refs require observations"):
+        preview_visual_extraction(
+            document_record=document,
+            visual_request=request,
+            observations=[
+                {
+                    "artifact_type": "figure",
+                    "source_ref": request["image_refs"][0],
+                    "page_number": 2,
+                    "description": "A reviewed figure on page 2.",
+                    "confidence": 0.86,
+                }
+            ],
+            extractor_id="agent-native-vision",
+            extractor_kind="agent_native",
+        )
+
+    preview = preview_visual_extraction(
+        document_record=document,
+        visual_request=request,
+        observations=[
+            {
+                "artifact_type": "figure",
+                "source_ref": request["image_refs"][0],
+                "page_number": 2,
+                "description": "A reviewed figure on page 2.",
+                "confidence": 0.86,
+            },
+            {
+                "artifact_type": "caption",
+                "source_ref": request["image_refs"][1],
+                "page_number": 3,
+                "text": "A reviewed caption on page 3.",
+                "confidence": 0.9,
+            },
+        ],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    assert preview["visual_coverage"] == {
+        "visual_request_id": request["request_id"],
+        "required_image_ref_count": 2,
+        "covered_image_ref_count": 2,
+        "missing_image_refs": [],
+        "coverage_complete": True,
+    }
+    assert preview["receipt"]["visual_request_coverage_complete"] is True
+
+
+def test_visual_coverage_requires_artifact_specific_matches_on_same_page():
+    document = prepare_document_record(
+        title="Design Book",
+        source_uri="file:///docs/design-book.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "a" * 64,
+        media_type="application/pdf",
+    )
+    request = prepare_visual_extraction_request(
+        document_record=document,
+        image_refs=[
+            {
+                "source_uri": "file:///docs/design-book.pdf",
+                "source_artifact_id": "document_artifacts/page_images/aa/page-012-figure-1.png",
+                "page_number": 12,
+            },
+            {
+                "source_uri": "file:///docs/design-book.pdf",
+                "source_artifact_id": "document_artifacts/page_images/bb/page-012-figure-2.png",
+                "page_number": 12,
+            },
+        ],
+        requested_capabilities=["figure_description"],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    with pytest.raises(ValueError, match="visual_request image_refs require observations"):
+        preview_visual_extraction(
+            document_record=document,
+            visual_request=request,
+            observations=[
+                {
+                    "artifact_type": "figure",
+                    "source_ref": request["image_refs"][0],
+                    "page_number": 12,
+                    "description": "The first figure on page 12.",
+                    "confidence": 0.83,
+                }
+            ],
+            extractor_id="agent-native-vision",
+            extractor_kind="agent_native",
+        )
+
+
 def test_preview_visual_extraction_accepts_coordinates_alias_and_source_artifact_ids():
     document = prepare_document_record(
         title="Design Book",
@@ -768,10 +890,91 @@ def test_prepare_document_understanding_packet_normalizes_agent_synthesis():
         "entity_candidate_count": 1,
         "high_value_section_count": 1,
         "low_confidence_warning_count": 2,
-        "candidate_graph_edge_count": 1,
+        "candidate_graph_edge_count": 12,
+        "supplied_graph_edge_count": 1,
+        "auto_graph_edge_count": 11,
         "chunk_ref_count": 1,
         "visual_artifact_count": 1,
     }
+
+
+def test_prepare_document_understanding_packet_auto_proposes_coverage_graph_edges():
+    preview = preview_document_extraction(
+        title="Design Book Notes",
+        source_uri="file:///docs/design-book.md",
+        source_type="markdown",
+        content="# Attention\n\nPeople notice motion before static details.",
+        media_type="text/markdown",
+        metadata={"project": "Engram", "domain": "document-intelligence"},
+    )
+    chunk_ref = preview["chunks"][0]["provenance"]
+    artifact = prepare_visual_artifact_record(
+        document_id=preview["document_record"]["document_id"],
+        artifact_type="figure",
+        source_ref={
+            "source_uri": "file:///docs/design-book.md",
+            "source_artifact_id": "document_artifacts/page_images/aa/page-002.png",
+        },
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+        description="Figure showing attention priority.",
+        page_number=2,
+        confidence=0.84,
+    )
+
+    packet = prepare_document_understanding_packet(
+        document_record=preview["document_record"],
+        analysis={
+            "claims": [
+                {
+                    "text": "People notice motion before static details.",
+                    "confidence": 0.82,
+                    "evidence_refs": [chunk_ref, artifact["artifact_id"]],
+                }
+            ],
+            "concepts": [
+                {
+                    "name": "attention priority",
+                    "description": "The visual or semantic precedence of one element over another.",
+                    "confidence": 0.77,
+                }
+            ],
+            "high_value_sections": [
+                {
+                    "title": "Attention",
+                    "reason": "Core design principle with direct agent reuse.",
+                    "page_number": 2,
+                    "chunk_ref": chunk_ref,
+                    "confidence": 0.7,
+                }
+            ],
+        },
+        chunk_refs=[chunk_ref],
+        visual_artifacts=[artifact],
+        candidate_graph_edges=[],
+        created_by="agent",
+    )
+
+    edges = packet["candidate_graph_edges"]
+    edge_index = {
+        (
+            edge["from_ref"]["kind"],
+            edge["to_ref"]["kind"],
+            edge["edge_type"],
+        )
+        for edge in edges
+    }
+
+    assert ("document", "section", "contains") in edge_index
+    assert ("section", "chunk", "contains") in edge_index
+    assert ("document", "concept", "defines") in edge_index
+    assert ("document", "claim", "supports") in edge_index
+    assert ("visual_artifact", "claim", "illustrates") in edge_index
+    assert ("document", "page", "contains") in edge_index
+    assert ("page", "visual_artifact", "contains") in edge_index
+    assert all(edge["source"] == "document_intelligence.auto_graph" for edge in edges)
+    assert packet["receipt"]["auto_graph_edge_count"] == len(edges)
+    assert packet["document_draft"]["receipt"]["proposed_edge_count"] == len(edges)
 
 
 def test_prepare_document_understanding_packet_validates_graph_proposals():

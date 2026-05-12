@@ -77,7 +77,7 @@ where typed, and focused tests.
 | `prepare_project_capsule` | beta | `dict{project, capsule, write_performed, error}` | No-write project capsule draft from context refs and memory quality signals; does not store capsule memory. |
 | `audit_memory_metadata` | beta | `dict{count, total, scanned_count, issue_count, repairable_count, limit, offset, has_more, memories, error}` | Read-only metadata hygiene audit. |
 | `repair_memory_metadata` | beta | `dict{requested_count, repaired_count, dry_run, repairs, error}` | Dry-run by default; writes must preserve JSON-first ordering. |
-| `add_graph_edge` | beta | `dict{edge, error}` | Stores compact graph edge records. |
+| `add_graph_edge` | beta | `dict{edge, error}` | Stores compact graph edge records, including document structure and visual evidence refs. |
 | `list_graph_edges` | beta | `dict{count, edges, error}` | Lists graph records without loading memory bodies. |
 | `impact_scan` | beta | `dict{root_ref, count, edges, error}` | Graph traversal returns refs/evidence, not neighbor bodies. |
 | `conflict_scan` | beta | `dict{schema_version, ref, status, edge_types, count, conflicts, error}` | Read-only contradiction, invalidation, and supersession scan; returns refs/evidence only. |
@@ -92,11 +92,11 @@ where typed, and focused tests.
 | `prepare_document_extraction_request` | beta | `dict{request, error}` | No-write external parser request for PDF/DOCX/image-bearing sources; does not run a provider. |
 | `prepare_document_extraction_result` | beta | `dict{result, error}` | No-write external parser result normalization; returns preview arguments and provenance. |
 | `preview_document_extraction` | beta | `dict{preview, error}` | No-write document evidence/chunk preview. |
-| `prepare_document_understanding_packet` | beta | `dict{packet, error}` | No-write agent-supplied understanding normalization; returns summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and graph proposals. |
+| `prepare_document_understanding_packet` | beta | `dict{packet, error}` | No-write agent-supplied understanding normalization; returns summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated graph coverage proposals. |
 | `prepare_document_draft` | beta | `dict{draft, error}` | No-write document memory/graph proposal draft; does not promote. |
 | `prepare_document_promotion_transaction` | beta | `dict{transaction, error}` | No-write operation plan for reviewed document draft promotion; does not execute writes. |
-| `prepare_visual_extraction_request` | beta | `dict{request, error}` | No-write OCR/vision work request with `visual_evidence_contract` and `framework_strategy`; does not run a provider. |
-| `preview_visual_extraction` | beta | `dict{preview, error}` | No-write caller-supplied OCR/vision observation preview; preserves page/source artifact/coordinate/confidence/extractor provenance and does not run a provider. |
+| `prepare_visual_extraction_request` | beta | `dict{request, error}` | No-write OCR/vision work request with mandatory visual interpretation, per-image-ref coverage, `visual_evidence_contract`, and `framework_strategy`; does not run a provider. |
+| `preview_visual_extraction` | beta | `dict{preview, error}` | No-write caller-supplied OCR/vision observation preview; pass the originating visual request to enforce per-image-ref coverage while preserving page/source artifact/coordinate/confidence/extractor provenance. |
 | `prepare_source_memory` | beta | `dict{draft, error}` | Draft only; malformed input returns structured errors. |
 | `list_source_drafts` | beta | `dict{count, drafts, error}` | Draft inventory. |
 | `discard_source_draft` | beta | `dict{discarded, draft_id, error}` | Rejects a draft while preserving an audit trail. |
@@ -140,7 +140,10 @@ where typed, and focused tests.
   memory JSON, ChromaDB, Chroma lock files, and source intake drafts for an
   entire process before startup.
 - Chunk IDs remain stable `{md5(key)}_{chunk_index}` references.
-- Graph edges preserve the required edge record fields named in `AGENTS.md`.
+- Graph edges preserve the required edge record fields named in `AGENTS.md`;
+  the accepted edge vocabulary includes document structure and visual evidence
+  relationships such as `contains`, `defines`, `explains`, `cites`,
+  `example_of`, and `illustrates`.
 - Source connector and chunk preview tools remain no-write.
 - Source intake remains draft-first and explicit-promotion only.
 - Operation records are receipts, not schedulers or autonomous triggers.
