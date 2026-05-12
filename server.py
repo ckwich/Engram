@@ -97,6 +97,13 @@ def _daemon_url() -> str | None:
     return configured.rstrip("/") or None
 
 
+def _normalize_daemon_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().rstrip("/")
+    return normalized or None
+
+
 def _daemon_enabled() -> bool:
     return _daemon_url() is not None
 
@@ -4434,6 +4441,11 @@ if __name__ == "__main__":
         help="Print MCP client config JSON and exit",
     )
     parser.add_argument(
+        "--daemon-url",
+        dest="daemon_url",
+        help="Include ENGRAM_DAEMON_URL in generated config or use it for this server process",
+    )
+    parser.add_argument(
         "--export",
         action="store_true",
         help="Export all memories to engram_export_YYYY-MM-DD.json and exit",
@@ -4466,6 +4478,11 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    normalized_daemon_url = _normalize_daemon_url(args.daemon_url)
+    if args.daemon_url is not None and normalized_daemon_url is None:
+        parser.error("--daemon-url cannot be blank")
+    if normalized_daemon_url is not None:
+        os.environ["ENGRAM_DAEMON_URL"] = normalized_daemon_url
 
     if args.rebuild_index:
         embedder._load()
@@ -4775,12 +4792,15 @@ if __name__ == "__main__":
         sys.exit(0 if passed else 1)
 
     if args.generate_config:
+        server_config: dict[str, Any] = {
+            "command": sys.executable,
+            "args": [os.path.abspath(__file__)],
+        }
+        if normalized_daemon_url is not None:
+            server_config["env"] = {"ENGRAM_DAEMON_URL": normalized_daemon_url}
         config = {
             "mcpServers": {
-                "engram": {
-                    "command": sys.executable,
-                    "args": [os.path.abspath(__file__)],
-                }
+                "engram": server_config,
             }
         }
         sys.stdout.write(json.dumps(config, indent=2) + "\n")

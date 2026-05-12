@@ -140,6 +140,17 @@ where typed, and focused tests.
 - Source intake remains draft-first and explicit-promotion only.
 - Operation records are receipts, not schedulers or autonomous triggers.
 
+## Daemon Client Configuration
+
+`server.py --generate-config --daemon-url <url>` emits MCP client config with
+`ENGRAM_DAEMON_URL` in the server environment. `--daemon-url` also enables
+daemon-client mode for that `server.py` process when used outside
+`--generate-config`. The URL is normalized by trimming trailing slashes.
+
+Daemon mode remains opt-in. It routes stable memory operations through the local
+`engramd` daemon, but it is not a hosted auth model, tenant boundary, or
+retrieval/graph backend switch.
+
 ## Non-Public Internals
 
 The following are implementation details, not public contracts:

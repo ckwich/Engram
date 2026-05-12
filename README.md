@@ -350,6 +350,15 @@ Health check:
 python engramd.py --health --host 127.0.0.1 --port 8765
 ```
 
+Generate MCP client config for daemon-client mode:
+
+```bash
+python server.py --generate-config --daemon-url http://127.0.0.1:8765
+```
+
+This emits `ENGRAM_DAEMON_URL` in the generated MCP server environment. The
+daemon URL is normalized by trimming trailing slashes.
+
 Daemon mode currently routes stable memory search, chunk/full reads, writes, and
 deletes through `engramd`. Direct in-process MCP mode remains the default unless
 `ENGRAM_DAEMON_URL` is set. This is not a LanceDB/Kuzu backend switch and does
@@ -510,6 +519,7 @@ python server.py --agent-eval
 
 # Generate MCP client config
 python server.py --generate-config
+python server.py --generate-config --daemon-url http://127.0.0.1:8765
 
 # Memory OS migration utilities
 python -m core.memory_os_migration import-legacy --legacy-dir data/memories --store-root .engram-migration/store

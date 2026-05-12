@@ -25,6 +25,29 @@ def test_generate_config_uses_active_python_interpreter():
     assert Path(engram["args"][0]).resolve() == (REPO_ROOT / "server.py").resolve()
 
 
+def test_generate_config_can_emit_daemon_client_environment():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "server.py"),
+            "--generate-config",
+            "--daemon-url",
+            "http://127.0.0.1:8765/",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+
+    config = json.loads(result.stdout)
+    engram = config["mcpServers"]["engram"]
+
+    assert engram["command"] == sys.executable
+    assert Path(engram["args"][0]).resolve() == (REPO_ROOT / "server.py").resolve()
+    assert engram["env"] == {"ENGRAM_DAEMON_URL": "http://127.0.0.1:8765"}
+
+
 def test_sse_help_documents_loopback_default():
     result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "server.py"), "--help"],
@@ -36,6 +59,19 @@ def test_sse_help_documents_loopback_default():
 
     assert "--host HOST" in result.stdout
     assert "SSE host (default: 127.0.0.1)" in result.stdout
+
+
+def test_help_documents_daemon_config_generation():
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "server.py"), "--help"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+
+    assert "--daemon-url DAEMON_URL" in result.stdout
+    assert "Include ENGRAM_DAEMON_URL" in result.stdout
 
 
 def test_help_documents_agent_reliability_eval():
