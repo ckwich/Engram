@@ -14,8 +14,10 @@ def test_inspector_tab_is_wired_in_static_assets():
     assert "loadInspectorTab" in js
     assert "/api/inspector/memory-quality" in js
     assert "/api/inspector/graph/audit" in js
+    assert "/api/inspector/source-drafts" in js
     assert "/api/inspector/operations/jobs" in js
     assert "/api/inspector/operations/events" in js
+    assert 'id="inspector-draft-list"' in html
 
 
 def test_memory_quality_inspector_api_returns_metadata_only_report(monkeypatch):
@@ -119,3 +121,34 @@ def test_operation_receipts_inspector_api_lists_jobs_and_events(monkeypatch):
     ]
     assert events.status_code == 200
     assert events.get_json()["events"] == [{"event_type": "source_draft_ready", "limit": 7}]
+
+
+def test_source_drafts_inspector_api_lists_review_queue(monkeypatch):
+    import webui
+
+    observed = {}
+
+    class FakeSourceIntakeManager:
+        def list_source_drafts(self, *, project=None, status=None, limit=50, offset=0):
+            observed.update({"project": project, "status": status, "limit": limit, "offset": offset})
+            return {
+                "count": 1,
+                "total": 1,
+                "limit": limit,
+                "offset": offset,
+                "has_more": False,
+                "drafts": [{"draft_id": "sha256:abc", "status": status, "pipeline": "handoff"}],
+                "error": None,
+            }
+
+    monkeypatch.setattr(webui, "source_intake_manager", FakeSourceIntakeManager())
+
+    response = webui.app.test_client().get(
+        "/api/inspector/source-drafts?project=C%3A%2FDev%2FEngram&status=draft&limit=5&offset=2"
+    )
+
+    assert response.status_code == 200
+    assert observed == {"project": "C:/Dev/Engram", "status": "draft", "limit": 5, "offset": 2}
+    assert response.get_json()["drafts"] == [
+        {"draft_id": "sha256:abc", "status": "draft", "pipeline": "handoff"}
+    ]

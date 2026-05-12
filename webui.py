@@ -29,6 +29,7 @@ from core.memory_manager import memory_manager, DuplicateMemoryError
 from core.operation_log import operation_log
 from core.retrieval_eval import run_retrieval_eval
 from core.source_connectors import preview_source_connector
+from core.source_intake import source_intake_manager
 from core.usage_meter import usage_meter
 
 DEFAULT_WEBUI_HOST = "127.0.0.1"
@@ -708,6 +709,25 @@ def api_inspector_graph_edges():
 def api_inspector_graph_audit():
     try:
         return jsonify(graph_manager.audit_graph())
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
+
+
+@app.route("/api/inspector/source-drafts")
+def api_inspector_source_drafts():
+    project = request.args.get("project") or None
+    status = request.args.get("status") or None
+    limit = _bounded_query_int("limit", 50, 1, 500)
+    offset = _bounded_query_int("offset", 0, 0, 100000)
+    try:
+        return jsonify(
+            source_intake_manager.list_source_drafts(
+                project=project,
+                status=status,
+                limit=limit,
+                offset=offset,
+            )
+        )
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 503
 

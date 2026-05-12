@@ -377,21 +377,24 @@
       '<div class="loading-row">Loading inspector data...</div>';
     document.getElementById('inspector-quality-list').innerHTML = '';
     document.getElementById('inspector-graph-list').innerHTML = '';
+    document.getElementById('inspector-draft-list').innerHTML = '';
     document.getElementById('inspector-job-list').innerHTML = '';
     document.getElementById('inspector-event-list').innerHTML = '';
     try {
-      const [qualityResponse, graphResponse, jobsResponse, eventsResponse] = await Promise.all([
+      const [qualityResponse, graphResponse, draftsResponse, jobsResponse, eventsResponse] = await Promise.all([
         fetch('/api/inspector/memory-quality?limit=5'),
         fetch('/api/inspector/graph/audit'),
+        fetch('/api/inspector/source-drafts?status=draft&limit=5'),
         fetch('/api/inspector/operations/jobs?limit=5'),
         fetch('/api/inspector/operations/events?limit=5'),
       ]);
-      if (!qualityResponse.ok || !graphResponse.ok || !jobsResponse.ok || !eventsResponse.ok) {
+      if (!qualityResponse.ok || !graphResponse.ok || !draftsResponse.ok || !jobsResponse.ok || !eventsResponse.ok) {
         throw new Error('Inspector API unavailable');
       }
       renderInspector({
         quality: await qualityResponse.json(),
         graph: await graphResponse.json(),
+        drafts: await draftsResponse.json(),
         jobs: await jobsResponse.json(),
         events: await eventsResponse.json(),
       });
@@ -404,13 +407,14 @@
   function renderInspector(data) {
     const quality = data.quality || {};
     const graph = data.graph || {};
+    const drafts = data.drafts || {};
     const jobs = data.jobs || {};
     const events = data.events || {};
     document.getElementById('inspector-summary-cards').innerHTML = `
       <div class="usage-card"><span>${safeInteger(quality.issue_count)}</span><label>quality issues</label></div>
       <div class="usage-card"><span>${safeInteger((quality.summary || {}).high_risk_count)}</span><label>high risk</label></div>
       <div class="usage-card"><span>${safeInteger(graph.issue_count)}</span><label>graph issues</label></div>
-      <div class="usage-card"><span>${safeInteger(jobs.count)}</span><label>recent jobs</label></div>
+      <div class="usage-card"><span>${safeInteger(drafts.total)}</span><label>drafts</label></div>
     `;
     document.getElementById('inspector-quality-list').innerHTML = (quality.memories || []).map(memory => `
       <div class="usage-call-row">
@@ -425,6 +429,13 @@
         <span>${esc(issue.edge_id || issue.edge_index || '')}</span>
       </div>
     `).join('') || '<div class="loading-row">Graph audit returned no issues.</div>';
+    document.getElementById('inspector-draft-list').innerHTML = (drafts.drafts || []).map(draft => `
+      <div class="usage-call-row">
+        <strong>${esc(draft.draft_id || 'draft')}</strong>
+        <span>${esc(draft.pipeline || draft.source_type || '')}</span>
+        <span>${esc(draft.status || '')}</span>
+      </div>
+    `).join('') || '<div class="loading-row">No draft source memories awaiting review.</div>';
     document.getElementById('inspector-job-list').innerHTML = (jobs.jobs || []).map(job => `
       <div class="usage-call-row">
         <strong>${esc(job.operation_type || 'operation')}</strong>
