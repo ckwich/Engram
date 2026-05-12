@@ -45,6 +45,7 @@ from core.document_intelligence import (
     preview_visual_extraction as build_visual_extraction_preview,
 )
 from core.embedder import embedder
+from core.engramd_client import EngramDaemonClient, EngramDaemonClientError
 from core.graph_backend_status import build_graph_backend_status
 from core.graph_manager import graph_manager
 from core.hybrid_retrieval import normalize_retrieval_mode
@@ -88,6 +89,28 @@ _USAGE_METERING_ENABLED: ContextVar[bool] = ContextVar(
     "engram_usage_metering_enabled",
     default=True,
 )
+
+
+def _daemon_url() -> str | None:
+    configured = os.environ.get("ENGRAM_DAEMON_URL", "").strip()
+    return configured.rstrip("/") or None
+
+
+def _daemon_enabled() -> bool:
+    return _daemon_url() is not None
+
+
+def _daemon_client() -> EngramDaemonClient:
+    url = _daemon_url()
+    if url is None:
+        raise EngramDaemonClientError("ENGRAM_DAEMON_URL is not configured")
+    return EngramDaemonClient(url)
+
+
+async def _call_daemon(method_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    client = _daemon_client()
+    method = getattr(client, method_name)
+    return await asyncio.to_thread(method, payload)
 
 
 def _clamp_search_limit(limit: int) -> int:
@@ -179,6 +202,37 @@ def _runtime_error_payload(message: str, **payload: Any) -> dict[str, Any]:
         "message": message,
     }
     return data
+
+
+def _format_store_success(key: str, result: dict[str, Any]) -> str:
+    return (
+        f"✅ Stored: '{result['title']}'\n"
+        f"   Key: {key}\n"
+        f"   Chunks: {result.get('chunk_count', '?')}\n"
+        f"   Chars: {result['chars']}"
+    )
+
+
+def _format_duplicate_warning(duplicate: dict[str, Any]) -> str:
+    threshold = _config.get("dedup_threshold", 0.92)
+    return (
+        f"⚠️  DUPLICATE DETECTED — similar memory already exists.\n"
+        f"   Existing key:   {duplicate['existing_key']}\n"
+        f"   Existing title: {duplicate['existing_title']}\n"
+        f"   Similarity:     {duplicate['score']:.3f} (threshold: {threshold})\n\n"
+        f"To store anyway, call store_memory again with force=True."
+    )
+
+
+def _format_daemon_store_response(key: str, response: dict[str, Any]) -> str:
+    error = response.get("error")
+    if response.get("stored") is True:
+        return _format_store_success(key, response["result"])
+    if isinstance(error, dict) and error.get("code") == "duplicate":
+        return _format_duplicate_warning(response.get("duplicate") or {})
+    if isinstance(error, dict):
+        return f"❌ Engram error: {error.get('message') or error.get('code')}"
+    return f"❌ Failed to store '{key}': daemon returned an invalid response"
 
 
 def _tool_error(code: str, message: str) -> dict[str, str]:
@@ -2225,14 +2279,42 @@ async def search_memories(
         _record_usage_for_payload("search_memories", input_payload, payload, started_at)
         return payload
 
-    normalized_session_id = _normalize_session_id(session_id)
     try:
+        normalized_session_id = _normalize_session_id(session_id)
         pinned_keys = (
             session_pin_store.list_pins(normalized_session_id)
             if normalized_session_id is not None
             else []
         )
         normalized_tags = _normalize_string_list(tags)
+    except ValueError as e:
+        payload = build_search_error_payload(query, "invalid_session", f"❌ {e}")
+        _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+        return payload
+
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon(
+                "search_memories",
+                {
+                    "query": query.strip(),
+                    "limit": _clamp_search_limit(limit),
+                    "project": project,
+                    "domain": domain,
+                    "tags": normalized_tags,
+                    "include_stale": include_stale,
+                    "canonical_only": canonical_only,
+                    "pinned_keys": pinned_keys,
+                    "pinned_first": pinned_first,
+                    "retrieval_mode": normalized_retrieval_mode,
+                },
+            )
+        except EngramDaemonClientError as e:
+            payload = build_search_error_payload(query, "runtime_error", f"❌ Engram daemon error: {e}")
+        _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+        return payload
+
+    try:
         filters_supplied = any(
             [
                 project is not None,
@@ -2644,6 +2726,20 @@ async def retrieve_chunk(key: str, chunk_id: int) -> dict[str, Any]:
     """
     started_at = time.perf_counter()
     input_payload = {"key": key, "chunk_id": chunk_id}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("retrieve_chunk", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                key=key,
+                chunk_id=chunk_id,
+                found=False,
+                chunk=None,
+            )
+        _record_usage_for_payload("retrieve_chunk", input_payload, payload, started_at)
+        return payload
+
     try:
         results = await memory_manager.retrieve_chunks_async([{"key": key, "chunk_id": chunk_id}])
     except Exception as e:
@@ -2691,6 +2787,19 @@ async def retrieve_chunks(requests: list[dict]) -> dict[str, Any]:
                 "message": "❌ requests must be a list of {key, chunk_id} objects.",
             },
         }
+        _record_usage_for_payload("retrieve_chunks", input_payload, payload, started_at)
+        return payload
+
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("retrieve_chunks", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                requested_count=len(requests),
+                found_count=0,
+                results=[],
+            )
         _record_usage_for_payload("retrieve_chunks", input_payload, payload, started_at)
         return payload
 
@@ -3407,6 +3516,19 @@ async def retrieve_memory(key: str) -> dict[str, Any]:
     """
     started_at = time.perf_counter()
     input_payload = {"key": key}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("retrieve_memory", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                key=key,
+                found=False,
+                memory=None,
+            )
+        _record_usage_for_payload("retrieve_memory", input_payload, payload, started_at)
+        return payload
+
     try:
         result = await memory_manager.retrieve_memory_async(key)
     except Exception as e:
@@ -3465,6 +3587,27 @@ async def store_memory(
     """
     tag_list = _normalize_string_list(tags)
     related_list = _normalize_string_list(related_to)
+    if _daemon_enabled():
+        try:
+            response = await _call_daemon(
+                "store_memory",
+                {
+                    "key": key,
+                    "content": content,
+                    "tags": tag_list,
+                    "title": title or None,
+                    "related_to": related_list,
+                    "force": force,
+                    "project": project,
+                    "domain": domain,
+                    "status": status,
+                    "canonical": canonical,
+                },
+            )
+            return _format_daemon_store_response(key, response)
+        except EngramDaemonClientError as e:
+            return f"❌ Engram daemon error: {e}"
+
     try:
         result = await memory_manager.store_memory_async(
             key=key,
@@ -3478,22 +3621,9 @@ async def store_memory(
             status=status,
             canonical=canonical,
         )
-        return (
-            f"✅ Stored: '{result['title']}'\n"
-            f"   Key: {key}\n"
-            f"   Chunks: {result.get('chunk_count', '?')}\n"
-            f"   Chars: {result['chars']}"
-        )
+        return _format_store_success(key, result)
     except DuplicateMemoryError as e:
-        dup = e.duplicate
-        threshold = _config.get("dedup_threshold", 0.92)
-        return (
-            f"⚠️  DUPLICATE DETECTED — similar memory already exists.\n"
-            f"   Existing key:   {dup['existing_key']}\n"
-            f"   Existing title: {dup['existing_title']}\n"
-            f"   Similarity:     {dup['score']:.3f} (threshold: {threshold})\n\n"
-            f"To store anyway, call store_memory again with force=True."
-        )
+        return _format_duplicate_warning(e.duplicate)
     except ValueError as e:
         return f"⚠️ Memory too large or invalid: {e}"
     except RuntimeError as e:
@@ -4197,6 +4327,20 @@ async def delete_memory(key: str) -> str:
     Returns:
         Confirmation or not-found message.
     """
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("delete_memory", {"key": key})
+        except EngramDaemonClientError as e:
+            return f"❌ Engram daemon error: {e}"
+        error = payload.get("error")
+        if error is not None:
+            message = error.get("message") if isinstance(error, dict) else str(error)
+            return f"❌ Engram daemon error: {message}"
+        if payload.get("deleted"):
+            session_pin_store.remove_key(key)
+            return f"🗑  Deleted memory: '{key}'"
+        return f"❌ Memory not found: '{key}'"
+
     try:
         deleted = await memory_manager.delete_memory_async(key)
     except RuntimeError as e:
