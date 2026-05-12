@@ -428,7 +428,7 @@ Run:
 .\venv\Scripts\python.exe server.py --agent-eval
 ```
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```powershell
 git add tests/fixtures/document_books/README.md tests/test_document_disassembly.py tests/test_reliability_harness.py tests/test_retrieval_eval.py core/reliability_harness.py docs/ENGRAM_1_0_RELEASE_CHECKLIST.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
@@ -442,15 +442,17 @@ git commit -m "test: add book dismantling release gate"
 - Modify: `core/engramd_client.py`
 - Modify: `server.py`
 - Test: `tests/test_engramd_api.py`
+- Test: `tests/test_engramd_client.py`
 - Test: `tests/test_server_daemon_client.py`
 - Test: `tests/test_server_daemon_status.py`
 
-- [ ] **Step 1: Write failing daemon route tests.**
+- [x] **Step 1: Write failing daemon route tests.**
 
-Add tests for document disassembly prepare/status/read-manifest routes in
-daemon mode.
+Add tests for the live no-write document disassembly prepare route in daemon
+mode. Do not invent status/read-manifest APIs until Engram has a persisted
+document job store.
 
-- [ ] **Step 2: Verify red.**
+- [x] **Step 2: Verify red.**
 
 Run:
 
@@ -458,22 +460,22 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_engramd_api.py tests/test_server_daemon_client.py tests/test_server_daemon_status.py -q
 ```
 
-- [ ] **Step 3: Implement daemon routes.**
+- [x] **Step 3: Implement daemon routes.**
 
 Route document jobs through `engramd` when `ENGRAM_DAEMON_URL` is set.
 
-- [ ] **Step 4: Verify.**
+- [x] **Step 4: Verify.**
 
 Run:
 
 ```powershell
-.\venv\Scripts\python.exe -m pytest tests/test_engramd_api.py tests/test_server_daemon_client.py tests/test_server_daemon_status.py tests/test_document_disassembly.py -q
+.\venv\Scripts\python.exe -m pytest tests/test_engramd_api.py tests/test_engramd_client.py tests/test_server_daemon_client.py tests/test_server_daemon_status.py tests/test_document_disassembly.py -q
 ```
 
 - [ ] **Step 5: Commit.**
 
 ```powershell
-git add core/engramd_api.py core/engramd_client.py server.py tests/test_engramd_api.py tests/test_server_daemon_client.py tests/test_server_daemon_status.py
+git add core/engramd_api.py core/engramd_client.py server.py tests/test_engramd_api.py tests/test_engramd_client.py tests/test_server_daemon_client.py tests/test_server_daemon_status.py README.md docs/ENGRAM_1_0_MCP_CONTRACT.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
 git commit -m "feat: route document jobs through engramd"
 ```
 

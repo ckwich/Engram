@@ -115,6 +115,20 @@ class FakeDaemonClient:
             "error": None,
         }
 
+    def prepare_document_disassembly(self, payload):
+        self.calls.append(("prepare_document_disassembly", payload))
+        return {
+            "disassembly": {
+                "record_type": "document_disassembly_preview",
+                "source": {"path": payload["source_path"]},
+                "document": {"page_limit": payload.get("max_pages")},
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "error": None,
+            },
+            "error": None,
+        }
+
     def list_source_drafts(self, payload):
         self.calls.append(("list_source_drafts", payload))
         return {
@@ -327,4 +341,21 @@ def test_source_draft_lifecycle_uses_daemon_when_configured(monkeypatch):
             {"project": "Engram", "status": "draft", "limit": 10, "offset": 2},
         ),
         ("discard_source_draft", {"draft_id": "draft-a"}),
+    ]
+
+
+def test_prepare_document_disassembly_uses_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    payload = asyncio.run(server.prepare_document_disassembly("C:/docs/book.pdf", max_pages=5))
+
+    assert payload["error"] is None
+    assert payload["disassembly"]["record_type"] == "document_disassembly_preview"
+    assert client.calls == [
+        (
+            "prepare_document_disassembly",
+            {"source_path": "C:/docs/book.pdf", "source_type": "pdf", "max_pages": 5},
+        )
     ]

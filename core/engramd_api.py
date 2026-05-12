@@ -9,6 +9,7 @@ import asyncio
 from typing import Any
 from urllib.parse import urlparse
 
+from core.document_extractors import prepare_document_disassembly
 from core.memory_manager import DuplicateMemoryError, memory_manager
 from core.source_intake import source_intake_manager
 
@@ -20,9 +21,11 @@ class EngramDaemonAPI:
         self,
         memory_manager=memory_manager,
         source_intake_manager=source_intake_manager,
+        document_disassembler=prepare_document_disassembly,
     ):
         self.memory_manager = memory_manager
         self.source_intake_manager = source_intake_manager
+        self.document_disassembler = document_disassembler
 
     def handle(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         """Handle one daemon request and return {status, body}."""
@@ -62,6 +65,8 @@ class EngramDaemonAPI:
                 return await self._store_memory(request)
             if route == "/v1/prepare_source_memory":
                 return await self._prepare_source_memory(request)
+            if route == "/v1/prepare_document_disassembly":
+                return await self._prepare_document_disassembly(request)
             if route == "/v1/list_source_drafts":
                 return await self._list_source_drafts(request)
             if route == "/v1/discard_source_draft":
@@ -209,6 +214,38 @@ class EngramDaemonAPI:
                 }
             )
         return self._ok({"draft": draft, "error": None})
+
+    async def _prepare_document_disassembly(self, request: dict[str, Any]) -> dict[str, Any]:
+        try:
+            disassembly = self.document_disassembler(
+                source_path=request.get("source_path"),
+                source_type=request.get("source_type", "pdf"),
+                max_pages=request.get("max_pages"),
+            )
+        except ValueError as exc:
+            return self._ok(
+                {
+                    "disassembly": None,
+                    "error": {
+                        "code": "invalid_request",
+                        "message": str(exc),
+                    },
+                }
+            )
+        except RuntimeError as exc:
+            return self._ok(
+                {
+                    "disassembly": None,
+                    "error": {
+                        "code": "runtime_error",
+                        "message": str(exc),
+                    },
+                }
+            )
+        payload = {"disassembly": disassembly, "error": None}
+        if isinstance(disassembly, dict) and disassembly.get("error") is not None:
+            payload["error"] = disassembly["error"]
+        return self._ok(payload)
 
     async def _list_source_drafts(self, request: dict[str, Any]) -> dict[str, Any]:
         try:

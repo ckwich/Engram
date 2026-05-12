@@ -159,6 +159,19 @@ class FakeSourceIntakeManager:
         return None
 
 
+def fake_document_disassembler(**kwargs):
+    if not kwargs.get("source_path"):
+        raise ValueError("source_path is required")
+    return {
+        "record_type": "document_disassembly_preview",
+        "source": {"path": kwargs["source_path"]},
+        "document": {"source_type": kwargs.get("source_type"), "page_limit": kwargs.get("max_pages")},
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "error": None,
+    }
+
+
 def test_health_reports_daemon_and_storage_stats():
     api = EngramDaemonAPI(memory_manager=FakeMemoryManager())
 
@@ -378,6 +391,47 @@ def test_prepare_source_memory_creates_source_draft_via_daemon():
     assert response["body"]["error"] is None
     assert source_intake.prepared["source_type"] == "handoff"
     assert source_intake.prepared["pipeline"] == "handoff"
+
+
+def test_prepare_document_disassembly_routes_to_document_disassembler():
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        document_disassembler=fake_document_disassembler,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/prepare_document_disassembly",
+        {
+            "source_path": "C:/docs/book.pdf",
+            "source_type": "pdf",
+            "max_pages": 5,
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["error"] is None
+    assert response["body"]["disassembly"]["record_type"] == "document_disassembly_preview"
+    assert response["body"]["disassembly"]["source"]["path"] == "C:/docs/book.pdf"
+    assert response["body"]["disassembly"]["document"]["page_limit"] == 5
+
+
+def test_prepare_document_disassembly_returns_structured_invalid_request():
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        document_disassembler=fake_document_disassembler,
+    )
+
+    response = api.handle("POST", "/v1/prepare_document_disassembly", {"source_path": ""})
+
+    assert response["status"] == 200
+    assert response["body"] == {
+        "disassembly": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "source_path is required",
+        },
+    }
 
 
 def test_list_source_drafts_reads_daemon_owned_drafts():

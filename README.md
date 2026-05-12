@@ -377,8 +377,9 @@ This emits `ENGRAM_DAEMON_URL` in the generated MCP server environment. The
 daemon URL is normalized by trimming trailing slashes.
 
 Daemon mode currently routes stable memory search, duplicate checks, chunk/full
-reads, writes, source draft prepare/list/discard/promotion, metadata updates,
-metadata repair, and deletes through `engramd`.
+reads, writes, source draft prepare/list/discard/promotion, no-write document
+disassembly preparation, metadata updates, metadata repair, and deletes through
+`engramd`.
 Direct in-process MCP mode remains the default unless `ENGRAM_DAEMON_URL` is
 set. This is not a LanceDB/Kuzu backend switch and does not add hosted tenant
 authorization.

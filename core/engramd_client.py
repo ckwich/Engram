@@ -81,6 +81,9 @@ class EngramDaemonClient:
     def prepare_source_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/prepare_source_memory", payload)
 
+    def prepare_document_disassembly(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_document_disassembly", payload)
+
     def list_source_drafts(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/list_source_drafts", payload)
 

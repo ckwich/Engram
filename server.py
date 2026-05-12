@@ -906,7 +906,7 @@ async def daemon_status() -> dict[str, Any]:
     """
     Report whether this MCP server is using direct storage or engramd.
 
-    `ENGRAM_DAEMON_URL` enables daemon-client mode for stable memory tools.
+    `ENGRAM_DAEMON_URL` enables daemon-client mode for routed MCP tools.
     This status tool verifies the configured mode and, when a daemon URL is
     present, performs a daemon health request without reading or writing memory.
     """
@@ -926,6 +926,7 @@ async def daemon_status() -> dict[str, Any]:
             "store_memory",
             "write_memory",
             "prepare_source_memory",
+            "prepare_document_disassembly",
             "list_source_drafts",
             "discard_source_draft",
             "store_prepared_memory",
@@ -1496,6 +1497,16 @@ async def prepare_document_disassembly(
     """
     started_at = time.perf_counter()
     input_payload = {"source_path": source_path, "source_type": source_type, "max_pages": max_pages}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_disassembly", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "disassembly": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_disassembly", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "disassembly": build_document_disassembly(

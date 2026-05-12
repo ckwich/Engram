@@ -50,6 +50,7 @@ def test_daemon_status_checks_configured_daemon(monkeypatch):
     assert "update_memory_metadata" in payload["stable_tools_routed"]
     assert "repair_memory_metadata" in payload["stable_tools_routed"]
     assert "prepare_source_memory" in payload["stable_tools_routed"]
+    assert "prepare_document_disassembly" in payload["stable_tools_routed"]
     assert "list_source_drafts" in payload["stable_tools_routed"]
     assert "discard_source_draft" in payload["stable_tools_routed"]
     assert "store_prepared_memory" in payload["stable_tools_routed"]
