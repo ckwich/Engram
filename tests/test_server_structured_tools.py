@@ -146,6 +146,43 @@ def test_memory_os_round_trip_check_tool_writes_only_migration_artifacts(tmp_pat
     assert payload["error"] is None
 
 
+def test_retrieval_backend_status_tool_reports_no_write_backend_gate(tmp_path):
+    server = load_server_module()
+    legacy_dir = tmp_path / "legacy"
+    work_root = tmp_path / "migration-work"
+    legacy_dir.mkdir()
+    _write_legacy_memory(
+        legacy_dir / "alpha.json",
+        {"key": "alpha", "title": "Alpha", "content": "Alpha content", "chunk_count": 1},
+    )
+    round_trip = asyncio.run(
+        server.memory_os_round_trip_check(
+            legacy_dir=str(legacy_dir),
+            work_root=str(work_root),
+        )
+    )
+
+    payload = asyncio.run(
+        server.retrieval_backend_status(
+            store_root=str(work_root / "store"),
+            include_rebuild_probe=True,
+            rebuild_batch_size=1,
+        )
+    )
+
+    assert round_trip["status"] == "pass"
+    assert payload["operation"] == "retrieval_backend_status"
+    assert payload["write_performed"] is False
+    assert payload["active_memory_write_performed"] is False
+    assert payload["live_retrieval_changed"] is False
+    assert payload["candidate_backend"]["backend"] == "lancedb"
+    assert payload["candidate_backend"]["required"] is False
+    assert payload["candidate_backend"]["promotion_ready"] is False
+    assert payload["store_probe"]["vector_source_count"] == 1
+    assert payload["rebuild_probe"]["status"] == "pass"
+    assert payload["error"] is None
+
+
 def test_prepare_codebase_mapping_tool_returns_manager_payload(monkeypatch):
     server = load_server_module()
     observed = {}

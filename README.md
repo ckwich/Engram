@@ -179,6 +179,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `list_ingestion_pipelines` | List available source-intake pipelines. |
 | `migration_dry_run` | Validate legacy JSON memories against the Memory OS ledger schema without writing. |
 | `memory_os_round_trip_check` | Run Memory OS import/export/restore parity checks in a migration work directory. |
+| `retrieval_backend_status` | Report legacy Chroma, optional LanceDB, migrated-store, and rebuild-probe readiness without switching live retrieval. |
 | `add_graph_edge` | Store a typed relationship between refs. |
 | `list_graph_edges` | List graph edges around refs. |
 | `impact_scan` | Traverse graph relationships for impact analysis. |
@@ -476,7 +477,7 @@ python -m core.memory_os_migration restore-bundle --store-root .engram-migration
 python -m core.memory_os_migration round-trip --legacy-dir data/memories --work-root .engram-migration/round-trip
 
 # Agent-facing migration checks are also available over MCP:
-# migration_dry_run and memory_os_round_trip_check
+# migration_dry_run, memory_os_round_trip_check, and retrieval_backend_status
 ```
 
 ---
@@ -497,6 +498,7 @@ Engram
 |   |-- codebase_mapper.py # Agent-native codebase mapping jobs
 |   |-- graph_manager.py   # Graph policy and traversal
 |   |-- graph_store.py     # Swappable graph persistence seam
+|   |-- retrieval_backend_status.py # No-write backend readiness report
 |   |-- usage_meter.py     # Privacy-safe token estimates
 |   |-- operation_log.py   # Job and event receipts
 |   `-- reliability_harness.py

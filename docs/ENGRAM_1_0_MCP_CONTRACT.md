@@ -106,6 +106,7 @@ where typed, and focused tests.
 | `list_operation_events` | beta | `dict{count, events, error}` | Local operation events. |
 | `migration_dry_run` | beta | `dict{schema_version, operation, source_count, valid_count, invalid_count, would_import_count, chunk_count_mismatch_count, unsupported_fields, write_performed, active_memory_write_performed, error}` | No-write validation of legacy JSON memories against the Memory OS migration ledger. |
 | `memory_os_round_trip_check` | beta | `dict{schema_version, operation, status, source_count, imported_count, bundle_memory_count, restored_count, parity, write_performed, active_memory_write_performed, error}` | Writes only migration work artifacts while proving import/export/restore parity; does not touch active memories or ChromaDB. |
+| `retrieval_backend_status` | beta | `dict{schema_version, operation, current_live_backend, candidate_backend, store_probe, rebuild_probe, readiness_gates, write_performed, active_memory_write_performed, live_retrieval_changed, error}` | No-write readiness report for legacy Chroma, optional LanceDB, migrated-store vector sources, and deterministic rebuild probes. |
 | `read_codebase_mapping_config` | beta | `dict{exists, config, status, error}` | Reads mapping config/status; no source scan. |
 | `draft_codebase_mapping_config` | beta | `dict{config, receipt, error}` | Draft only; no write. |
 | `store_codebase_mapping_config` | beta | `dict{stored, error}` | Writes `.engram/config.json` with overwrite protection. |

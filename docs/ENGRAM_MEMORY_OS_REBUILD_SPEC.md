@@ -319,6 +319,13 @@ Chroma should remain as a legacy adapter during migration. Qdrant can be a
 future adapter for users who want a separate vector service. SQLite vector
 extensions should remain experimental until their stability story is stronger.
 
+Implementation status, 2026-05-12: Engram now has a no-write
+`retrieval_backend_status` MCP gate that reports legacy Chroma as the live
+index, LanceDB as an optional candidate, migrated-store vector source counts,
+and deterministic rebuild-probe results. This is not a backend switch. LanceDB
+must still pass a real optional-dependency spike against the migrated corpus
+before it can replace Chroma in live retrieval.
+
 ### Kuzu Graph Store
 
 Kuzu is the recommended default graph database candidate. It is embedded,

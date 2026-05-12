@@ -54,6 +54,7 @@ from core.memory_quality import audit_memory_quality as build_memory_quality_aud
 from core.operation_log import operation_log
 from core.project_capsule import build_project_capsule_draft
 from core.reliability_harness import run_agent_reliability_harness
+from core.retrieval_backend_status import build_retrieval_backend_status
 from core.retrieval_eval import run_retrieval_eval
 from core.session_pins import SessionPinStore
 from core.source_intake import source_intake_manager
@@ -510,6 +511,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "agent_workflows": "beta",
             "review_helpers": "beta",
             "retrieval_quality": "beta",
+            "retrieval_backend": "beta",
             "usage": "beta",
             "operations": "beta",
             "migration": "beta",
@@ -624,6 +626,12 @@ async def memory_protocol() -> MemoryProtocolPayload:
                     "list_workflow_templates",
                 ],
             },
+            "retrieval_backend": {
+                "purpose": "Inspect Memory OS retrieval backend readiness before switching away from legacy Chroma.",
+                "stability": "beta",
+                "cost_class": "low-to-medium",
+                "tools": ["retrieval_backend_status"],
+            },
             "codebase_mapping": {
                 "purpose": "Map codebases through the connected agent without provider-specific model subprocesses.",
                 "stability": "beta",
@@ -701,6 +709,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "memory quality": "audit_memory_quality",
                 "migration dry run": "migration_dry_run",
                 "migration round trip": "memory_os_round_trip_check",
+                "retrieval backend status": "retrieval_backend_status",
                 "metadata browsing": "list_memories",
                 "memory writing": "prepare_memory",
             },
@@ -754,6 +763,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "list_operation_events": "List recent local operation event records.",
             "migration_dry_run": "Validate legacy JSON memories against the Memory OS ledger schema without writing.",
             "memory_os_round_trip_check": "Run legacy import/export/restore parity checks in a migration work directory without active memory writes.",
+            "retrieval_backend_status": "Report legacy Chroma, optional LanceDB, migrated-store, and rebuild-probe readiness without changing live retrieval.",
         },
         "aliases": {
             "find_memories": "search_memories",
@@ -779,6 +789,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_visual_extraction(document_record=doc, observations=vision_notes) before promoting image-derived claims",
             "migration_dry_run(legacy_dir='data/memories') before importing the current memory corpus into a Memory OS store",
             "memory_os_round_trip_check(legacy_dir='data/memories', work_root='.engram/migration-round-trip-check') for migration parity proof",
+            "retrieval_backend_status(store_root='.engram/migration-round-trip-check/store', include_rebuild_probe=True) before considering a retrieval backend switch",
             "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
         ],
         "warnings": [
@@ -902,6 +913,61 @@ async def memory_os_round_trip_check(
             "error": _tool_error("runtime_error", f"Unexpected Memory OS round-trip failure: {e}"),
         }
     _record_usage_for_payload("memory_os_round_trip_check", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def retrieval_backend_status(
+    store_root: str | None = None,
+    include_rebuild_probe: bool = False,
+    rebuild_batch_size: int = 128,
+) -> dict[str, Any]:
+    """
+    Report Memory OS retrieval backend readiness without changing live retrieval.
+
+    The current live Engram retrieval path remains legacy JSON plus Chroma.
+    This tool reports whether the optional LanceDB adapter can even be spiked,
+    whether a migrated Memory OS ledger exposes vector source records, and
+    whether the deterministic rebuild plumbing passes. It does not write active
+    memories, mutate ChromaDB, or promote LanceDB as the backend.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "store_root": store_root,
+        "include_rebuild_probe": include_rebuild_probe,
+        "rebuild_batch_size": rebuild_batch_size,
+    }
+    try:
+        resolved_store_root = None
+        if store_root is not None:
+            resolved_store_root = _repo_path(store_root, store_root)
+        payload = await asyncio.to_thread(
+            build_retrieval_backend_status,
+            store_root=resolved_store_root,
+            include_rebuild_probe=include_rebuild_probe,
+            rebuild_batch_size=rebuild_batch_size,
+        )
+    except ValueError as e:
+        payload = {
+            "schema_version": None,
+            "operation": "retrieval_backend_status",
+            "store_root": store_root,
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "live_retrieval_changed": False,
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    except Exception as e:
+        payload = {
+            "schema_version": None,
+            "operation": "retrieval_backend_status",
+            "store_root": store_root,
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "live_retrieval_changed": False,
+            "error": _tool_error("runtime_error", f"Unexpected retrieval backend status failure: {e}"),
+        }
+    _record_usage_for_payload("retrieval_backend_status", input_payload, payload, started_at)
     return payload
 
 
