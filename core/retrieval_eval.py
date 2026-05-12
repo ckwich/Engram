@@ -14,6 +14,7 @@ def run_retrieval_eval(memory_manager: Any) -> dict[str, Any]:
         "schema_version": RETRIEVAL_EVAL_SCHEMA_VERSION,
         "summary": report.get("summary", {}),
         "scenarios": report.get("scenarios", []),
+        "workflow_checks": report.get("workflow_checks", []),
         "warnings": report.get("warnings", []),
         "source_schema_version": report.get("schema_version"),
         "generated_at": report.get("generated_at"),

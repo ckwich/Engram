@@ -98,7 +98,7 @@ where typed, and focused tests.
 | `list_source_drafts` | beta | `dict{count, drafts, error}` | Draft inventory. |
 | `discard_source_draft` | beta | `dict{discarded, draft_id, error}` | Rejects a draft while preserving an audit trail. |
 | `store_prepared_memory` | beta | `dict{stored_count, stored, skipped, error}` | Explicit promotion of selected draft items. |
-| `retrieval_eval` | beta | `dict{summary, scenarios, warnings, error}` | Deterministic retrieval quality check. |
+| `retrieval_eval` | beta | `dict{summary, scenarios, workflow_checks, warnings, error}` | Deterministic retrieval and no-write agent workflow quality check. |
 | `usage_summary` | beta | `dict` summary | Engram-attributed estimates only, not billed provider tokens. |
 | `list_usage_calls` | beta | `dict` call list | Privacy-safe usage records only. |
 | `list_workflow_templates` | beta | `dict{templates, error}` | Static workflow recipes. |

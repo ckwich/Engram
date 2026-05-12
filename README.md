@@ -184,7 +184,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `audit_graph` | Inspect graph hygiene. |
 | `usage_summary` | Summarize Engram-attributed token estimates. |
 | `list_usage_calls` | Inspect recent estimated usage calls. |
-| `retrieval_eval` | Run deterministic retrieval-quality checks. |
+| `retrieval_eval` | Run deterministic retrieval and no-write workflow-quality checks. |
 | `list_workflow_templates` | List built-in agent workflow recipes. |
 
 ### Codebase Mapping
