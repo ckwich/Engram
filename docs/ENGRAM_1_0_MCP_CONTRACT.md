@@ -135,8 +135,8 @@ where typed, and focused tests.
 - ChromaDB remains a rebuildable vector index.
 - Memory writes remain JSON-first, then ChromaDB.
 - The default local data root remains `data/`; `ENGRAM_DATA_DIR` may redirect
-  memory JSON, ChromaDB, and Chroma lock files for an entire process before
-  startup.
+  memory JSON, ChromaDB, Chroma lock files, and source intake drafts for an
+  entire process before startup.
 - Chunk IDs remain stable `{md5(key)}_{chunk_index}` references.
 - Graph edges preserve the required edge record fields named in `AGENTS.md`.
 - Source connector and chunk preview tools remain no-write.

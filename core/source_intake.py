@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +11,17 @@ from typing import Any
 from core.ingestion_pipelines import resolve_ingestion_pipeline
 
 PROJECT_ROOT = Path(__file__).parent.parent
-SOURCE_DRAFTS_DIR = PROJECT_ROOT / "data" / "source_drafts"
+
+
+def _data_root() -> Path:
+    configured = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+    if not configured:
+        return PROJECT_ROOT / "data"
+    return Path(configured).expanduser().resolve()
+
+
+DATA_ROOT = _data_root()
+SOURCE_DRAFTS_DIR = DATA_ROOT / "source_drafts"
 SOURCE_DRAFT_SCHEMA_VERSION = "2026-04-30.source-draft.v2"
 
 SECTION_TITLES = {

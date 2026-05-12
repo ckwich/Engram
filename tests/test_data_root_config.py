@@ -47,3 +47,42 @@ def test_memory_manager_honors_engram_data_dir(tmp_path):
     assert Path(payload["owner_lock"]) == data_root / "chroma.owner.lock"
     assert payload["json_exists"] is True
     assert payload["chroma_exists"] is True
+
+
+def test_source_intake_honors_engram_data_dir(tmp_path):
+    data_root = tmp_path / "engram-data"
+    env = os.environ.copy()
+    env["ENGRAM_DATA_DIR"] = str(data_root)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json; "
+                "from core import source_intake as si; "
+                "draft = si.source_intake_manager.prepare_source_memory("
+                "source_text='Decision: keep daemon-owned promotion', "
+                "source_type='note', "
+                "project='Engram', "
+                "domain='daemon'"
+                "); "
+                "print(json.dumps({"
+                "'source_drafts_dir': str(si.SOURCE_DRAFTS_DIR), "
+                "'draft_count': len(list(si.SOURCE_DRAFTS_DIR.glob('*.json'))), "
+                "'draft_id': draft['draft_id']"
+                "}))"
+            ),
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert Path(payload["source_drafts_dir"]) == data_root / "source_drafts"
+    assert payload["draft_count"] == 1
+    assert payload["draft_id"]
