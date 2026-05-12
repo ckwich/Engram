@@ -92,6 +92,7 @@ where typed, and focused tests.
 | `prepare_document_extraction_request` | beta | `dict{request, error}` | No-write external parser request for PDF/DOCX/image-bearing sources; does not run a provider. |
 | `prepare_document_extraction_result` | beta | `dict{result, error}` | No-write external parser result normalization; returns preview arguments and provenance. |
 | `preview_document_extraction` | beta | `dict{preview, error}` | No-write document evidence/chunk preview. |
+| `prepare_document_understanding_packet` | beta | `dict{packet, error}` | No-write agent-supplied understanding normalization; returns summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and graph proposals. |
 | `prepare_document_draft` | beta | `dict{draft, error}` | No-write document memory/graph proposal draft; does not promote. |
 | `prepare_document_promotion_transaction` | beta | `dict{transaction, error}` | No-write operation plan for reviewed document draft promotion; does not execute writes. |
 | `prepare_visual_extraction_request` | beta | `dict{request, error}` | No-write OCR/vision work request with `visual_evidence_contract` and `framework_strategy`; does not run a provider. |

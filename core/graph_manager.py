@@ -24,6 +24,7 @@ GRAPH_EDGE_TYPES = {
 }
 CONFLICT_EDGE_TYPES = {"contradicts", "invalidates", "supersedes"}
 GRAPH_EDGE_STATUSES = {"active", "archived"}
+GRAPH_EDGE_PROPOSAL_STATUSES = GRAPH_EDGE_STATUSES | {"draft"}
 REQUIRED_EDGE_FIELDS = {
     "edge_id",
     "from_ref",
@@ -60,6 +61,77 @@ def _edge_id(payload: dict[str, Any]) -> str:
 
 def _refs_equal(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return _stable_json(left) == _stable_json(right)
+
+
+def normalize_graph_ref(ref: dict[str, Any], label: str = "ref") -> dict[str, Any]:
+    """Normalize a graph reference without reading or writing graph storage."""
+    if not isinstance(ref, dict):
+        raise ValueError(f"{label} must be a dict")
+    kind = _required_text(ref.get("kind"), f"{label}.kind")
+    key = _required_text(ref.get("key"), f"{label}.key")
+    normalized = dict(ref)
+    normalized["kind"] = kind
+    normalized["key"] = key
+    return normalized
+
+
+def normalize_graph_edge_proposal(
+    edge: dict[str, Any],
+    *,
+    default_source: str = "document_intelligence",
+    default_status: str = "draft",
+) -> dict[str, Any]:
+    """Normalize a reviewable graph edge proposal without persisting it."""
+    if not isinstance(edge, dict):
+        raise ValueError("graph edge proposal must be an object")
+    edge_type = _required_text(edge.get("edge_type"), "graph_edge.edge_type")
+    if edge_type not in GRAPH_EDGE_TYPES:
+        raise ValueError(f"Unsupported edge_type: {edge_type}")
+    confidence = _normalize_confidence(edge.get("confidence", 0.5))
+    evidence = _required_text(edge.get("evidence"), "graph_edge.evidence")
+    source = _optional_text(edge.get("source")) or default_source
+    status = _optional_text(edge.get("status")) or default_status
+    if status not in GRAPH_EDGE_PROPOSAL_STATUSES:
+        raise ValueError(f"Unsupported graph edge proposal status: {status}")
+    proposal = {
+        "from_ref": normalize_graph_ref(edge.get("from_ref"), "graph_edge.from_ref"),
+        "to_ref": normalize_graph_ref(edge.get("to_ref"), "graph_edge.to_ref"),
+        "edge_type": edge_type,
+        "confidence": confidence,
+        "evidence": evidence,
+        "source": source,
+        "status": status,
+    }
+    proposal_seed = _stable_json(proposal)
+    proposal["proposal_id"] = "graph_proposal_" + hashlib.sha256(proposal_seed.encode("utf-8")).hexdigest()[:16]
+    return proposal
+
+
+def _required_text(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} is required")
+    return value.strip()
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("graph edge text fields must be strings")
+    text = value.strip()
+    return text or None
+
+
+def _normalize_confidence(value: Any) -> float:
+    if isinstance(value, bool):
+        raise ValueError("confidence must be between 0 and 1")
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("confidence must be between 0 and 1") from None
+    if confidence < 0 or confidence > 1:
+        raise ValueError("confidence must be between 0 and 1")
+    return confidence
 
 
 class GraphManager:

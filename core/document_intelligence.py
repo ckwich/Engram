@@ -5,6 +5,7 @@ import hashlib
 from typing import Any
 
 from core.chunker import chunk_content_with_metadata
+from core.graph_manager import normalize_graph_edge_proposal
 
 
 DOCUMENT_INTELLIGENCE_SCHEMA_VERSION = "2026-05-11.document-intelligence.v1"
@@ -15,7 +16,9 @@ VISUAL_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.visual-request
 DOCUMENT_EXTRACTION_REQUEST_SCHEMA_VERSION = "2026-05-11.document-intelligence.extraction-request.v1"
 DOCUMENT_EXTRACTION_RESULT_SCHEMA_VERSION = "2026-05-11.document-intelligence.extraction-result.v1"
 DOCUMENT_DRAFT_SCHEMA_VERSION = "2026-05-11.document-intelligence.draft.v1"
+DOCUMENT_UNDERSTANDING_SCHEMA_VERSION = "2026-05-12.document-intelligence.understanding.v1"
 DOCUMENT_PROMOTION_SCHEMA_VERSION = "2026-05-11.document-intelligence.promotion.v1"
+LOW_CONFIDENCE_THRESHOLD = 0.5
 VALID_EXTRACTOR_KINDS = {"agent_native", "ocr", "vision", "ocr_vision"}
 VALID_DOCUMENT_EXTRACTOR_KINDS = {
     "agent_native",
@@ -51,6 +54,14 @@ DOCUMENT_ANALYSIS_SECTIONS = {
     "dates": "Dates",
     "open_questions": "Open Questions",
     "external_pointers": "External Pointers",
+}
+DOCUMENT_UNDERSTANDING_ANALYSIS_FIELDS = {
+    "summary",
+    "claims",
+    "concepts",
+    "entities",
+    "high_value_sections",
+    "warnings",
 }
 VALID_VISUAL_CAPABILITIES = {
     "caption_alt_text",
@@ -600,6 +611,91 @@ def prepare_document_draft(
     }
 
 
+def prepare_document_understanding_packet(
+    *,
+    document_record: dict[str, Any],
+    analysis: dict[str, Any],
+    chunk_refs: list[dict[str, Any]] | None = None,
+    visual_artifacts: list[dict[str, Any]] | None = None,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+    created_by: str = "agent",
+) -> dict[str, Any]:
+    """Normalize agent-supplied document understanding into reviewable evidence."""
+    document_id = _require_text(document_record.get("document_id"), "document_record.document_id")
+    normalized_created_by = _require_text(created_by, "created_by")
+    normalized_chunk_refs = _normalize_chunk_refs(chunk_refs or [])
+    normalized_visuals = _normalize_visual_artifacts(visual_artifacts or [], document_id)
+    normalized_edges = _normalize_candidate_graph_edges(candidate_graph_edges or [])
+    normalized = _normalize_understanding_analysis(analysis, document_id)
+    if _understanding_item_count(normalized) == 0 and not normalized_edges:
+        raise ValueError("analysis or candidate_graph_edges must include at least one item")
+
+    visual_artifact_ids = [
+        _require_text(artifact.get("artifact_id"), "visual_artifact.artifact_id")
+        for artifact in normalized_visuals
+    ]
+    low_confidence_warnings = _understanding_low_confidence_warnings(normalized, normalized_visuals)
+    draft_analysis = _understanding_draft_analysis(normalized)
+    document_draft = None
+    if _analysis_item_count(_normalize_document_analysis(draft_analysis)) > 0 or normalized_edges:
+        document_draft = prepare_document_draft(
+            document_record=document_record,
+            analysis=draft_analysis,
+            chunk_refs=normalized_chunk_refs,
+            visual_artifacts=normalized_visuals,
+            candidate_graph_edges=normalized_edges,
+            created_by=normalized_created_by,
+        )
+
+    packet_seed = "|".join(
+        [
+            document_id,
+            _stable_repr(normalized),
+            _stable_repr(normalized_chunk_refs),
+            _stable_repr(visual_artifact_ids),
+            _stable_repr(normalized_edges),
+            normalized_created_by,
+        ]
+    )
+    return {
+        "schema_version": DOCUMENT_UNDERSTANDING_SCHEMA_VERSION,
+        "record_type": "document_understanding_packet",
+        "packet_id": _stable_id("doc_packet", packet_seed),
+        "document_id": document_id,
+        "created_by": normalized_created_by,
+        "review_status": "packet",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "promotion_required": True,
+        "promotion_guidance": dict(PROMOTION_GUIDANCE),
+        "summary_slots": normalized["summary_slots"],
+        "claim_candidates": normalized["claim_candidates"],
+        "concept_candidates": normalized["concept_candidates"],
+        "entity_candidates": normalized["entity_candidates"],
+        "high_value_sections": normalized["high_value_sections"],
+        "low_confidence_warnings": low_confidence_warnings,
+        "candidate_graph_edges": normalized_edges,
+        "evidence_refs": {
+            "document_id": document_id,
+            "source_uri": document_record.get("source_uri"),
+            "chunk_refs": normalized_chunk_refs,
+            "visual_artifact_ids": visual_artifact_ids,
+        },
+        "document_draft": document_draft,
+        "receipt": {
+            "summary_slot_count": len(normalized["summary_slots"]),
+            "claim_candidate_count": len(normalized["claim_candidates"]),
+            "concept_candidate_count": len(normalized["concept_candidates"]),
+            "entity_candidate_count": len(normalized["entity_candidates"]),
+            "high_value_section_count": len(normalized["high_value_sections"]),
+            "low_confidence_warning_count": len(low_confidence_warnings),
+            "candidate_graph_edge_count": len(normalized_edges),
+            "chunk_ref_count": len(normalized_chunk_refs),
+            "visual_artifact_count": len(normalized_visuals),
+        },
+    }
+
+
 def prepare_document_promotion_transaction(
     *,
     document_draft: dict[str, Any],
@@ -908,6 +1004,307 @@ def _normalize_document_outputs(value: Any) -> list[str]:
     return sorted(normalized)
 
 
+def _normalize_understanding_analysis(value: Any, document_id: str) -> dict[str, list[dict[str, Any]]]:
+    if not isinstance(value, dict):
+        raise ValueError("analysis must be an object")
+    unknown = sorted(set(value) - DOCUMENT_UNDERSTANDING_ANALYSIS_FIELDS)
+    if unknown:
+        raise ValueError(f"Unsupported understanding analysis field: {unknown[0]}")
+    return {
+        "summary_slots": _normalize_summary_slots(value.get("summary"), document_id),
+        "claim_candidates": _normalize_claim_candidates(value.get("claims"), document_id),
+        "concept_candidates": _normalize_concept_candidates(value.get("concepts"), document_id),
+        "entity_candidates": _normalize_entity_candidates(value.get("entities"), document_id),
+        "high_value_sections": _normalize_high_value_sections(value.get("high_value_sections"), document_id),
+        "explicit_warnings": _normalize_understanding_warnings(value.get("warnings")),
+    }
+
+
+def _normalize_summary_slots(value: Any, document_id: str) -> list[dict[str, Any]]:
+    slots: list[dict[str, Any]] = []
+    for index, item in enumerate(_understanding_items(value, "analysis.summary")):
+        if isinstance(item, str):
+            slot = "summary"
+            text = _require_text(item, "analysis.summary")
+            confidence = None
+            evidence_refs: list[Any] = []
+        elif isinstance(item, dict):
+            slot = _optional_text(item.get("slot"), "analysis.summary.slot") or "summary"
+            text = _require_text(item.get("text") or item.get("summary"), "analysis.summary.text")
+            confidence = _normalize_confidence(item.get("confidence"))
+            evidence_refs = _normalize_evidence_refs(item.get("evidence_refs"))
+        else:
+            raise ValueError("analysis.summary entries must be strings or objects")
+        slots.append(
+            {
+                "record_type": "summary_slot",
+                "summary_id": _stable_id("summary", f"{document_id}|{index}|{slot}|{text}"),
+                "slot": slot,
+                "text": text,
+                "confidence": confidence,
+                "evidence_refs": evidence_refs,
+            }
+        )
+    return slots
+
+
+def _normalize_claim_candidates(value: Any, document_id: str) -> list[dict[str, Any]]:
+    claims: list[dict[str, Any]] = []
+    for item in _understanding_items(value, "analysis.claims"):
+        if isinstance(item, str):
+            text = _require_text(item, "analysis.claims")
+            confidence = None
+            evidence_refs: list[Any] = []
+        elif isinstance(item, dict):
+            text = _require_text(item.get("text") or item.get("claim"), "analysis.claims.text")
+            confidence = _normalize_confidence(item.get("confidence"))
+            evidence_refs = _normalize_evidence_refs(item.get("evidence_refs"))
+        else:
+            raise ValueError("analysis.claims entries must be strings or objects")
+        claims.append(
+            {
+                "record_type": "claim_candidate",
+                "claim_id": _stable_id("claim", f"{document_id}|{text}|{_stable_repr(evidence_refs)}"),
+                "text": text,
+                "confidence": confidence,
+                "evidence_refs": evidence_refs,
+                "review_status": "candidate",
+                "promotion_required": True,
+            }
+        )
+    return claims
+
+
+def _normalize_concept_candidates(value: Any, document_id: str) -> list[dict[str, Any]]:
+    concepts: list[dict[str, Any]] = []
+    for item in _understanding_items(value, "analysis.concepts"):
+        if isinstance(item, str):
+            name = _require_text(item, "analysis.concepts")
+            description = None
+            confidence = None
+        elif isinstance(item, dict):
+            name = _require_text(item.get("name") or item.get("concept"), "analysis.concepts.name")
+            description = _optional_text(item.get("description"), "analysis.concepts.description")
+            confidence = _normalize_confidence(item.get("confidence"))
+        else:
+            raise ValueError("analysis.concepts entries must be strings or objects")
+        concepts.append(
+            {
+                "record_type": "concept_candidate",
+                "concept_id": _stable_id("concept", f"{document_id}|{name}"),
+                "name": name,
+                "description": description,
+                "confidence": confidence,
+                "review_status": "candidate",
+                "promotion_required": True,
+            }
+        )
+    return concepts
+
+
+def _normalize_entity_candidates(value: Any, document_id: str) -> list[dict[str, Any]]:
+    entities: list[dict[str, Any]] = []
+    for item in _understanding_items(value, "analysis.entities"):
+        if isinstance(item, str):
+            name = _require_text(item, "analysis.entities")
+            kind = "entity"
+            confidence = None
+        elif isinstance(item, dict):
+            name = _require_text(item.get("name") or item.get("entity"), "analysis.entities.name")
+            kind = _optional_text(item.get("kind"), "analysis.entities.kind") or "entity"
+            confidence = _normalize_confidence(item.get("confidence"))
+        else:
+            raise ValueError("analysis.entities entries must be strings or objects")
+        entities.append(
+            {
+                "record_type": "entity_candidate",
+                "entity_id": _stable_id("entity", f"{document_id}|{kind}|{name}"),
+                "name": name,
+                "kind": kind,
+                "confidence": confidence,
+                "review_status": "candidate",
+                "promotion_required": True,
+            }
+        )
+    return entities
+
+
+def _normalize_high_value_sections(value: Any, document_id: str) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    for item in _understanding_items(value, "analysis.high_value_sections"):
+        if isinstance(item, str):
+            title = _require_text(item, "analysis.high_value_sections")
+            reason = None
+            page_number = None
+            confidence = None
+            chunk_ref = None
+        elif isinstance(item, dict):
+            title = _require_text(item.get("title") or item.get("section"), "analysis.high_value_sections.title")
+            reason = _optional_text(item.get("reason"), "analysis.high_value_sections.reason")
+            page_number = _optional_positive_int(item.get("page_number"), "analysis.high_value_sections.page_number")
+            confidence = _normalize_confidence(item.get("confidence"))
+            chunk_ref = item.get("chunk_ref") if isinstance(item.get("chunk_ref"), dict) else None
+        else:
+            raise ValueError("analysis.high_value_sections entries must be strings or objects")
+        sections.append(
+            {
+                "record_type": "high_value_section",
+                "section_id": _stable_id("section", f"{document_id}|{title}|{page_number}"),
+                "title": title,
+                "reason": reason,
+                "page_number": page_number,
+                "chunk_ref": chunk_ref,
+                "confidence": confidence,
+                "review_status": "candidate",
+                "promotion_required": True,
+            }
+        )
+    return sections
+
+
+def _normalize_understanding_warnings(value: Any) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    for item in _understanding_items(value, "analysis.warnings"):
+        if isinstance(item, str):
+            message = _require_text(item, "analysis.warnings")
+            warnings.append({"code": "analysis_warning", "message": message})
+            continue
+        if not isinstance(item, dict):
+            raise ValueError("analysis.warnings entries must be strings or objects")
+        warning = {
+            "code": _optional_text(item.get("code"), "analysis.warnings.code") or "analysis_warning",
+            "message": _require_text(item.get("message"), "analysis.warnings.message"),
+        }
+        target_id = _optional_text(item.get("target_id"), "analysis.warnings.target_id")
+        confidence = _normalize_confidence(item.get("confidence"))
+        if target_id:
+            warning["target_id"] = target_id
+        if confidence is not None:
+            warning["confidence"] = confidence
+        warnings.append(warning)
+    return warnings
+
+
+def _understanding_items(value: Any, field_name: str) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (str, dict)):
+        return [value]
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a string, object, or list")
+    return value
+
+
+def _normalize_evidence_refs(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("evidence_refs must be a list")
+    refs: list[Any] = []
+    for item in value:
+        if isinstance(item, dict):
+            refs.append(dict(item))
+        else:
+            refs.append(_require_text(item, "evidence_ref"))
+    return refs
+
+
+def _understanding_item_count(value: dict[str, list[dict[str, Any]]]) -> int:
+    return sum(
+        len(value[key])
+        for key in (
+            "summary_slots",
+            "claim_candidates",
+            "concept_candidates",
+            "entity_candidates",
+            "high_value_sections",
+            "explicit_warnings",
+        )
+    )
+
+
+def _understanding_draft_analysis(value: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
+    return {
+        "summary": [item["text"] for item in value["summary_slots"]],
+        "claims": [item["text"] for item in value["claim_candidates"]],
+        "entities": [
+            f"{item['kind']}: {item['name']}"
+            for item in value["entity_candidates"]
+        ],
+    }
+
+
+def _understanding_low_confidence_warnings(
+    normalized: dict[str, list[dict[str, Any]]],
+    visual_artifacts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    warnings = list(normalized["explicit_warnings"])
+    for item in normalized["claim_candidates"]:
+        warning = _low_confidence_warning(
+            code="low_confidence_claim",
+            target_id=item["claim_id"],
+            confidence=item.get("confidence"),
+            message="Claim candidate confidence is below review threshold.",
+        )
+        if warning:
+            warnings.append(warning)
+    for item in normalized["concept_candidates"]:
+        warning = _low_confidence_warning(
+            code="low_confidence_concept",
+            target_id=item["concept_id"],
+            confidence=item.get("confidence"),
+            message="Concept candidate confidence is below review threshold.",
+        )
+        if warning:
+            warnings.append(warning)
+    for item in normalized["entity_candidates"]:
+        warning = _low_confidence_warning(
+            code="low_confidence_entity",
+            target_id=item["entity_id"],
+            confidence=item.get("confidence"),
+            message="Entity candidate confidence is below review threshold.",
+        )
+        if warning:
+            warnings.append(warning)
+    for item in normalized["high_value_sections"]:
+        warning = _low_confidence_warning(
+            code="low_confidence_section",
+            target_id=item["section_id"],
+            confidence=item.get("confidence"),
+            message="High-value section confidence is below review threshold.",
+        )
+        if warning:
+            warnings.append(warning)
+    for artifact in visual_artifacts:
+        warning = _low_confidence_warning(
+            code="low_confidence_visual_artifact",
+            target_id=_require_text(artifact.get("artifact_id"), "visual_artifact.artifact_id"),
+            confidence=artifact.get("confidence"),
+            message="Visual artifact confidence is below review threshold.",
+        )
+        if warning:
+            warnings.append(warning)
+    return warnings
+
+
+def _low_confidence_warning(
+    *,
+    code: str,
+    target_id: str,
+    confidence: Any,
+    message: str,
+) -> dict[str, Any] | None:
+    normalized_confidence = _normalize_confidence(confidence)
+    if normalized_confidence is None or normalized_confidence >= LOW_CONFIDENCE_THRESHOLD:
+        return None
+    return {
+        "code": code,
+        "target_id": target_id,
+        "confidence": normalized_confidence,
+        "message": message,
+    }
+
+
 def _normalize_document_analysis(value: Any) -> dict[str, list[str]]:
     if not isinstance(value, dict):
         raise ValueError("analysis must be an object")
@@ -991,22 +1388,7 @@ def _normalize_candidate_graph_edges(value: Any) -> list[dict[str, Any]]:
         raise ValueError("candidate_graph_edges must be a list")
     normalized: list[dict[str, Any]] = []
     for edge in value:
-        if not isinstance(edge, dict):
-            raise ValueError("candidate_graph_edges entries must be objects")
-        for field in ("from_ref", "to_ref"):
-            if not isinstance(edge.get(field), dict) or not edge[field]:
-                raise ValueError(f"candidate_graph_edge.{field} is required")
-        normalized.append(
-            {
-                "from_ref": dict(edge["from_ref"]),
-                "to_ref": dict(edge["to_ref"]),
-                "edge_type": _require_text(edge.get("edge_type"), "candidate_graph_edge.edge_type"),
-                "confidence": _normalize_confidence(edge.get("confidence", 0.5)),
-                "evidence": _require_text(edge.get("evidence"), "candidate_graph_edge.evidence"),
-                "source": _optional_text(edge.get("source"), "candidate_graph_edge.source") or "document_intelligence",
-                "status": _optional_text(edge.get("status"), "candidate_graph_edge.status") or "draft",
-            }
-        )
+        normalized.append(normalize_graph_edge_proposal(edge))
     return normalized
 
 

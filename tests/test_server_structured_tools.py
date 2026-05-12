@@ -77,6 +77,16 @@ def test_memory_protocol_advertises_agent_native_codebase_mapping():
     assert payload["progressive_discovery"]["load_next"]["codebase mapping setup"] == "draft_codebase_mapping_config"
 
 
+def test_memory_protocol_advertises_document_understanding_packets():
+    server = load_server_module()
+
+    payload = asyncio.run(server.memory_protocol())
+
+    assert "prepare_document_understanding_packet" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert payload["progressive_discovery"]["load_next"]["document understanding"] == "prepare_document_understanding_packet"
+    assert "claim/concept/entity candidates" in payload["canonical_tools"]["prepare_document_understanding_packet"]
+
+
 def _write_legacy_memory(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -1817,6 +1827,77 @@ def test_prepare_document_draft_tool_returns_structured_invalid_request():
         "error": {
             "code": "invalid_request",
             "message": "analysis or candidate_graph_edges must include at least one item",
+        },
+    }
+
+
+def test_prepare_document_understanding_packet_tool_returns_no_write_packet():
+    server = load_server_module()
+    document = {
+        "document_id": "doc_architecture",
+        "title": "Architecture Note",
+        "source_uri": "file:///notes/architecture.md",
+        "source_type": "markdown",
+        "content_hash": "sha256:" + "a" * 64,
+        "media_type": "text/markdown",
+    }
+
+    payload = asyncio.run(
+        server.prepare_document_understanding_packet(
+            document_record=document,
+            analysis={
+                "summary": "Architecture note for agent reuse.",
+                "claims": [{"text": "Document understanding stays review-first.", "confidence": 0.82}],
+                "concepts": ["review-first import"],
+                "entities": [{"name": "Engram", "kind": "system"}],
+                "high_value_sections": [{"title": "Review Boundary", "reason": "Contains reusable doctrine."}],
+            },
+            chunk_refs=[{"document_id": "doc_architecture", "chunk_id": 0}],
+            visual_artifacts=[],
+            candidate_graph_edges=[
+                {
+                    "from_ref": {"kind": "document", "key": "doc_architecture"},
+                    "to_ref": {"kind": "concept", "key": "review_first_import"},
+                    "edge_type": "supports",
+                    "confidence": 0.7,
+                    "evidence": "The document supports the review-first import concept.",
+                }
+            ],
+            created_by="agent",
+        )
+    )
+
+    assert payload["error"] is None
+    assert payload["packet"]["record_type"] == "document_understanding_packet"
+    assert payload["packet"]["active_memory_write_performed"] is False
+    assert payload["packet"]["candidate_graph_edges"][0]["proposal_id"].startswith("graph_proposal_")
+    assert payload["packet"]["document_draft"]["record_type"] == "document_draft"
+
+
+def test_prepare_document_understanding_packet_tool_returns_structured_invalid_request():
+    server = load_server_module()
+
+    payload = asyncio.run(
+        server.prepare_document_understanding_packet(
+            document_record={"document_id": "doc_architecture"},
+            analysis={"claims": ["Claim"]},
+            candidate_graph_edges=[
+                {
+                    "from_ref": {"kind": "document", "key": "doc_architecture"},
+                    "to_ref": {"kind": "concept", "key": "target"},
+                    "edge_type": "imagines",
+                    "confidence": 0.7,
+                    "evidence": "Unsupported.",
+                }
+            ],
+        )
+    )
+
+    assert payload == {
+        "packet": None,
+        "error": {
+            "code": "invalid_request",
+            "message": "Unsupported edge_type: imagines",
         },
     }
 

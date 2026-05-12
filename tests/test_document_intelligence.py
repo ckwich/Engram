@@ -8,6 +8,7 @@ from core.document_intelligence import (
     prepare_document_draft,
     prepare_document_extraction_request,
     prepare_document_extraction_result,
+    prepare_document_understanding_packet,
     prepare_document_promotion_transaction,
     prepare_extractor_receipt,
     prepare_visual_extraction_request,
@@ -634,6 +635,167 @@ def test_prepare_document_draft_validates_reviewable_evidence_boundary():
             document_record=document,
             analysis={"claims": ["Claim"]},
             visual_artifacts=[other_artifact],
+        )
+
+
+def test_prepare_document_understanding_packet_normalizes_agent_synthesis():
+    preview = preview_document_extraction(
+        title="Design Book Notes",
+        source_uri="file:///docs/design-book.md",
+        source_type="markdown",
+        content="# Attention\n\nPeople notice motion before static details.",
+        media_type="text/markdown",
+        metadata={"project": "Engram", "domain": "document-intelligence"},
+    )
+    artifact = prepare_visual_artifact_record(
+        document_id=preview["document_record"]["document_id"],
+        artifact_type="figure",
+        source_ref={
+            "source_uri": "file:///docs/design-book.md",
+            "source_artifact_id": "document_artifacts/page_images/aa/page-002.png",
+        },
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+        description="Figure showing attention priority.",
+        page_number=2,
+        confidence=0.43,
+    )
+
+    packet = prepare_document_understanding_packet(
+        document_record=preview["document_record"],
+        analysis={
+            "summary": [
+                {
+                    "slot": "agent_brief",
+                    "text": "Design guidance about attention and motion.",
+                    "confidence": 0.91,
+                }
+            ],
+            "claims": [
+                {
+                    "text": "People notice motion before static details.",
+                    "confidence": 0.82,
+                    "evidence_refs": [preview["chunks"][0]["provenance"]],
+                },
+                {
+                    "text": "The page figure may show a motion hierarchy.",
+                    "confidence": 0.42,
+                    "evidence_refs": [artifact["artifact_id"]],
+                },
+            ],
+            "concepts": [{"name": "attention priority", "confidence": 0.77}],
+            "entities": [{"name": "motion", "kind": "design_concept", "confidence": 0.8}],
+            "high_value_sections": [
+                {
+                    "title": "Attention",
+                    "reason": "Core design principle with direct agent reuse.",
+                    "page_number": 2,
+                    "confidence": 0.7,
+                }
+            ],
+        },
+        chunk_refs=[preview["chunks"][0]["provenance"]],
+        visual_artifacts=[artifact],
+        candidate_graph_edges=[
+            {
+                "from_ref": {"kind": "document", "key": preview["document_record"]["document_id"]},
+                "to_ref": {"kind": "concept", "key": "attention_priority"},
+                "edge_type": "supports",
+                "confidence": 0.74,
+                "evidence": "The document section supports attention-priority concept extraction.",
+            }
+        ],
+        created_by="agent",
+    )
+    duplicate = prepare_document_understanding_packet(
+        document_record=preview["document_record"],
+        analysis={
+            "summary": [{"slot": "agent_brief", "text": "Design guidance about attention and motion.", "confidence": 0.91}],
+            "claims": [
+                {"text": "People notice motion before static details.", "confidence": 0.82, "evidence_refs": [preview["chunks"][0]["provenance"]]},
+                {"text": "The page figure may show a motion hierarchy.", "confidence": 0.42, "evidence_refs": [artifact["artifact_id"]]},
+            ],
+            "concepts": [{"name": "attention priority", "confidence": 0.77}],
+            "entities": [{"name": "motion", "kind": "design_concept", "confidence": 0.8}],
+            "high_value_sections": [{"title": "Attention", "reason": "Core design principle with direct agent reuse.", "page_number": 2, "confidence": 0.7}],
+        },
+        chunk_refs=[preview["chunks"][0]["provenance"]],
+        visual_artifacts=[artifact],
+        candidate_graph_edges=[
+            {
+                "from_ref": {"kind": "document", "key": preview["document_record"]["document_id"]},
+                "to_ref": {"kind": "concept", "key": "attention_priority"},
+                "edge_type": "supports",
+                "confidence": 0.74,
+                "evidence": "The document section supports attention-priority concept extraction.",
+            }
+        ],
+        created_by="agent",
+    )
+
+    assert duplicate["packet_id"] == packet["packet_id"]
+    assert packet["schema_version"] == "2026-05-12.document-intelligence.understanding.v1"
+    assert packet["record_type"] == "document_understanding_packet"
+    assert packet["active_memory_write_performed"] is False
+    assert packet["summary_slots"][0]["slot"] == "agent_brief"
+    assert packet["claim_candidates"][0]["record_type"] == "claim_candidate"
+    assert packet["claim_candidates"][0]["evidence_refs"] == [preview["chunks"][0]["provenance"]]
+    assert packet["concept_candidates"][0]["name"] == "attention priority"
+    assert packet["entity_candidates"][0]["kind"] == "design_concept"
+    assert packet["high_value_sections"][0]["page_number"] == 2
+    assert packet["candidate_graph_edges"][0]["proposal_id"].startswith("graph_proposal_")
+    assert packet["candidate_graph_edges"][0]["status"] == "draft"
+    assert packet["document_draft"]["record_type"] == "document_draft"
+    assert packet["document_draft"]["proposed_edges"][0]["proposal_id"] == packet["candidate_graph_edges"][0]["proposal_id"]
+    assert packet["low_confidence_warnings"] == [
+        {
+            "code": "low_confidence_claim",
+            "target_id": packet["claim_candidates"][1]["claim_id"],
+            "confidence": 0.42,
+            "message": "Claim candidate confidence is below review threshold.",
+        },
+        {
+            "code": "low_confidence_visual_artifact",
+            "target_id": artifact["artifact_id"],
+            "confidence": 0.43,
+            "message": "Visual artifact confidence is below review threshold.",
+        },
+    ]
+    assert packet["receipt"] == {
+        "summary_slot_count": 1,
+        "claim_candidate_count": 2,
+        "concept_candidate_count": 1,
+        "entity_candidate_count": 1,
+        "high_value_section_count": 1,
+        "low_confidence_warning_count": 2,
+        "candidate_graph_edge_count": 1,
+        "chunk_ref_count": 1,
+        "visual_artifact_count": 1,
+    }
+
+
+def test_prepare_document_understanding_packet_validates_graph_proposals():
+    document = prepare_document_record(
+        title="Architecture Note",
+        source_uri="file:///docs/architecture.md",
+        source_type="markdown",
+        content_hash="sha256:" + "c" * 64,
+        media_type="text/markdown",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported edge_type"):
+        prepare_document_understanding_packet(
+            document_record=document,
+            analysis={"claims": ["Claim"]},
+            candidate_graph_edges=[
+                {
+                    "from_ref": {"kind": "document", "key": document["document_id"]},
+                    "to_ref": {"kind": "memory", "key": "target"},
+                    "edge_type": "imagines",
+                    "confidence": 0.8,
+                    "evidence": "Unsupported edge type should stay out of graph proposals.",
+                }
+            ],
         )
 
 

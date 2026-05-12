@@ -633,6 +633,13 @@ Document analysis should identify:
 No document import should automatically become durable memory. Imports create
 evidence and drafts first.
 
+Implementation status, 2026-05-12: `prepare_document_understanding_packet`
+normalizes connected-agent synthesis into no-write summary slots, claim
+candidates, concept candidates, entity candidates, high-value sections,
+low-confidence warnings, draft memory proposals, and graph edge proposals.
+Engram validates graph proposal refs and edge types but does not perform the
+analysis itself and does not promote the packet into active memory.
+
 ### Book Dismantling Gate
 
 Engram 1.0 must pass the Book Dismantling Gate before claiming rich document

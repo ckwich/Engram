@@ -39,6 +39,7 @@ from core.document_intelligence import (
     prepare_document_draft as build_document_draft,
     prepare_document_extraction_request as build_document_extraction_request,
     prepare_document_extraction_result as build_document_extraction_result,
+    prepare_document_understanding_packet as build_document_understanding_packet,
     prepare_document_promotion_transaction as build_document_promotion_transaction,
     prepare_visual_extraction_request as build_visual_extraction_request,
     preview_document_extraction as build_document_extraction_preview,
@@ -679,6 +680,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                     "prepare_document_draft",
                     "prepare_document_extraction_request",
                     "prepare_document_extraction_result",
+                    "prepare_document_understanding_packet",
                     "prepare_document_promotion_transaction",
                     "prepare_visual_extraction_request",
                     "preview_document_source_connector",
@@ -784,6 +786,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "document extraction result": "prepare_document_extraction_result",
                 "document source connector": "preview_document_source_connector",
                 "document draft": "prepare_document_draft",
+                "document understanding": "prepare_document_understanding_packet",
                 "document promotion": "prepare_document_promotion_transaction",
                 "visual extraction request": "prepare_visual_extraction_request",
                 "visual extraction": "preview_visual_extraction",
@@ -819,6 +822,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_extraction_result": "Normalize external parser output into no-write preview arguments and provenance.",
             "preview_document_extraction": "Preview text/markdown document evidence and chunks without writing memory.",
             "prepare_document_draft": "Prepare a no-write document draft with proposed memories and graph edges.",
+            "prepare_document_understanding_packet": "Normalize agent-supplied document understanding into reviewable summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and graph edge proposals.",
             "prepare_document_promotion_transaction": "Prepare a no-write operation plan for reviewed document draft promotion.",
             "prepare_visual_extraction_request": "Prepare a no-write OCR/vision work request for image-bearing documents.",
             "preview_visual_extraction": "Preview caller-supplied OCR or vision observations as visual evidence without writing memory.",
@@ -873,6 +877,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_disassembly(source_path='C:/docs/book.pdf') for no-write local PDF page/text/image inventory plus visual/OCR follow-up request",
             "prepare_document_extraction_request(source_ref={'source_uri': 'file:///notes.pdf'}, source_type='pdf', requested_outputs=['markdown', 'page_images']) before running a local parser",
             "prepare_document_extraction_result(extraction_request=req, title='Notes', content=markdown, media_type='text/markdown') before preview_document_extraction",
+            "prepare_document_understanding_packet(document_record=doc, analysis=agent_analysis) before preparing promotion decisions",
             "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
             "prepare_document_promotion_transaction(document_draft=draft, approved_by='agent-review') before executing writes",
             "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
@@ -1714,6 +1719,55 @@ async def prepare_document_draft(
             "error": _tool_error("runtime_error", f"Unexpected document draft failure: {e}"),
         }
     _record_usage_for_payload("prepare_document_draft", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_understanding_packet(
+    document_record: dict[str, Any],
+    analysis: dict[str, Any],
+    chunk_refs: list[dict[str, Any]] | None = None,
+    visual_artifacts: list[dict[str, Any]] | None = None,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+    created_by: str = "agent",
+) -> dict[str, Any]:
+    """
+    Normalize agent-supplied document understanding into reviewable evidence.
+
+    This tool does not analyze content by itself. The connected agent supplies
+    summaries, claims, concepts, entities, high-value sections, and graph edge
+    candidates; Engram normalizes them into a no-write packet with draft memory
+    and graph proposals for later explicit review.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_record": document_record,
+        "analysis": analysis,
+        "chunk_refs": chunk_refs,
+        "visual_artifacts": visual_artifacts,
+        "candidate_graph_edges": candidate_graph_edges,
+        "created_by": created_by,
+    }
+    try:
+        payload = {
+            "packet": build_document_understanding_packet(
+                document_record=document_record,
+                analysis=analysis,
+                chunk_refs=chunk_refs,
+                visual_artifacts=visual_artifacts,
+                candidate_graph_edges=candidate_graph_edges,
+                created_by=created_by,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"packet": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "packet": None,
+            "error": _tool_error("runtime_error", f"Unexpected document understanding failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_understanding_packet", input_payload, payload, started_at)
     return payload
 
 

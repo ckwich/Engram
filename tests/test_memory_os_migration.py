@@ -15,6 +15,7 @@ from core.document_intelligence import (
     prepare_document_draft,
     prepare_document_extraction_request,
     prepare_document_extraction_result,
+    prepare_document_understanding_packet,
     prepare_document_promotion_transaction,
     prepare_extractor_receipt,
     prepare_visual_artifact_record,
@@ -560,6 +561,50 @@ def test_document_draft_records_persist_and_restore_with_evidence_records(tmp_pa
     assert report["record_ids"] == [document["document_id"], draft["draft_id"]]
     assert draft_records == [draft]
     assert restored.read_document_evidence_records(record_type="document_draft") == [draft]
+
+
+def test_document_understanding_packets_persist_and_restore_with_evidence_records(tmp_path):
+    store_root = tmp_path / "store"
+    restore_root = tmp_path / "restored"
+    document = prepare_document_record(
+        title="Design Book Notes",
+        source_uri="file:///docs/design-book.md",
+        source_type="markdown",
+        content_hash="sha256:" + "d" * 64,
+        media_type="text/markdown",
+    )
+    packet = prepare_document_understanding_packet(
+        document_record=document,
+        analysis={
+            "summary": "Design book notes for agent reuse.",
+            "claims": [{"text": "People notice motion first.", "confidence": 0.8}],
+            "concepts": ["attention priority"],
+            "entities": [{"name": "motion", "kind": "design_concept"}],
+            "high_value_sections": [{"title": "Attention", "reason": "Reusable design principle."}],
+        },
+        candidate_graph_edges=[
+            {
+                "from_ref": {"kind": "document", "key": document["document_id"]},
+                "to_ref": {"kind": "concept", "key": "attention_priority"},
+                "edge_type": "supports",
+                "confidence": 0.7,
+                "evidence": "The notes support attention-priority extraction.",
+            }
+        ],
+    )
+
+    kernel = MemoryOSMigrationKernel(store_root)
+    report = kernel.store_document_evidence_records([document, packet])
+    stored_packets = kernel.read_document_evidence_records(
+        document_id=document["document_id"],
+        record_type="document_understanding_packet",
+    )
+    restored = MemoryOSMigrationKernel(restore_root)
+    restored.restore_bundle(kernel.export_bundle())
+
+    assert report["record_ids"] == [document["document_id"], packet["packet_id"]]
+    assert stored_packets == [packet]
+    assert restored.read_document_evidence_records(record_type="document_understanding_packet") == [packet]
 
 
 def test_document_promotion_transaction_records_persist_and_restore(tmp_path):

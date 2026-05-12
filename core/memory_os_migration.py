@@ -32,6 +32,7 @@ DOCUMENT_EVIDENCE_ID_FIELDS = {
     "visual_extraction_request": "request_id",
     "visual_artifact": "artifact_id",
     "extractor_receipt": "receipt_id",
+    "document_understanding_packet": "packet_id",
     "document_draft": "draft_id",
     "document_promotion_transaction": "transaction_id",
 }
@@ -42,8 +43,9 @@ DOCUMENT_EVIDENCE_RECORD_ORDER = {
     "visual_extraction_request": 3,
     "visual_artifact": 4,
     "extractor_receipt": 5,
-    "document_draft": 6,
-    "document_promotion_transaction": 7,
+    "document_understanding_packet": 6,
+    "document_draft": 7,
+    "document_promotion_transaction": 8,
 }
 
 KNOWN_LEGACY_FIELDS = {
