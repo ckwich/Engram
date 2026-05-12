@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -41,6 +41,7 @@ class AgentReliabilityScenario:
     budget_chars: int = 1200
     include_stale: bool = False
     canonical_only: bool = False
+    distractors: list[dict[str, Any]] = field(default_factory=list)
 
 
 def default_agent_reliability_scenarios() -> list[AgentReliabilityScenario]:
@@ -64,7 +65,74 @@ def default_agent_reliability_scenarios() -> list[AgentReliabilityScenario]:
             tags=["agent-eval", "reliability", "context-pack"],
             max_chunks=2,
             budget_chars=1000,
-        )
+        ),
+        AgentReliabilityScenario(
+            scenario_id="current_memory_excludes_stale_distractor",
+            description=(
+                "Seed a stale distractor with matching text and verify the current "
+                "memory is selected when stale memories are excluded."
+            ),
+            key=f"{EVAL_KEY_PREFIX}current_memory_excludes_stale_distractor",
+            expected_key=f"{EVAL_KEY_PREFIX}current_memory_excludes_stale_distractor",
+            title="Agent Reliability Current Memory",
+            content=(
+                "## Current Memory Preference\n\n"
+                "Current reviewed source-backed memory should be preferred over a "
+                "stale matching claim during agent reliability checks."
+            ),
+            query="current reviewed source-backed memory preferred stale matching claim",
+            tags=["agent-eval", "reliability", "freshness"],
+            max_chunks=2,
+            budget_chars=1000,
+            distractors=[
+                {
+                    "key": f"{EVAL_KEY_PREFIX}stale_memory_preference_distractor",
+                    "title": "Agent Reliability Stale Distractor",
+                    "content": (
+                        "## Stale Memory Preference\n\n"
+                        "Current reviewed source-backed memory should be preferred over a "
+                        "stale matching claim during agent reliability checks."
+                    ),
+                    "tags": ["agent-eval", "reliability", "freshness"],
+                    "canonical": True,
+                    "potentially_stale": True,
+                    "stale_reason": "seeded stale distractor for agent reliability eval",
+                }
+            ],
+        ),
+        AgentReliabilityScenario(
+            scenario_id="reviewed_source_backed_metadata_preference",
+            description=(
+                "Verify reviewed source-backed memories can be targeted through "
+                "required metadata tags before agent context assembly."
+            ),
+            key=f"{EVAL_KEY_PREFIX}reviewed_source_backed_metadata_preference",
+            expected_key=f"{EVAL_KEY_PREFIX}reviewed_source_backed_metadata_preference",
+            title="Agent Reliability Reviewed Source Backing",
+            content=(
+                "## Reviewed Source Backing\n\n"
+                "Reviewed source-backed memories should be retrievable when an agent "
+                "requires evidence-backed context."
+            ),
+            query="reviewed source-backed evidence-backed context",
+            tags=["agent-eval", "reliability", "source-backed", "reviewed"],
+            max_chunks=2,
+            budget_chars=1000,
+            distractors=[
+                {
+                    "key": f"{EVAL_KEY_PREFIX}unreviewed_source_backed_distractor",
+                    "title": "Agent Reliability Unreviewed Source Distractor",
+                    "content": (
+                        "## Unreviewed Source Backing\n\n"
+                        "Reviewed source-backed memories should be retrievable when an agent "
+                        "requires evidence-backed context."
+                    ),
+                    "tags": ["agent-eval", "reliability", "source-backed"],
+                    "canonical": True,
+                    "status": "draft",
+                }
+            ],
+        ),
     ]
 
 
@@ -111,8 +179,29 @@ def _run_scenario(
     findings: list[dict[str, str]] = []
     search_payload: dict[str, Any] = {"query": scenario.query, "count": 0, "results": []}
     chunks: list[dict[str, Any]] = []
+    seeded_keys: list[str] = []
 
     try:
+        for distractor in scenario.distractors:
+            distractor_key = str(distractor["key"])
+            memory_manager.store_memory(
+                distractor_key,
+                str(distractor["content"]),
+                list(distractor.get("tags") or scenario.tags),
+                str(distractor.get("title") or distractor_key),
+                force=True,
+                project=str(distractor.get("project") or scenario.project),
+                domain=str(distractor.get("domain") or scenario.domain),
+                status=distractor.get("status"),
+                canonical=bool(distractor.get("canonical", False)),
+            )
+            seeded_keys.append(distractor_key)
+            if distractor.get("potentially_stale"):
+                memory_manager.mark_memory_potentially_stale(
+                    distractor_key,
+                    reason=str(distractor.get("stale_reason") or "agent reliability distractor"),
+                )
+
         memory_manager.store_memory(
             scenario.key,
             scenario.content,
@@ -123,6 +212,7 @@ def _run_scenario(
             domain=scenario.domain,
             canonical=True,
         )
+        seeded_keys.append(scenario.key)
         search_payload = memory_manager.search_memories_structured(
             scenario.query,
             limit=max(scenario.max_chunks, 1),
@@ -231,14 +321,15 @@ def _run_scenario(
         }
     finally:
         if cleanup:
-            try:
-                memory_manager.delete_memory(scenario.key)
-            except Exception as cleanup_exc:
-                LOGGER.warning(
-                    "Failed to clean up agent reliability eval memory %s: %s",
-                    scenario.key,
-                    cleanup_exc,
-                )
+            for key in dict.fromkeys([*seeded_keys, scenario.key]):
+                try:
+                    memory_manager.delete_memory(key)
+                except Exception as cleanup_exc:
+                    LOGGER.warning(
+                        "Failed to clean up agent reliability eval memory %s: %s",
+                        key,
+                        cleanup_exc,
+                    )
 
 
 def _expected_key_rank(results: list[dict[str, Any]], expected_key: str) -> int | None:

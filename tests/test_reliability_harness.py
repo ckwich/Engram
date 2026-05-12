@@ -104,6 +104,44 @@ def test_agent_reliability_harness_reports_findings_for_missing_expected_key(iso
     ]
 
 
+def test_agent_reliability_harness_seeds_and_cleans_distractor_memories(isolated_storage):
+    from core.reliability_harness import AgentReliabilityScenario, run_agent_reliability_harness
+
+    manager = isolated_storage["mm"].memory_manager
+    scenario = AgentReliabilityScenario(
+        scenario_id="freshness_preference",
+        description="Expected fresh memory should be selected while a stale distractor is excluded.",
+        key="_engram_eval_current_preference",
+        content="## Current\n\nCurrent reviewed source-backed architecture decision.",
+        query="current reviewed source-backed architecture decision",
+        expected_key="_engram_eval_current_preference",
+        title="Current Preference",
+        tags=["agent-eval", "freshness"],
+        project="C:/Dev/Engram",
+        domain="agent-reliability",
+        max_chunks=2,
+        budget_chars=600,
+        distractors=[
+            {
+                "key": "_engram_eval_stale_preference_distractor",
+                "content": "## Stale\n\nCurrent reviewed source-backed architecture decision.",
+                "title": "Stale Preference Distractor",
+                "tags": ["agent-eval", "freshness"],
+                "canonical": True,
+                "potentially_stale": True,
+                "stale_reason": "superseded during reliability eval",
+            }
+        ],
+    )
+
+    report = run_agent_reliability_harness(manager, scenarios=[scenario])
+
+    assert report["summary"]["status"] == "pass"
+    assert report["scenarios"][0]["search"]["top_keys"] == ["_engram_eval_current_preference"]
+    assert manager.retrieve_memory("_engram_eval_current_preference") is None
+    assert manager.retrieve_memory("_engram_eval_stale_preference_distractor") is None
+
+
 def test_default_agent_reliability_scenarios_are_seeded_and_bounded():
     from core.reliability_harness import (
         EVAL_KEY_PREFIX,
@@ -111,10 +149,23 @@ def test_default_agent_reliability_scenarios_are_seeded_and_bounded():
     )
 
     scenarios = default_agent_reliability_scenarios()
+    scenario_ids = {scenario.scenario_id for scenario in scenarios}
 
-    assert len(scenarios) >= 1
+    assert {
+        "retrieval_ladder_context_budget",
+        "current_memory_excludes_stale_distractor",
+        "reviewed_source_backed_metadata_preference",
+    } <= scenario_ids
     for scenario in scenarios:
         assert scenario.key.startswith(EVAL_KEY_PREFIX)
         assert scenario.expected_key == scenario.key
         assert scenario.budget_chars <= 1500
         assert scenario.max_chunks <= 3
+    freshness = next(
+        scenario for scenario in scenarios if scenario.scenario_id == "current_memory_excludes_stale_distractor"
+    )
+    assert freshness.distractors[0]["potentially_stale"] is True
+    source_backed = next(
+        scenario for scenario in scenarios if scenario.scenario_id == "reviewed_source_backed_metadata_preference"
+    )
+    assert {"source-backed", "reviewed"} <= set(source_backed.tags)
