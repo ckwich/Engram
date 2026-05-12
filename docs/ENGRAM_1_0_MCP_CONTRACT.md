@@ -151,8 +151,8 @@ daemon-client mode for that `server.py` process when used outside
 `--generate-config`. The URL is normalized by trimming trailing slashes.
 
 Daemon mode remains opt-in. It routes stable memory operations and source draft
-promotion through the local `engramd` daemon, but it is not a hosted auth model,
-tenant boundary, or retrieval/graph backend switch.
+prepare/list/discard/promotion through the local `engramd` daemon, but it is not
+a hosted auth model, tenant boundary, or retrieval/graph backend switch.
 
 ## Non-Public Internals
 

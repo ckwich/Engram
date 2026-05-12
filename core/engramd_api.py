@@ -60,6 +60,12 @@ class EngramDaemonAPI:
                 return await self._retrieve_memory(request)
             if route == "/v1/store_memory":
                 return await self._store_memory(request)
+            if route == "/v1/prepare_source_memory":
+                return await self._prepare_source_memory(request)
+            if route == "/v1/list_source_drafts":
+                return await self._list_source_drafts(request)
+            if route == "/v1/discard_source_draft":
+                return await self._discard_source_draft(request)
             if route == "/v1/store_prepared_memory":
                 return await self._store_prepared_memory(request)
             if route == "/v1/check_duplicate":
@@ -170,6 +176,84 @@ class EngramDaemonAPI:
         except ValueError as exc:
             return self._error(400, "invalid_request", str(exc))
         return self._ok({"stored": True, "result": result, "error": None})
+
+    async def _prepare_source_memory(self, request: dict[str, Any]) -> dict[str, Any]:
+        try:
+            draft = self.source_intake_manager.prepare_source_memory(
+                source_text=request.get("source_text"),
+                source_type=request.get("source_type"),
+                source_uri=request.get("source_uri"),
+                project=request.get("project"),
+                domain=request.get("domain"),
+                budget_chars=request.get("budget_chars", 6000),
+                pipeline=request.get("pipeline", "generic"),
+            )
+        except ValueError as exc:
+            return self._ok(
+                {
+                    "draft": None,
+                    "error": {
+                        "code": "invalid_request",
+                        "message": str(exc),
+                    },
+                }
+            )
+        except RuntimeError as exc:
+            return self._ok(
+                {
+                    "draft": None,
+                    "error": {
+                        "code": "runtime_error",
+                        "message": str(exc),
+                    },
+                }
+            )
+        return self._ok({"draft": draft, "error": None})
+
+    async def _list_source_drafts(self, request: dict[str, Any]) -> dict[str, Any]:
+        try:
+            payload = self.source_intake_manager.list_source_drafts(
+                project=request.get("project"),
+                status=request.get("status"),
+                limit=request.get("limit", 50),
+                offset=request.get("offset", 0),
+            )
+        except RuntimeError as exc:
+            payload = {
+                "count": 0,
+                "drafts": [],
+                "error": {
+                    "code": "runtime_error",
+                    "message": str(exc),
+                },
+            }
+        return self._ok(payload)
+
+    async def _discard_source_draft(self, request: dict[str, Any]) -> dict[str, Any]:
+        draft_id = str(request.get("draft_id") or "").strip()
+        if not draft_id:
+            return self._ok(
+                {
+                    "discarded": False,
+                    "draft_id": draft_id,
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "draft_id is required",
+                    },
+                }
+            )
+        try:
+            payload = self.source_intake_manager.discard_source_draft(draft_id)
+        except RuntimeError as exc:
+            payload = {
+                "discarded": False,
+                "draft_id": draft_id,
+                "error": {
+                    "code": "runtime_error",
+                    "message": str(exc),
+                },
+            }
+        return self._ok(payload)
 
     async def _store_prepared_memory(self, request: dict[str, Any]) -> dict[str, Any]:
         draft_id = str(request.get("draft_id") or "").strip()

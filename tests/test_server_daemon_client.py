@@ -104,6 +104,33 @@ class FakeDaemonClient:
             "error": None,
         }
 
+    def prepare_source_memory(self, payload):
+        self.calls.append(("prepare_source_memory", payload))
+        return {
+            "draft": {
+                "draft_id": "draft-a",
+                "proposed_memories": [{"key": "daemon_source_memory"}],
+                "proposed_edges": [],
+            },
+            "error": None,
+        }
+
+    def list_source_drafts(self, payload):
+        self.calls.append(("list_source_drafts", payload))
+        return {
+            "count": 1,
+            "total": 1,
+            "limit": payload["limit"],
+            "offset": payload["offset"],
+            "has_more": False,
+            "drafts": [{"draft_id": "draft-a"}],
+            "error": None,
+        }
+
+    def discard_source_draft(self, payload):
+        self.calls.append(("discard_source_draft", payload))
+        return {"discarded": True, "draft_id": payload["draft_id"], "error": None}
+
     def store_prepared_memory(self, payload):
         self.calls.append(("store_prepared_memory", payload))
         return {
@@ -255,4 +282,49 @@ def test_store_prepared_memory_uses_daemon_when_configured(monkeypatch):
             "store_prepared_memory",
             {"draft_id": "draft-a", "selected_items": [0], "force": True},
         )
+    ]
+
+
+def test_source_draft_lifecycle_uses_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    prepared = asyncio.run(
+        server.prepare_source_memory(
+            source_text="Decision: daemon owns source draft lifecycle.",
+            source_type="handoff",
+            source_uri="file:///handoff.md",
+            project="Engram",
+            domain="daemon",
+            budget_chars=4000,
+            pipeline="handoff",
+        )
+    )
+    drafts = asyncio.run(
+        server.list_source_drafts(project="Engram", status="draft", limit=10, offset=2)
+    )
+    discarded = asyncio.run(server.discard_source_draft("draft-a"))
+
+    assert prepared["draft"]["draft_id"] == "draft-a"
+    assert drafts["drafts"][0]["draft_id"] == "draft-a"
+    assert discarded["discarded"] is True
+    assert client.calls == [
+        (
+            "prepare_source_memory",
+            {
+                "source_text": "Decision: daemon owns source draft lifecycle.",
+                "source_type": "handoff",
+                "source_uri": "file:///handoff.md",
+                "project": "Engram",
+                "domain": "daemon",
+                "budget_chars": 4000,
+                "pipeline": "handoff",
+            },
+        ),
+        (
+            "list_source_drafts",
+            {"project": "Engram", "status": "draft", "limit": 10, "offset": 2},
+        ),
+        ("discard_source_draft", {"draft_id": "draft-a"}),
     ]

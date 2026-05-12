@@ -78,6 +78,15 @@ class EngramDaemonClient:
     def store_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/store_memory", payload)
 
+    def prepare_source_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_source_memory", payload)
+
+    def list_source_drafts(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/list_source_drafts", payload)
+
+    def discard_source_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/discard_source_draft", payload)
+
     def store_prepared_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/store_prepared_memory", payload)
 

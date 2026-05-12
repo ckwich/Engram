@@ -915,6 +915,9 @@ async def daemon_status() -> dict[str, Any]:
             "retrieve_memory",
             "store_memory",
             "write_memory",
+            "prepare_source_memory",
+            "list_source_drafts",
+            "discard_source_draft",
             "store_prepared_memory",
             "check_duplicate",
             "update_memory_metadata",
@@ -1888,6 +1891,67 @@ async def prepare_source_memory(
         "budget_chars": budget_chars,
         "pipeline": pipeline,
     }
+
+    def _record_success(draft: dict[str, Any]) -> None:
+        draft_result = {
+            "draft_id": draft.get("draft_id"),
+            "proposed_memory_count": len(draft.get("proposed_memories", [])),
+            "proposed_edge_count": len(draft.get("proposed_edges", [])),
+        }
+        _record_operation_job(
+            operation_type="source_intake",
+            status="completed",
+            result=draft_result,
+            metadata={
+                "source_type": source_type,
+                "project": project,
+                "domain": domain,
+                "pipeline": pipeline,
+            },
+        )
+        _record_operation_event(
+            event_type="source_draft_ready",
+            subject={"kind": "source_draft", "draft_id": draft.get("draft_id")},
+            summary="Source draft ready for review.",
+            metadata=draft_result,
+        )
+
+    def _record_failure(message: str) -> None:
+        _record_operation_job(
+            operation_type="source_intake",
+            status="failed",
+            result={"source_type": source_type},
+            error=message,
+        )
+
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_source_memory", input_payload)
+        except EngramDaemonClientError as e:
+            message = f"❌ Engram daemon error: {e}"
+            payload = {"draft": None, "error": _tool_error("runtime_error", message)}
+            _record_failure(message)
+            _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
+            return payload
+        draft = payload.get("draft")
+        if payload.get("error") is None and isinstance(draft, dict):
+            _record_success(draft)
+        elif payload.get("error"):
+            error = payload["error"]
+            message = (
+                error.get("message", str(error))
+                if isinstance(error, dict)
+                else str(error)
+            )
+            _record_failure(message)
+        _record_usage_for_payload(
+            "prepare_source_memory",
+            input_payload,
+            payload,
+            started_at,
+        )
+        return payload
+
     try:
         payload = {
             "draft": source_intake_manager.prepare_source_memory(
@@ -1902,54 +1966,23 @@ async def prepare_source_memory(
             "error": None,
         }
         draft = payload["draft"]
-        draft_result = {
-            "draft_id": draft.get("draft_id"),
-            "proposed_memory_count": len(draft.get("proposed_memories", [])),
-            "proposed_edge_count": len(draft.get("proposed_edges", [])),
-        }
-        _record_operation_job(
-            operation_type="source_intake",
-            status="completed",
-            result=draft_result,
-            metadata={"source_type": source_type, "project": project, "domain": domain, "pipeline": pipeline},
-        )
-        _record_operation_event(
-            event_type="source_draft_ready",
-            subject={"kind": "source_draft", "draft_id": draft.get("draft_id")},
-            summary="Source draft ready for review.",
-            metadata=draft_result,
-        )
+        _record_success(draft)
         _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
         return payload
     except ValueError as e:
         payload = {"draft": None, "error": _tool_error("invalid_request", str(e))}
-        _record_operation_job(
-            operation_type="source_intake",
-            status="failed",
-            result={"source_type": source_type},
-            error=str(e),
-        )
+        _record_failure(str(e))
         _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
         return payload
     except RuntimeError as e:
         payload = {"draft": None, "error": _tool_error("runtime_error", str(e))}
-        _record_operation_job(
-            operation_type="source_intake",
-            status="failed",
-            result={"source_type": source_type},
-            error=str(e),
-        )
+        _record_failure(str(e))
         _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
         return payload
     except Exception as e:
         message = f"Unexpected source intake failure: {e}"
         payload = {"draft": None, "error": _tool_error("runtime_error", message)}
-        _record_operation_job(
-            operation_type="source_intake",
-            status="failed",
-            result={"source_type": source_type},
-            error=message,
-        )
+        _record_failure(message)
         _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
         return payload
 
@@ -1964,6 +1997,23 @@ async def list_source_drafts(
     """
     List source intake drafts and proposed memories without promoting them.
     """
+    if _daemon_enabled():
+        try:
+            return await _call_daemon(
+                "list_source_drafts",
+                {
+                    "project": project,
+                    "status": status,
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
+        except EngramDaemonClientError as e:
+            return {
+                "count": 0,
+                "drafts": [],
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
     try:
         return source_intake_manager.list_source_drafts(
             project=project,
@@ -1984,6 +2034,15 @@ async def discard_source_draft(draft_id: str) -> dict[str, Any]:
     """
     Mark a source intake draft rejected without deleting the audit trail.
     """
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("discard_source_draft", {"draft_id": draft_id})
+        except EngramDaemonClientError as e:
+            return {
+                "discarded": False,
+                "draft_id": draft_id,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
     try:
         return source_intake_manager.discard_source_draft(draft_id)
     except RuntimeError as e:

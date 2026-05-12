@@ -55,6 +55,11 @@ def test_client_methods_map_to_daemon_routes():
     client.check_duplicate({"key": "k", "content": "body"})
     client.update_memory_metadata({"key": "k", "title": "Updated"})
     client.repair_memory_metadata({"keys": ["k"], "dry_run": False})
+    client.prepare_source_memory({"source_text": "body", "source_type": "note"})
+    client.list_source_drafts(
+        {"project": "Engram", "status": "draft", "limit": 10, "offset": 0}
+    )
+    client.discard_source_draft({"draft_id": "draft-a"})
     client.store_prepared_memory({"draft_id": "draft-a", "selected_items": [0], "force": True})
     client.delete_memory({"key": "k"})
 
@@ -66,6 +71,9 @@ def test_client_methods_map_to_daemon_routes():
         "check_duplicate",
         "update_memory_metadata",
         "repair_memory_metadata",
+        "prepare_source_memory",
+        "list_source_drafts",
+        "discard_source_draft",
         "store_prepared_memory",
         "delete_memory",
     ]

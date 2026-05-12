@@ -112,6 +112,9 @@ class FakeMemoryManager:
 
 class FakeSourceIntakeManager:
     def __init__(self, draft=None):
+        self.prepared = None
+        self.listed = None
+        self.discarded = None
         self.draft = draft or {
             "draft_id": "draft-a",
             "status": "draft",
@@ -129,6 +132,26 @@ class FakeSourceIntakeManager:
                 }
             ],
         }
+
+    def prepare_source_memory(self, **kwargs):
+        self.prepared = kwargs
+        return self.draft
+
+    def list_source_drafts(self, **kwargs):
+        self.listed = kwargs
+        return {
+            "count": 1,
+            "total": 1,
+            "limit": kwargs["limit"],
+            "offset": kwargs["offset"],
+            "has_more": False,
+            "drafts": [self.draft],
+            "error": None,
+        }
+
+    def discard_source_draft(self, draft_id):
+        self.discarded = draft_id
+        return {"discarded": True, "draft_id": draft_id, "error": None}
 
     def get_source_draft(self, draft_id):
         if draft_id == self.draft.get("draft_id"):
@@ -327,6 +350,82 @@ def test_store_prepared_memory_promotes_source_draft_via_daemon():
     assert manager.stored["key"] == "daemon_source_memory"
     assert manager.stored["force"] is True
     assert response["body"]["error"] is None
+
+
+def test_prepare_source_memory_creates_source_draft_via_daemon():
+    source_intake = FakeSourceIntakeManager()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        source_intake_manager=source_intake,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/prepare_source_memory",
+        {
+            "source_text": "Decision: route source drafts through daemon.",
+            "source_type": "handoff",
+            "source_uri": "file:///handoff.md",
+            "project": "Engram",
+            "domain": "daemon",
+            "budget_chars": 4000,
+            "pipeline": "handoff",
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["draft"]["draft_id"] == "draft-a"
+    assert response["body"]["error"] is None
+    assert source_intake.prepared["source_type"] == "handoff"
+    assert source_intake.prepared["pipeline"] == "handoff"
+
+
+def test_list_source_drafts_reads_daemon_owned_drafts():
+    source_intake = FakeSourceIntakeManager()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        source_intake_manager=source_intake,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/list_source_drafts",
+        {
+            "project": "Engram",
+            "status": "draft",
+            "limit": 10,
+            "offset": 2,
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["count"] == 1
+    assert response["body"]["drafts"][0]["draft_id"] == "draft-a"
+    assert source_intake.listed == {
+        "project": "Engram",
+        "status": "draft",
+        "limit": 10,
+        "offset": 2,
+    }
+
+
+def test_discard_source_draft_marks_daemon_owned_draft_rejected():
+    source_intake = FakeSourceIntakeManager()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        source_intake_manager=source_intake,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/discard_source_draft",
+        {"draft_id": "draft-a"},
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["discarded"] is True
+    assert response["body"]["draft_id"] == "draft-a"
+    assert source_intake.discarded == "draft-a"
 
 
 def test_unknown_route_returns_structured_not_found_error():

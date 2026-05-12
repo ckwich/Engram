@@ -373,8 +373,9 @@ First implementation slice, 2026-05-12:
 - The daemon owns the current live `memory_manager` path, including JSON memory
   writes and legacy Chroma indexing.
 - MCP stdio sessions can set `ENGRAM_DAEMON_URL` to route stable memory search,
-  duplicate checks, chunk/full reads, writes, source draft promotion, metadata
-  updates, metadata repair, and deletes through the daemon.
+  duplicate checks, chunk/full reads, writes, source draft
+  prepare/list/discard/promotion, metadata updates, metadata repair, and
+  deletes through the daemon.
 - Direct in-process MCP mode remains the default while daemon mode is proven in
   real sessions.
 - `engramd.py --smoke-test` verifies a running daemon by checking duplicate
