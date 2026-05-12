@@ -13,12 +13,14 @@ Three-tier retrieval pattern (agents should follow this):
 """
 
 import argparse
+import asyncio
 import json
 import os
 import re
 import sys
 import time
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
@@ -47,6 +49,7 @@ from core.graph_manager import graph_manager
 from core.hybrid_retrieval import normalize_retrieval_mode
 from core.ingestion_pipelines import list_ingestion_pipelines as build_ingestion_pipeline_catalog
 from core.memory_manager import memory_manager, DuplicateMemoryError, _config
+from core.memory_os_migration import MemoryOSMigrationKernel, run_round_trip_check
 from core.memory_quality import audit_memory_quality as build_memory_quality_audit
 from core.operation_log import operation_log
 from core.project_capsule import build_project_capsule_draft
@@ -178,6 +181,95 @@ def _runtime_error_payload(message: str, **payload: Any) -> dict[str, Any]:
 
 def _tool_error(code: str, message: str) -> dict[str, str]:
     return {"code": code, "message": message}
+
+
+def _repo_path(path: str | None, default: str) -> Path:
+    raw = Path(path or default)
+    if raw.is_absolute():
+        return raw
+    return Path(__file__).resolve().parent / raw
+
+
+def _default_migration_work_root() -> Path:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return Path(__file__).resolve().parent / ".engram" / f"migration-round-trip-{stamp}-{os.getpid()}"
+
+
+def _compact_migration_import_report(
+    report: dict[str, Any],
+    *,
+    operation: str,
+    legacy_dir: Path,
+    write_performed: bool,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    unsupported = report.get("unsupported_fields") or {}
+    payload: dict[str, Any] = {
+        "schema_version": report.get("schema_version"),
+        "operation": operation,
+        "legacy_dir": str(legacy_dir),
+        "write_performed": write_performed,
+        "active_memory_write_performed": False,
+        "dry_run": report.get("dry_run"),
+        "source_count": report.get("source_count", 0),
+        "valid_count": report.get("valid_count", 0),
+        "invalid_count": report.get("invalid_count", 0),
+        "would_import_count": report.get("would_import_count", 0),
+        "imported_count": report.get("imported_count", 0),
+        "chunk_count_total": report.get("chunk_count_total", 0),
+        "derived_chunk_count_total": report.get("derived_chunk_count_total", 0),
+        "chunk_count_mismatch_count": len(report.get("chunk_count_mismatches") or []),
+        "related_to_count": report.get("related_to_count", 0),
+        "unsupported_field_count": sum(len(fields) for fields in unsupported.values()),
+        "unsupported_fields": unsupported,
+        "field_mappings": report.get("field_mappings", {}),
+        "error": None,
+    }
+    if include_details:
+        payload["key_set"] = report.get("key_set", [])
+        payload["artifact_hashes"] = report.get("artifact_hashes", {})
+        payload["chunk_count_mismatches"] = report.get("chunk_count_mismatches", [])
+        payload["invalid"] = report.get("invalid", [])
+    return payload
+
+
+def _compact_round_trip_report(
+    report: dict[str, Any],
+    *,
+    legacy_dir: Path,
+    work_root: Path,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    dry_run = report.get("dry_run") or {}
+    restore = report.get("restore") or {}
+    payload: dict[str, Any] = {
+        "schema_version": report.get("schema_version"),
+        "operation": "memory_os_round_trip_check",
+        "status": report.get("status"),
+        "legacy_dir": str(legacy_dir),
+        "work_root": str(work_root),
+        "write_performed": True,
+        "active_memory_write_performed": False,
+        "source_count": dry_run.get("source_count", 0),
+        "valid_count": dry_run.get("valid_count", 0),
+        "invalid_count": dry_run.get("invalid_count", 0),
+        "chunk_count_total": dry_run.get("chunk_count_total", 0),
+        "derived_chunk_count_total": dry_run.get("derived_chunk_count_total", 0),
+        "chunk_count_mismatch_count": dry_run.get("chunk_count_mismatch_count", 0),
+        "related_to_count": dry_run.get("related_to_count", 0),
+        "unsupported_field_count": sum(
+            len(fields) for fields in (dry_run.get("unsupported_fields") or {}).values()
+        ),
+        "imported_count": (report.get("import") or {}).get("imported_count", 0),
+        "bundle_memory_count": (report.get("bundle") or {}).get("memory_count", 0),
+        "restored_count": restore.get("restored_count", 0),
+        "legacy_json_restored_count": (report.get("legacy_json_restore") or {}).get("restored_count", 0),
+        "parity": report.get("parity", {}),
+        "error": None,
+    }
+    if include_details:
+        payload["report"] = report
+    return payload
 
 
 def _payload_error_message(payload: Any) -> str | None:
@@ -420,6 +512,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "retrieval_quality": "beta",
             "usage": "beta",
             "operations": "beta",
+            "migration": "beta",
         },
         "retrieval_ladder": [
             {
@@ -558,6 +651,12 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "cost_class": "low",
                 "tools": ["list_operation_jobs", "list_operation_events"],
             },
+            "migration": {
+                "purpose": "Validate Memory OS migration readiness without touching active memories.",
+                "stability": "beta",
+                "cost_class": "medium",
+                "tools": ["migration_dry_run", "memory_os_round_trip_check"],
+            },
             "compatibility_text": {
                 "purpose": "Legacy text-returning wrappers for older MCP clients; prefer structured tools for new integrations.",
                 "stability": "legacy",
@@ -600,6 +699,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "codebase mapping setup": "draft_codebase_mapping_config",
                 "usage review": "usage_summary",
                 "memory quality": "audit_memory_quality",
+                "migration dry run": "migration_dry_run",
+                "migration round trip": "memory_os_round_trip_check",
                 "metadata browsing": "list_memories",
                 "memory writing": "prepare_memory",
             },
@@ -651,6 +752,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "usage_summary": "Engram-attributed token estimate rollups; not billed model usage.",
             "list_operation_jobs": "List recent local operation/job receipts.",
             "list_operation_events": "List recent local operation event records.",
+            "migration_dry_run": "Validate legacy JSON memories against the Memory OS ledger schema without writing.",
+            "memory_os_round_trip_check": "Run legacy import/export/restore parity checks in a migration work directory without active memory writes.",
         },
         "aliases": {
             "find_memories": "search_memories",
@@ -674,6 +777,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_promotion_transaction(document_draft=draft, approved_by='agent-review') before executing writes",
             "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
             "preview_visual_extraction(document_record=doc, observations=vision_notes) before promoting image-derived claims",
+            "migration_dry_run(legacy_dir='data/memories') before importing the current memory corpus into a Memory OS store",
+            "memory_os_round_trip_check(legacy_dir='data/memories', work_root='.engram/migration-round-trip-check') for migration parity proof",
             "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
         ],
         "warnings": [
@@ -685,6 +790,119 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "When multiple stdio Engram servers are live, only one process owns ChromaDB; secondary processes keep JSON-first writes available, and vector search/context tools return a runtime error until the owner exits.",
         ],
     }
+
+
+@mcp.tool()
+async def migration_dry_run(
+    legacy_dir: str = "data/memories",
+    include_details: bool = False,
+) -> dict[str, Any]:
+    """
+    Validate legacy JSON memories against the Memory OS migration ledger without writing.
+
+    This is the safe first migration gate. It scans legacy JSON memories, derives
+    chunk and metadata mappings, and reports unsupported fields and parity risks.
+    It does not create a ledger, write artifacts, or promote active memories.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"legacy_dir": legacy_dir, "include_details": include_details}
+    try:
+        resolved_legacy_dir = _repo_path(legacy_dir, "data/memories")
+        if not resolved_legacy_dir.is_dir():
+            raise ValueError(f"legacy_dir must be an existing directory: {resolved_legacy_dir}")
+        report = await asyncio.to_thread(
+            MemoryOSMigrationKernel(Path(os.devnull)).import_legacy_json,
+            resolved_legacy_dir,
+            True,
+        )
+        payload = _compact_migration_import_report(
+            report,
+            operation="migration_dry_run",
+            legacy_dir=resolved_legacy_dir,
+            write_performed=False,
+            include_details=include_details,
+        )
+    except ValueError as e:
+        payload = {
+            "schema_version": None,
+            "operation": "migration_dry_run",
+            "legacy_dir": legacy_dir,
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    except Exception as e:
+        payload = {
+            "schema_version": None,
+            "operation": "migration_dry_run",
+            "legacy_dir": legacy_dir,
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "error": _tool_error("runtime_error", f"Unexpected migration dry-run failure: {e}"),
+        }
+    _record_usage_for_payload("migration_dry_run", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def memory_os_round_trip_check(
+    legacy_dir: str = "data/memories",
+    work_root: str | None = None,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    """
+    Run a Memory OS legacy import/export/restore parity check.
+
+    This writes only migration work artifacts under work_root. It never writes
+    active memories, never promotes drafts, and never mutates ChromaDB. Use it
+    after migration_dry_run when an agent or operator needs proof that the
+    current corpus can round-trip through the rebuilt ledger and artifact store.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "legacy_dir": legacy_dir,
+        "work_root": work_root,
+        "include_details": include_details,
+    }
+    resolved_legacy_dir = _repo_path(legacy_dir, "data/memories")
+    resolved_work_root = _repo_path(work_root, str(_default_migration_work_root()))
+    try:
+        if not resolved_legacy_dir.is_dir():
+            raise ValueError(f"legacy_dir must be an existing directory: {resolved_legacy_dir}")
+        report = await asyncio.to_thread(
+            run_round_trip_check,
+            resolved_legacy_dir,
+            resolved_work_root,
+            resolved_work_root / "report.json",
+        )
+        payload = _compact_round_trip_report(
+            report,
+            legacy_dir=resolved_legacy_dir,
+            work_root=resolved_work_root,
+            include_details=include_details,
+        )
+    except (FileExistsError, ValueError) as e:
+        payload = {
+            "schema_version": None,
+            "operation": "memory_os_round_trip_check",
+            "legacy_dir": str(resolved_legacy_dir),
+            "work_root": str(resolved_work_root),
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    except Exception as e:
+        payload = {
+            "schema_version": None,
+            "operation": "memory_os_round_trip_check",
+            "legacy_dir": str(resolved_legacy_dir),
+            "work_root": str(resolved_work_root),
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "error": _tool_error("runtime_error", f"Unexpected Memory OS round-trip failure: {e}"),
+        }
+    _record_usage_for_payload("memory_os_round_trip_check", input_payload, payload, started_at)
+    return payload
 
 
 @mcp.tool()

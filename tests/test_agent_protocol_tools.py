@@ -75,6 +75,9 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "prepare_project_capsule" in payload["tool_groups"]["agent_workflows"]["tools"]
     assert "audit_memory_quality" in payload["tool_groups"]["memory_review"]["tools"]
     assert payload["tool_groups"]["usage"]["stability"] == "beta"
+    assert payload["tool_groups"]["migration"]["stability"] == "beta"
+    assert "migration_dry_run" in payload["tool_groups"]["migration"]["tools"]
+    assert "memory_os_round_trip_check" in payload["tool_groups"]["migration"]["tools"]
     assert payload["progressive_discovery"]["start_here"] == "memory_protocol"
     assert payload["progressive_discovery"]["load_next"]["source ingestion"] == "prepare_source_memory"
     assert payload["progressive_discovery"]["load_next"]["conflict inspection"] == "conflict_scan"
@@ -93,6 +96,8 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert payload["progressive_discovery"]["load_next"]["project capsule"] == "prepare_project_capsule"
     assert payload["progressive_discovery"]["load_next"]["usage review"] == "usage_summary"
     assert payload["progressive_discovery"]["load_next"]["memory quality"] == "audit_memory_quality"
+    assert payload["progressive_discovery"]["load_next"]["migration dry run"] == "migration_dry_run"
+    assert payload["progressive_discovery"]["load_next"]["migration round trip"] == "memory_os_round_trip_check"
     assert "preview_document_extraction" in payload["canonical_tools"]
     assert "list_document_extractors" in payload["canonical_tools"]
     assert "preview_document_source_connector" in payload["canonical_tools"]
@@ -108,6 +113,8 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "prepare_project_capsule" in payload["canonical_tools"]
     assert "conflict_scan" in payload["canonical_tools"]
     assert "audit_memory_quality" in payload["canonical_tools"]
+    assert "migration_dry_run" in payload["canonical_tools"]
+    assert "memory_os_round_trip_check" in payload["canonical_tools"]
     assert payload["warnings"][0].startswith("Do not call retrieve_memory")
 
 
@@ -123,6 +130,7 @@ def test_memory_protocol_marks_new_v06_surfaces_as_beta_or_stable():
     assert payload["tool_groups"]["agent_workflows"]["stability"] == "beta"
     assert payload["tool_groups"]["usage"]["stability"] == "beta"
     assert payload["tool_groups"]["operations"]["stability"] == "beta"
+    assert payload["tool_groups"]["migration"]["stability"] == "beta"
 
 
 def test_readme_mcp_tool_table_covers_protocol_tools():

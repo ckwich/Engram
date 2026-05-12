@@ -177,6 +177,8 @@ and protocol `schema_version: "2026-04-27"`.
 | `prepare_visual_extraction_request` | Prepare a no-write OCR/vision work request. |
 | `preview_visual_extraction` | Preview OCR/vision observations without writing. |
 | `list_ingestion_pipelines` | List available source-intake pipelines. |
+| `migration_dry_run` | Validate legacy JSON memories against the Memory OS ledger schema without writing. |
+| `memory_os_round_trip_check` | Run Memory OS import/export/restore parity checks in a migration work directory. |
 | `add_graph_edge` | Store a typed relationship between refs. |
 | `list_graph_edges` | List graph edges around refs. |
 | `impact_scan` | Traverse graph relationships for impact analysis. |
@@ -472,6 +474,9 @@ python -m core.memory_os_migration list-document-records --store-root .engram-mi
 python -m core.memory_os_migration export-bundle --store-root .engram-migration/store --bundle .engram-migration/bundle.json
 python -m core.memory_os_migration restore-bundle --store-root .engram-migration/restored --bundle .engram-migration/bundle.json
 python -m core.memory_os_migration round-trip --legacy-dir data/memories --work-root .engram-migration/round-trip
+
+# Agent-facing migration checks are also available over MCP:
+# migration_dry_run and memory_os_round_trip_check
 ```
 
 ---

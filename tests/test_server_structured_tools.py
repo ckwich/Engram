@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+from pathlib import Path
 
 from core.session_pins import SessionPinStore
 
@@ -74,6 +75,75 @@ def test_memory_protocol_advertises_agent_native_codebase_mapping():
     }
     assert payload["progressive_discovery"]["load_next"]["codebase mapping"] == "prepare_codebase_mapping"
     assert payload["progressive_discovery"]["load_next"]["codebase mapping setup"] == "draft_codebase_mapping_config"
+
+
+def _write_legacy_memory(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def test_migration_dry_run_tool_returns_compact_no_write_report(tmp_path):
+    server = load_server_module()
+    legacy_dir = tmp_path / "legacy"
+    legacy_dir.mkdir()
+    _write_legacy_memory(
+        legacy_dir / "alpha.json",
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "content": "Alpha content",
+            "related_to": ["beta"],
+            "chunk_count": 1,
+            "potentially_stale": True,
+            "stale_reason": "source files changed",
+            "stale_flagged_at": "2026-05-11T17:31:36.231238-07:00",
+        },
+    )
+
+    payload = asyncio.run(server.migration_dry_run(str(legacy_dir)))
+
+    assert payload["schema_version"] == "2026-05-11.memory_os_migration.v8"
+    assert payload["operation"] == "migration_dry_run"
+    assert payload["write_performed"] is False
+    assert payload["active_memory_write_performed"] is False
+    assert payload["source_count"] == 1
+    assert payload["valid_count"] == 1
+    assert payload["would_import_count"] == 1
+    assert payload["derived_chunk_count_total"] == 1
+    assert payload["related_to_count"] == 1
+    assert payload["unsupported_field_count"] == 0
+    assert payload["chunk_count_mismatch_count"] == 0
+    assert "key_set" not in payload
+    assert "artifact_hashes" not in payload
+    assert payload["error"] is None
+
+
+def test_memory_os_round_trip_check_tool_writes_only_migration_artifacts(tmp_path):
+    server = load_server_module()
+    legacy_dir = tmp_path / "legacy"
+    work_root = tmp_path / "migration-work"
+    legacy_dir.mkdir()
+    _write_legacy_memory(
+        legacy_dir / "alpha.json",
+        {"key": "alpha", "title": "Alpha", "content": "Alpha content", "chunk_count": 1},
+    )
+
+    payload = asyncio.run(
+        server.memory_os_round_trip_check(
+            legacy_dir=str(legacy_dir),
+            work_root=str(work_root),
+        )
+    )
+
+    assert payload["schema_version"] == "2026-05-11.memory_os_migration.v8"
+    assert payload["operation"] == "memory_os_round_trip_check"
+    assert payload["status"] == "pass"
+    assert payload["write_performed"] is True
+    assert payload["active_memory_write_performed"] is False
+    assert payload["source_count"] == 1
+    assert payload["restored_count"] == 1
+    assert payload["parity"] == {"key_sets_match": True, "count_parity": True}
+    assert (work_root / "store" / "ledger.sqlite3").exists()
+    assert payload["error"] is None
 
 
 def test_prepare_codebase_mapping_tool_returns_manager_payload(monkeypatch):
