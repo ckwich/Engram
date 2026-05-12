@@ -12,6 +12,7 @@ from typing import Any
 from core.embedder import embedder
 from core.engramd_api import EngramDaemonAPI
 from core.engramd_client import EngramDaemonClient
+from core.engramd_smoke import run_daemon_smoke
 from core.memory_manager import memory_manager
 
 DEFAULT_DAEMON_HOST = os.environ.get("ENGRAM_DAEMON_HOST", "127.0.0.1")
@@ -96,12 +97,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Engram local daemon")
     parser.add_argument("--host", default=DEFAULT_DAEMON_HOST, help=f"Host (default: {DEFAULT_DAEMON_HOST})")
     parser.add_argument("--port", type=int, default=DEFAULT_DAEMON_PORT, help=f"Port (default: {DEFAULT_DAEMON_PORT})")
-    parser.add_argument("--health", action="store_true", help="Query daemon health and exit")
+    check_group = parser.add_mutually_exclusive_group()
+    check_group.add_argument("--health", action="store_true", help="Query daemon health and exit")
+    check_group.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="Run a write/search/read/delete smoke test against a running daemon and exit",
+    )
     args = parser.parse_args(argv)
 
+    url = f"http://{args.host}:{args.port}"
     if args.health:
-        client = EngramDaemonClient(f"http://{args.host}:{args.port}")
+        client = EngramDaemonClient(url)
         payload = client.health()
+        sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        return 0 if payload.get("status") == "ok" and payload.get("error") is None else 1
+
+    if args.smoke_test:
+        client = EngramDaemonClient(url)
+        payload = run_daemon_smoke(client)
+        payload["url"] = url
         sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
         return 0 if payload.get("status") == "ok" and payload.get("error") is None else 1
 

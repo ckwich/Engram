@@ -355,6 +355,15 @@ Health check:
 python engramd.py --health --host 127.0.0.1 --port 8765
 ```
 
+Smoke test a running daemon:
+
+```bash
+python engramd.py --smoke-test --host 127.0.0.1 --port 8765
+```
+
+The smoke test writes, searches, reads, and deletes a temporary
+`_engramd_smoke_*` memory through the daemon.
+
 Generate MCP client config for daemon-client mode:
 
 ```bash
@@ -504,6 +513,7 @@ python server.py
 # Local daemon, then opt-in MCP daemon-client mode
 python engramd.py --host 127.0.0.1 --port 8765
 ENGRAM_DAEMON_URL=http://127.0.0.1:8765 python server.py
+python engramd.py --smoke-test --host 127.0.0.1 --port 8765
 
 # SSE transport
 python server.py --transport sse --port 5100
