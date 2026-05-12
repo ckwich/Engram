@@ -243,15 +243,19 @@ git commit -m "feat: add document import quality reports"
 **Files:**
 - Create: `core/document_artifacts.py`
 - Modify: `core/document_extractors.py`
-- Modify: `core/operation_log.py`
+- Modify: `AGENTS.md`
+- Modify: `README.md`
+- Modify: `docs/ENGRAM_1_0_MCP_CONTRACT.md`
+- Modify: `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - Test: `tests/test_document_artifacts.py`
+- Test: `tests/test_document_disassembly.py`
 
-- [ ] **Step 1: Write failing tests for content-addressed artifact paths.**
+- [x] **Step 1: Write failing tests for content-addressed artifact paths.**
 
 Assert raw source, page text, rendered page, image, table, and manifest refs are
 deduplicated by hash and safe under `ENGRAM_DATA_DIR`.
 
-- [ ] **Step 2: Verify red.**
+- [x] **Step 2: Verify red.**
 
 Run:
 
@@ -259,17 +263,17 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_document_artifacts.py -q
 ```
 
-- [ ] **Step 3: Implement artifact path builder.**
+- [x] **Step 3: Implement artifact path builder.**
 
 Use content hashes and relative refs, not absolute machine-local paths, in
 portable manifests.
 
-- [ ] **Step 4: Implement resume manifest.**
+- [x] **Step 4: Implement resume manifest.**
 
 Record per-page state: `pending`, `text_extracted`, `visual_needed`,
 `visual_complete`, `failed`, or `skipped`.
 
-- [ ] **Step 5: Verify.**
+- [x] **Step 5: Verify.**
 
 Run:
 
@@ -277,10 +281,10 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_document_artifacts.py tests/test_document_disassembly.py -q
 ```
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```powershell
-git add core/document_artifacts.py core/document_extractors.py core/operation_log.py tests/test_document_artifacts.py
+git add core/document_artifacts.py core/document_extractors.py tests/test_document_artifacts.py tests/test_document_disassembly.py AGENTS.md README.md docs/ENGRAM_1_0_MCP_CONTRACT.md docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
 git commit -m "feat: add resumable document artifact manifests"
 ```
 

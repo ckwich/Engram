@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from core.document_artifacts import build_document_artifact_manifest
 from core.document_quality import build_document_quality_report
 
 
@@ -167,6 +168,7 @@ def prepare_document_disassembly(
         "error": None,
     }
     payload["quality_report"] = build_document_quality_report(payload)
+    payload["artifact_manifest"] = build_document_artifact_manifest(payload)
     return payload
 
 

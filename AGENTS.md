@@ -24,6 +24,7 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 | `core/source_connectors.py` | Preview-only source connector helpers | Must not import or promote memory without a separate explicit store flow |
 | `core/source_intake.py` | Reviewable source draft preparation | Draft-only until explicit promotion |
 | `core/document_intelligence.py` | Provider-neutral document evidence and draft records | Document extraction, visual/OCR evidence, drafts, and promotion plans stay no-write until explicit promotion |
+| `core/document_artifacts.py` | Portable document artifact manifests | Content-addressed refs and resume states must stay relative and safe under the Engram data root |
 | `core/document_extractors.py` | Local no-write document disassembly adapters | PDF page/text/image inventory uses local tools when available and returns evidence, receipts, and quality seeds only |
 | `core/document_quality.py` | No-write document quality reports | Converts disassembly evidence into deterministic warnings and next-tool guidance; must not write repairs |
 | `core/hybrid_retrieval.py` | Lexical scoring helpers for opt-in hybrid retrieval | Semantic retrieval remains the default |

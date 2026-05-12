@@ -650,9 +650,9 @@ Implementation status, 2026-05-12: `prepare_document_disassembly` now provides
 a no-write local PDF page/text/image inventory through Poppler-compatible
 `pdfinfo`, `pdftotext`, and `pdfimages` tools when available. It returns source
 hashes, page text status, image-bearing pages, extraction receipts, quality seed
-signals, and deterministic document quality warnings without promoting memory.
-It is the first disassembly slice, not the final OCR/table/artifact-manifest
-pipeline.
+signals, deterministic document quality warnings, portable artifact refs, and
+page-level resume states without promoting memory. It is the first disassembly
+slice, not the final OCR/table/materialized-artifact pipeline.
 
 ## Watchers
 

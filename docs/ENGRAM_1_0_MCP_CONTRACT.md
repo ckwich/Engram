@@ -88,7 +88,7 @@ where typed, and focused tests.
 | `preview_source_connector` | beta | `dict{connector_type, target, count, items, omitted, write_performed, error}` | No-write local source preview. |
 | `list_document_extractors` | beta | `dict{catalog, error}` | No-write document extraction capability catalog; does not run providers. |
 | `preview_document_source_connector` | beta | `dict{connector_type, target, count, items, omitted, write_performed, error}` | No-write local Markdown/text/HTML and URL preview; external formats return structured extraction-request arguments. |
-| `prepare_document_disassembly` | beta | `dict{disassembly, error}` | No-write local PDF page/text/image inventory with quality warnings; uses local tools when available and does not promote memory. |
+| `prepare_document_disassembly` | beta | `dict{disassembly, error}` | No-write local PDF page/text/image inventory with quality warnings, portable artifact refs, and resume states; uses local tools when available and does not promote memory. |
 | `prepare_document_extraction_request` | beta | `dict{request, error}` | No-write external parser request for PDF/DOCX/image-bearing sources; does not run a provider. |
 | `prepare_document_extraction_result` | beta | `dict{result, error}` | No-write external parser result normalization; returns preview arguments and provenance. |
 | `preview_document_extraction` | beta | `dict{preview, error}` | No-write document evidence/chunk preview. |
