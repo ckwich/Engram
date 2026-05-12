@@ -9,6 +9,7 @@
   let staleTabActive = false;
   let usageTabActive = false;
   let evalTabActive = false;
+  let inspectorTabActive = false;
 
   const pageConfig = document.body.dataset;
   const writeAuthRequired = pageConfig.writeAuthRequired === 'true';
@@ -38,7 +39,9 @@
       else if (action === 'toggle-stale') toggleStaleTab();
       else if (action === 'toggle-usage') toggleUsageTab();
       else if (action === 'toggle-eval') toggleEvalTab();
+      else if (action === 'toggle-inspector') toggleInspectorTab();
       else if (action === 'run-eval') loadEvalTab();
+      else if (action === 'refresh-inspector') loadInspectorTab();
       else if (action === 'apply-template') applyTemplate(control.dataset.template);
       else if (action === 'close-modal') closeModal(control.dataset.modalId);
       else if (action === 'save-memory') saveMemory();
@@ -114,18 +117,23 @@
       const query = searchInput.value.trim();
       if (!query) {
         searchResults.classList.add('hidden');
-        if (!staleTabActive && !usageTabActive && !evalTabActive) memoryContainer.classList.remove('hidden');
+        if (!staleTabActive && !usageTabActive && !evalTabActive && !inspectorTabActive) {
+          memoryContainer.classList.remove('hidden');
+        }
         return;
       }
       staleTabActive = false;
       usageTabActive = false;
       evalTabActive = false;
+      inspectorTabActive = false;
       document.getElementById('btn-stale-tab').classList.remove('active');
       document.getElementById('btn-usage-tab').classList.remove('active');
       document.getElementById('btn-eval-tab').classList.remove('active');
+      document.getElementById('btn-inspector-tab').classList.remove('active');
       document.getElementById('stale-panel').classList.add('hidden');
       document.getElementById('usage-panel').classList.add('hidden');
       document.getElementById('eval-panel').classList.add('hidden');
+      document.getElementById('inspector-panel').classList.add('hidden');
       searchTimeout = setTimeout(() => doSearch(query), 300);
     });
 
@@ -203,19 +211,24 @@
     staleTabActive = !staleTabActive;
     usageTabActive = false;
     evalTabActive = false;
+    inspectorTabActive = false;
     const button = document.getElementById('btn-stale-tab');
     const usageButton = document.getElementById('btn-usage-tab');
     const evalButton = document.getElementById('btn-eval-tab');
+    const inspectorButton = document.getElementById('btn-inspector-tab');
     const stalePanel = document.getElementById('stale-panel');
     const usagePanel = document.getElementById('usage-panel');
     const evalPanel = document.getElementById('eval-panel');
+    const inspectorPanel = document.getElementById('inspector-panel');
     const memoryContainer = document.getElementById('memory-container');
     const searchResults = document.getElementById('search-results');
 
     usageButton.classList.remove('active');
     evalButton.classList.remove('active');
+    inspectorButton.classList.remove('active');
     usagePanel.classList.add('hidden');
     evalPanel.classList.add('hidden');
+    inspectorPanel.classList.add('hidden');
 
     if (staleTabActive) {
       button.classList.add('active');
@@ -236,20 +249,25 @@
     usageTabActive = !usageTabActive;
     staleTabActive = false;
     evalTabActive = false;
+    inspectorTabActive = false;
     const usageButton = document.getElementById('btn-usage-tab');
     const staleButton = document.getElementById('btn-stale-tab');
     const evalButton = document.getElementById('btn-eval-tab');
+    const inspectorButton = document.getElementById('btn-inspector-tab');
     const usagePanel = document.getElementById('usage-panel');
     const stalePanel = document.getElementById('stale-panel');
     const evalPanel = document.getElementById('eval-panel');
+    const inspectorPanel = document.getElementById('inspector-panel');
     const memoryContainer = document.getElementById('memory-container');
     const searchResults = document.getElementById('search-results');
 
     staleButton.classList.remove('active');
     evalButton.classList.remove('active');
+    inspectorButton.classList.remove('active');
     stalePanel.classList.add('hidden');
     stalePanel.classList.remove('active');
     evalPanel.classList.add('hidden');
+    inspectorPanel.classList.add('hidden');
     usageButton.classList.toggle('active', usageTabActive);
     usagePanel.classList.toggle('hidden', !usageTabActive);
     memoryContainer.classList.toggle('hidden', usageTabActive);
@@ -261,25 +279,60 @@
     evalTabActive = !evalTabActive;
     staleTabActive = false;
     usageTabActive = false;
+    inspectorTabActive = false;
     const evalButton = document.getElementById('btn-eval-tab');
     const staleButton = document.getElementById('btn-stale-tab');
     const usageButton = document.getElementById('btn-usage-tab');
+    const inspectorButton = document.getElementById('btn-inspector-tab');
     const evalPanel = document.getElementById('eval-panel');
     const stalePanel = document.getElementById('stale-panel');
     const usagePanel = document.getElementById('usage-panel');
+    const inspectorPanel = document.getElementById('inspector-panel');
     const memoryContainer = document.getElementById('memory-container');
     const searchResults = document.getElementById('search-results');
 
     staleButton.classList.remove('active');
     usageButton.classList.remove('active');
+    inspectorButton.classList.remove('active');
     stalePanel.classList.add('hidden');
     stalePanel.classList.remove('active');
     usagePanel.classList.add('hidden');
+    inspectorPanel.classList.add('hidden');
     evalButton.classList.toggle('active', evalTabActive);
     evalPanel.classList.toggle('hidden', !evalTabActive);
     memoryContainer.classList.toggle('hidden', evalTabActive);
     searchResults.classList.add('hidden');
     if (evalTabActive) loadEvalTab();
+  }
+
+  function toggleInspectorTab() {
+    inspectorTabActive = !inspectorTabActive;
+    staleTabActive = false;
+    usageTabActive = false;
+    evalTabActive = false;
+    const inspectorButton = document.getElementById('btn-inspector-tab');
+    const staleButton = document.getElementById('btn-stale-tab');
+    const usageButton = document.getElementById('btn-usage-tab');
+    const evalButton = document.getElementById('btn-eval-tab');
+    const inspectorPanel = document.getElementById('inspector-panel');
+    const stalePanel = document.getElementById('stale-panel');
+    const usagePanel = document.getElementById('usage-panel');
+    const evalPanel = document.getElementById('eval-panel');
+    const memoryContainer = document.getElementById('memory-container');
+    const searchResults = document.getElementById('search-results');
+
+    staleButton.classList.remove('active');
+    usageButton.classList.remove('active');
+    evalButton.classList.remove('active');
+    stalePanel.classList.add('hidden');
+    stalePanel.classList.remove('active');
+    usagePanel.classList.add('hidden');
+    evalPanel.classList.add('hidden');
+    inspectorButton.classList.toggle('active', inspectorTabActive);
+    inspectorPanel.classList.toggle('hidden', !inspectorTabActive);
+    memoryContainer.classList.toggle('hidden', inspectorTabActive);
+    searchResults.classList.add('hidden');
+    if (inspectorTabActive) loadInspectorTab();
   }
 
   async function loadEvalTab() {
@@ -317,6 +370,74 @@
         <span>${safeInteger(((scenario.context_pack || {}).selected_chunk_count))} chunks</span>
       </div>
     `).join('') || '<div class="loading-row">No scenarios returned.</div>';
+  }
+
+  async function loadInspectorTab() {
+    document.getElementById('inspector-summary-cards').innerHTML =
+      '<div class="loading-row">Loading inspector data...</div>';
+    document.getElementById('inspector-quality-list').innerHTML = '';
+    document.getElementById('inspector-graph-list').innerHTML = '';
+    document.getElementById('inspector-job-list').innerHTML = '';
+    document.getElementById('inspector-event-list').innerHTML = '';
+    try {
+      const [qualityResponse, graphResponse, jobsResponse, eventsResponse] = await Promise.all([
+        fetch('/api/inspector/memory-quality?limit=5'),
+        fetch('/api/inspector/graph/audit'),
+        fetch('/api/inspector/operations/jobs?limit=5'),
+        fetch('/api/inspector/operations/events?limit=5'),
+      ]);
+      if (!qualityResponse.ok || !graphResponse.ok || !jobsResponse.ok || !eventsResponse.ok) {
+        throw new Error('Inspector API unavailable');
+      }
+      renderInspector({
+        quality: await qualityResponse.json(),
+        graph: await graphResponse.json(),
+        jobs: await jobsResponse.json(),
+        events: await eventsResponse.json(),
+      });
+    } catch (error) {
+      document.getElementById('inspector-summary-cards').innerHTML =
+        `<div class="loading-row">Error loading inspector: ${esc(error.message)}</div>`;
+    }
+  }
+
+  function renderInspector(data) {
+    const quality = data.quality || {};
+    const graph = data.graph || {};
+    const jobs = data.jobs || {};
+    const events = data.events || {};
+    document.getElementById('inspector-summary-cards').innerHTML = `
+      <div class="usage-card"><span>${safeInteger(quality.issue_count)}</span><label>quality issues</label></div>
+      <div class="usage-card"><span>${safeInteger((quality.summary || {}).high_risk_count)}</span><label>high risk</label></div>
+      <div class="usage-card"><span>${safeInteger(graph.issue_count)}</span><label>graph issues</label></div>
+      <div class="usage-card"><span>${safeInteger(jobs.count)}</span><label>recent jobs</label></div>
+    `;
+    document.getElementById('inspector-quality-list').innerHTML = (quality.memories || []).map(memory => `
+      <div class="usage-call-row">
+        <strong>${esc(memory.key || memory.title || 'memory')}</strong>
+        <span>${esc(memory.risk || 'unknown')}</span>
+        <span>${safeInteger((memory.issues || []).length)} issues</span>
+      </div>
+    `).join('') || '<div class="loading-row">No quality issues in the current page.</div>';
+    document.getElementById('inspector-graph-list').innerHTML = (graph.issues || []).map(issue => `
+      <div class="usage-call-row">
+        <strong>${esc(issue.code || 'graph issue')}</strong>
+        <span>${esc(issue.edge_id || issue.edge_index || '')}</span>
+      </div>
+    `).join('') || '<div class="loading-row">Graph audit returned no issues.</div>';
+    document.getElementById('inspector-job-list').innerHTML = (jobs.jobs || []).map(job => `
+      <div class="usage-call-row">
+        <strong>${esc(job.operation_type || 'operation')}</strong>
+        <span>${esc(job.status || '')}</span>
+        <span>${esc((job.timestamp || '').slice(0, 19))}</span>
+      </div>
+    `).join('') || '<div class="loading-row">No recent operation jobs.</div>';
+    document.getElementById('inspector-event-list').innerHTML = (events.events || []).map(event => `
+      <div class="usage-call-row">
+        <strong>${esc(event.event_type || 'event')}</strong>
+        <span>${esc(event.summary || '')}</span>
+      </div>
+    `).join('') || '<div class="loading-row">No recent operation events.</div>';
   }
 
   async function loadUsageTab() {

@@ -151,6 +151,7 @@
         <button class="btn" id="btn-stale-tab" type="button" data-action="toggle-stale">Review stale</button>
         <button class="btn" id="btn-usage-tab" type="button" data-action="toggle-usage">Token Lens</button>
         <button class="btn" id="btn-eval-tab" type="button" data-action="toggle-eval">Eval Lab</button>
+        <button class="btn" id="btn-inspector-tab" type="button" data-action="toggle-inspector">Inspector</button>
         <button class="btn btn-cyan compact-new" type="button" data-action="open-create">New</button>
       </div>
     </div>
@@ -250,6 +251,37 @@
         <div class="eval-helper-card">
           <h3>Connector preview</h3>
           <p>Use <code>/api/source-connectors/preview</code> to review local source drafts without importing them.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Memory Inspector Panel (hidden by default) -->
+    <section id="inspector-panel" class="eval-panel hidden">
+      <div class="review-header">
+        <div>
+          <p class="eyebrow">Memory Inspector</p>
+          <h2>Local state</h2>
+          <p>Quality, graph, and operation receipts from the local Engram store.</p>
+        </div>
+        <button class="btn btn-cyan" type="button" data-action="refresh-inspector">Refresh</button>
+      </div>
+      <div id="inspector-summary-cards" class="usage-summary-grid"></div>
+      <div class="eval-helper-grid">
+        <div class="eval-helper-card">
+          <h3>Memory quality</h3>
+          <div id="inspector-quality-list" class="usage-call-list"></div>
+        </div>
+        <div class="eval-helper-card">
+          <h3>Graph audit</h3>
+          <div id="inspector-graph-list" class="usage-call-list"></div>
+        </div>
+        <div class="eval-helper-card">
+          <h3>Operation jobs</h3>
+          <div id="inspector-job-list" class="usage-call-list"></div>
+        </div>
+        <div class="eval-helper-card">
+          <h3>Operation events</h3>
+          <div id="inspector-event-list" class="usage-call-list"></div>
         </div>
       </div>
     </section>

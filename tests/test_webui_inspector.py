@@ -1,5 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+
+def test_inspector_tab_is_wired_in_static_assets():
+    html = Path("templates/index.html").read_text(encoding="utf-8")
+    js = Path("static/app.js").read_text(encoding="utf-8")
+
+    assert 'id="btn-inspector-tab"' in html
+    assert 'id="inspector-panel"' in html
+    assert 'data-action="toggle-inspector"' in html
+    assert "toggleInspectorTab" in js
+    assert "loadInspectorTab" in js
+    assert "/api/inspector/memory-quality" in js
+    assert "/api/inspector/graph/audit" in js
+    assert "/api/inspector/operations/jobs" in js
+    assert "/api/inspector/operations/events" in js
+
 
 def test_memory_quality_inspector_api_returns_metadata_only_report(monkeypatch):
     import webui
