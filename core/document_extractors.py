@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.document_artifacts import build_document_artifact_manifest
+from core.document_intelligence import prepare_document_record, prepare_visual_extraction_request
 from core.document_quality import build_document_quality_report
 
 
@@ -169,6 +170,10 @@ def prepare_document_disassembly(
     }
     payload["quality_report"] = build_document_quality_report(payload)
     payload["artifact_manifest"] = build_document_artifact_manifest(payload)
+    visual_candidates, visual_request_arguments, visual_request = _visual_evidence_plan(payload)
+    payload["visual_artifact_candidates"] = visual_candidates
+    payload["visual_extraction_request_arguments"] = visual_request_arguments
+    payload["visual_extraction_request"] = visual_request
     return payload
 
 
@@ -332,6 +337,95 @@ def _page_records(
     if page_count == 0 and not records:
         return []
     return records
+
+
+def _visual_evidence_plan(
+    payload: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
+    document = dict(payload.get("document") or {})
+    source = dict(payload.get("source") or {})
+    artifact_manifest = dict(payload.get("artifact_manifest") or {})
+    raw_source = dict((artifact_manifest.get("artifacts") or {}).get("raw_source") or {})
+    source_artifact_id = raw_source.get("ref")
+    pages = [page for page in payload.get("pages") or [] if page.get("visual_review_needed")]
+    if not pages or not source_artifact_id:
+        return [], None, None
+
+    candidates: list[dict[str, Any]] = []
+    image_refs: list[dict[str, Any]] = []
+    for page in pages:
+        page_number = int(page.get("page_number"))
+        source_ref = {
+            "source_uri": source.get("source_uri"),
+            "content_hash": source.get("content_hash"),
+            "source_artifact_id": source_artifact_id,
+            "source_artifact_ref": source_artifact_id,
+            "page": page_number,
+            "page_number": page_number,
+            "artifact_type": "page_crop",
+            "text_status": page.get("text_status"),
+            "image_count": int(page.get("image_count") or 0),
+        }
+        candidate_id = _stable_id(
+            "vis_candidate",
+            f"{document.get('document_id')}|{page_number}|{source_artifact_id}|page_crop",
+        )
+        candidates.append(
+            {
+                "record_type": "visual_artifact_candidate",
+                "candidate_id": candidate_id,
+                "document_id": document.get("document_id"),
+                "artifact_type": "page_crop",
+                "page_number": page_number,
+                "coordinates": None,
+                "source_artifact_id": source_artifact_id,
+                "source_ref": source_ref,
+                "extractor": {
+                    "id": "engram-local-pdf-disassembly",
+                    "kind": "pdf",
+                    "external_framework_required": False,
+                },
+                "confidence": None,
+                "review_status": "candidate",
+                "active_memory_write_performed": False,
+                "promotion_required": True,
+                "next_tool": "prepare_visual_extraction_request",
+            }
+        )
+        image_refs.append(source_ref)
+
+    document_record = prepare_document_record(
+        title=str(document.get("title") or "Untitled Document"),
+        source_uri=str(source.get("source_uri") or ""),
+        source_type=str(document.get("source_type") or source.get("source_type") or "pdf"),
+        content_hash=str(document.get("content_hash") or source.get("content_hash") or ""),
+        media_type=str(document.get("media_type") or source.get("media_type") or PDF_MEDIA_TYPE),
+        metadata={
+            "extractor_id": "engram-local-pdf-disassembly",
+            "page_count": document.get("page_count"),
+            "page_limit": document.get("page_limit"),
+        },
+    )
+    request_arguments = {
+        "document_record": document_record,
+        "image_refs": image_refs,
+        "requested_capabilities": [
+            "ocr_text",
+            "figure_description",
+            "table_structure",
+            "diagram_description",
+            "caption_alt_text",
+        ],
+        "extractor_id": "engram-visual-request",
+        "extractor_kind": "ocr_vision",
+        "instructions": (
+            "Review low-text, no-text, or image-bearing PDF pages before document draft promotion; "
+            "return OCR blocks, figures, tables, captions, diagrams, and page-crop evidence with page "
+            "numbers, coordinates when available, confidence, extractor id, and source artifact id."
+        ),
+    }
+    visual_request = prepare_visual_extraction_request(**request_arguments)
+    return candidates, request_arguments, visual_request
 
 
 def _normalize_max_pages(value: int | None) -> int | None:

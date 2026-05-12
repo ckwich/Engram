@@ -293,16 +293,21 @@ git commit -m "feat: add resumable document artifact manifests"
 **Files:**
 - Modify: `core/document_intelligence.py`
 - Modify: `core/document_extractors.py`
+- Modify: `server.py`
+- Modify: `AGENTS.md`
+- Modify: `README.md`
+- Modify: `docs/ENGRAM_1_0_MCP_CONTRACT.md`
+- Modify: `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - Test: `tests/test_document_intelligence.py`
 - Test: `tests/test_document_disassembly.py`
 
-- [ ] **Step 1: Write failing tests for visual/table artifacts.**
+- [x] **Step 1: Write failing tests for visual/table artifacts.**
 
 Assert figure, table, caption, OCR block, page crop, and diagram refs retain
 page number, coordinates when available, extractor id, confidence, and source
 artifact id.
 
-- [ ] **Step 2: Verify red.**
+- [x] **Step 2: Verify red.**
 
 Run:
 
@@ -310,12 +315,12 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_document_intelligence.py tests/test_document_disassembly.py -q
 ```
 
-- [ ] **Step 3: Implement visual/table candidate records.**
+- [x] **Step 3: Implement visual/table candidate records.**
 
 Return candidate records from local inventory and route low/no-text pages into
 `prepare_visual_extraction_request`.
 
-- [ ] **Step 4: Verify.**
+- [x] **Step 4: Verify.**
 
 Run:
 
@@ -326,7 +331,7 @@ Run:
 - [ ] **Step 5: Commit.**
 
 ```powershell
-git add core/document_intelligence.py core/document_extractors.py tests/test_document_intelligence.py tests/test_document_disassembly.py
+git add core/document_intelligence.py core/document_extractors.py server.py tests/test_document_intelligence.py tests/test_document_disassembly.py AGENTS.md README.md docs/ENGRAM_1_0_MCP_CONTRACT.md docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
 git commit -m "feat: preserve visual and table evidence"
 ```
 

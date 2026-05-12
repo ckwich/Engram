@@ -170,7 +170,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `preview_source_connector` | Preview local source intake without writing. |
 | `list_document_extractors` | List bundled and external document extraction capabilities. |
 | `preview_document_source_connector` | Preview local Markdown/text/HTML and URL/external parser request arguments without writing. |
-| `prepare_document_disassembly` | Prepare a no-write local PDF page/text/image inventory with quality warnings and portable artifact refs. |
+| `prepare_document_disassembly` | Prepare a no-write local PDF page/text/image inventory with quality warnings, portable artifact refs, visual candidates, and an OCR/vision follow-up request. |
 | `prepare_document_extraction_request` | Prepare a no-write external parser request for PDF/DOCX/image-bearing sources. |
 | `prepare_document_extraction_result` | Normalize external parser output into no-write preview arguments. |
 | `preview_document_extraction` | Preview document evidence and chunks without writing. |
@@ -501,7 +501,7 @@ The review flow is:
 prepare_source_memory -> inspect draft -> store_prepared_memory
 ```
 
-Use `preview_memory_chunks`, `preview_source_connector`, `list_document_extractors`, `preview_document_source_connector`, `prepare_document_disassembly`, `prepare_document_extraction_request`, `prepare_document_extraction_result`, `preview_document_extraction`, `prepare_document_draft`, `prepare_document_promotion_transaction`, `prepare_visual_extraction_request`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any write happens. Document disassembly, extraction requests/results, draft proposals, promotion operation plans, and image/OCR requests or observations are evidence records, not trusted active memory, until a later explicit review path promotes them. Visual extraction requests include a `visual_evidence_contract` and `framework_strategy` so an agent can use native vision when available, or hand work to an external OCR/vision framework and return observations through `preview_visual_extraction`.
+Use `preview_memory_chunks`, `preview_source_connector`, `list_document_extractors`, `preview_document_source_connector`, `prepare_document_disassembly`, `prepare_document_extraction_request`, `prepare_document_extraction_result`, `preview_document_extraction`, `prepare_document_draft`, `prepare_document_promotion_transaction`, `prepare_visual_extraction_request`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any write happens. Document disassembly, extraction requests/results, draft proposals, promotion operation plans, and image/OCR requests or observations are evidence records, not trusted active memory, until a later explicit review path promotes them. Visual extraction requests include a `visual_evidence_contract` and `framework_strategy` so an agent can use native vision when available, or hand work to an external OCR/vision framework and return observations through `preview_visual_extraction`. Visual/table evidence records preserve page number, source artifact id, coordinates/bounding boxes when available, confidence, and extractor id.
 
 Source intake never auto-promotes active memories. Drafts are review records with
 `status: "draft"`, `active_memory_write_performed: false`, and promotion guidance

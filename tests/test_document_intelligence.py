@@ -118,6 +118,36 @@ def test_prepare_visual_artifact_record_marks_ocr_vision_as_reviewable_evidence(
     assert artifact["provenance"]["bounding_box"] == {"x": 0.1, "y": 0.2, "width": 0.5, "height": 0.25}
 
 
+def test_visual_artifact_records_preserve_visual_table_source_provenance():
+    source_artifact_id = "document_artifacts/page_images/aa/page-004.png"
+    coordinates = {"x": 0.12, "y": 0.18, "width": 0.44, "height": 0.21}
+
+    for artifact_type in ("figure", "table", "caption", "ocr_block", "page_crop", "diagram"):
+        artifact = prepare_visual_artifact_record(
+            document_id="doc_visual",
+            artifact_type=artifact_type,
+            source_ref={
+                "source_uri": "file:///docs/design-book.pdf",
+                "source_artifact_id": source_artifact_id,
+            },
+            extractor_id="local-vision-v1",
+            extractor_kind="ocr_vision",
+            page_number=4,
+            bounding_box=coordinates,
+            confidence=0.76,
+            text="Visible text" if artifact_type in {"caption", "ocr_block"} else None,
+            description=f"Candidate {artifact_type} evidence.",
+        )
+
+        assert artifact["artifact_type"] == artifact_type
+        assert artifact["extractor"]["id"] == "local-vision-v1"
+        assert artifact["confidence"] == 0.76
+        assert artifact["provenance"]["page_number"] == 4
+        assert artifact["provenance"]["source_artifact_id"] == source_artifact_id
+        assert artifact["provenance"]["bounding_box"] == coordinates
+        assert artifact["provenance"]["coordinates"] == coordinates
+
+
 def test_prepare_visual_artifact_record_validates_confidence_bbox_and_provenance():
     with pytest.raises(ValueError, match="confidence must be between 0 and 1"):
         prepare_visual_artifact_record(
@@ -297,6 +327,41 @@ def test_prepare_visual_extraction_request_allows_agent_native_vision_with_same_
         "promotion_path": "review_visual_artifacts_before_document_draft",
     }
     assert request["visual_evidence_contract"]["trusted_memory"] is False
+
+
+def test_preview_visual_extraction_accepts_coordinates_alias_and_source_artifact_ids():
+    document = prepare_document_record(
+        title="Design Book",
+        source_uri="file:///docs/design-book.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "a" * 64,
+        media_type="application/pdf",
+    )
+
+    preview = preview_visual_extraction(
+        document_record=document,
+        observations=[
+            {
+                "artifact_type": "table",
+                "source_ref": {
+                    "source_uri": "file:///docs/design-book.pdf",
+                    "source_artifact_id": "document_artifacts/page_images/bb/page-012.png",
+                },
+                "page_number": 12,
+                "coordinates": {"x": 0.05, "y": 0.2, "width": 0.8, "height": 0.3},
+                "confidence": 0.88,
+                "description": "A table comparing design principles.",
+            }
+        ],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    artifact = preview["visual_artifacts"][0]
+    assert artifact["artifact_type"] == "table"
+    assert artifact["provenance"]["source_artifact_id"] == "document_artifacts/page_images/bb/page-012.png"
+    assert artifact["provenance"]["coordinates"] == {"x": 0.05, "y": 0.2, "width": 0.8, "height": 0.3}
+    assert artifact["extractor"]["id"] == "agent-native-vision"
 
 
 def test_prepare_visual_extraction_request_validates_images_and_capabilities():

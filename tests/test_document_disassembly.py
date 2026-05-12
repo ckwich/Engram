@@ -84,6 +84,20 @@ def test_prepare_pdf_disassembly_uses_poppler_inventory_without_writes(tmp_path)
     assert "visual_review_needed" in {warning["code"] for warning in payload["quality_report"]["warnings"]}
     assert payload["artifact_manifest"]["record_type"] == "document_artifact_manifest"
     assert payload["artifact_manifest"]["resume"]["states"]["2"] == "visual_needed"
+    candidates = payload["visual_artifact_candidates"]
+    assert [candidate["page_number"] for candidate in candidates] == [2, 3]
+    assert {candidate["artifact_type"] for candidate in candidates} == {"page_crop"}
+    assert all(candidate["source_artifact_id"] for candidate in candidates)
+    assert all(candidate["extractor"]["id"] == "engram-local-pdf-disassembly" for candidate in candidates)
+    assert payload["visual_extraction_request"]["record_type"] == "visual_extraction_request"
+    assert [ref["page_number"] for ref in payload["visual_extraction_request"]["image_refs"]] == [2, 3]
+    assert set(payload["visual_extraction_request"]["requested_capabilities"]) == {
+        "caption_alt_text",
+        "diagram_description",
+        "figure_description",
+        "ocr_text",
+        "table_structure",
+    }
     assert payload["promotion_guidance"]["auto_promote"] is False
     assert {receipt["tool"] for receipt in payload["extraction_receipts"]} == {
         "pdfinfo",

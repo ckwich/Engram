@@ -813,7 +813,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
             "list_document_extractors": "List bundled and external document extraction capabilities without running providers.",
-            "prepare_document_disassembly": "Prepare a no-write local PDF page/text/image inventory using local tools when available.",
+            "prepare_document_disassembly": "Prepare a no-write local PDF page/text/image inventory, quality report, artifact manifest, visual candidates, and visual extraction request using local tools when available.",
             "preview_document_source_connector": "Preview local Markdown/text/HTML extraction arguments plus URL/external parser request arguments without writing memory.",
             "prepare_document_extraction_request": "Prepare a no-write external document parsing request for PDF/DOCX/image-bearing sources.",
             "prepare_document_extraction_result": "Normalize external parser output into no-write preview arguments and provenance.",
@@ -870,7 +870,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
             "list_document_extractors() before choosing a local parser, OCR/vision adapter, or agent-native preview path",
             "preview_document_source_connector(connector_type='local_path', target='docs') before document extraction",
-            "prepare_document_disassembly(source_path='C:/docs/book.pdf') for no-write local PDF page/text/image inventory",
+            "prepare_document_disassembly(source_path='C:/docs/book.pdf') for no-write local PDF page/text/image inventory plus visual/OCR follow-up request",
             "prepare_document_extraction_request(source_ref={'source_uri': 'file:///notes.pdf'}, source_type='pdf', requested_outputs=['markdown', 'page_images']) before running a local parser",
             "prepare_document_extraction_result(extraction_request=req, title='Notes', content=markdown, media_type='text/markdown') before preview_document_extraction",
             "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
@@ -1483,10 +1483,11 @@ async def prepare_document_disassembly(
 
     This beta helper currently supports PDF files through local Poppler-style
     tools (`pdfinfo`, `pdftotext`, and `pdfimages`). It inventories pages,
-    available text, image-bearing pages, extraction receipts, and quality seed
-    signals without storing memory or promoting graph edges. Review the returned
-    evidence before using preview_document_extraction, visual extraction, or
-    document draft promotion.
+    available text, image-bearing pages, extraction receipts, quality seed
+    signals, portable artifact refs, visual/page-crop candidates, and a prepared
+    visual extraction request without storing memory or promoting graph edges.
+    Review the returned evidence before using preview_document_extraction,
+    visual extraction, or document draft promotion.
     """
     started_at = time.perf_counter()
     input_payload = {"source_path": source_path, "source_type": source_type, "max_pages": max_pages}

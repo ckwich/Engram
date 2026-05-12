@@ -611,7 +611,10 @@ image recognition as required, including OCR-only and agent-native vision
 flows. Each request includes a `visual_evidence_contract` and
 `framework_strategy` so agents know whether native vision is enough, when an
 external OCR/vision framework is required, and that observations must return
-through `preview_visual_extraction` as reviewable visual artifacts.
+through `preview_visual_extraction` as reviewable visual artifacts. Visual
+artifact records now preserve source artifact id, page number, coordinates and
+bounding boxes when available, confidence, and extractor id for figure, table,
+caption, OCR block, page crop, and diagram evidence.
 
 Document analysis should identify:
 
@@ -651,8 +654,10 @@ a no-write local PDF page/text/image inventory through Poppler-compatible
 `pdfinfo`, `pdftotext`, and `pdfimages` tools when available. It returns source
 hashes, page text status, image-bearing pages, extraction receipts, quality seed
 signals, deterministic document quality warnings, portable artifact refs, and
-page-level resume states without promoting memory. It is the first disassembly
-slice, not the final OCR/table/materialized-artifact pipeline.
+page-level resume states without promoting memory. It also returns page-crop
+visual candidates and a prepared OCR/vision request for low-text, no-text, or
+image-bearing pages, keeping visual/table analysis review-first instead of
+automatic. It is not yet the final materialized artifact writer.
 
 ## Watchers
 

@@ -69,10 +69,12 @@ PROMOTION_GUIDANCE = {
 EXPECTED_VISUAL_OBSERVATION_FIELDS = [
     "artifact_type",
     "source_ref",
+    "source_artifact_id",
     "text",
     "description",
     "page_number",
     "bounding_box",
+    "coordinates",
     "confidence",
     "metadata",
 ]
@@ -207,6 +209,7 @@ def prepare_visual_artifact_record(
     normalized_page = _optional_positive_int(page_number, "page_number")
     normalized_box = _normalize_bounding_box(bounding_box)
     normalized_confidence = _normalize_confidence(confidence)
+    normalized_source_artifact_id = _source_artifact_id_from_ref(normalized_source_ref)
 
     artifact_seed = "|".join(
         [
@@ -237,8 +240,10 @@ def prepare_visual_artifact_record(
         },
         "provenance": {
             "source_ref": normalized_source_ref,
+            "source_artifact_id": normalized_source_artifact_id,
             "page_number": normalized_page,
             "bounding_box": normalized_box,
+            "coordinates": normalized_box,
         },
         "metadata": dict(metadata or {}),
         "review_status": "evidence",
@@ -750,7 +755,7 @@ def preview_visual_extraction(
             text=observation.get("text"),
             description=observation.get("description"),
             page_number=observation.get("page_number"),
-            bounding_box=observation.get("bounding_box"),
+            bounding_box=observation.get("bounding_box") or observation.get("coordinates"),
             confidence=observation.get("confidence"),
             metadata=observation.get("metadata"),
         )
@@ -834,6 +839,13 @@ def _normalize_source_ref(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or not value:
         raise ValueError("source_ref is required")
     return dict(value)
+
+
+def _source_artifact_id_from_ref(value: dict[str, Any]) -> str | None:
+    return _optional_text(
+        value.get("source_artifact_id") or value.get("artifact_id") or value.get("ref"),
+        "source_ref.source_artifact_id",
+    )
 
 
 def _normalize_image_refs(value: Any) -> list[dict[str, Any]]:
