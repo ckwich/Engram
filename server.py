@@ -915,6 +915,7 @@ async def daemon_status() -> dict[str, Any]:
             "retrieve_memory",
             "store_memory",
             "write_memory",
+            "store_prepared_memory",
             "check_duplicate",
             "update_memory_metadata",
             "repair_memory_metadata",
@@ -2008,6 +2009,25 @@ async def store_prepared_memory(
     def _finish(payload: dict[str, Any]) -> dict[str, Any]:
         _record_usage_for_payload("store_prepared_memory", input_payload, payload, started_at)
         return payload
+
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon(
+                "store_prepared_memory",
+                {
+                    "draft_id": draft_id,
+                    "selected_items": selected_items,
+                    "force": force,
+                },
+            )
+        except EngramDaemonClientError as e:
+            payload = {
+                "stored_count": 0,
+                "stored": [],
+                "skipped": [],
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        return _finish(payload)
 
     draft = source_intake_manager.get_source_draft(draft_id)
     if draft is None:

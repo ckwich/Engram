@@ -55,6 +55,7 @@ def test_client_methods_map_to_daemon_routes():
     client.check_duplicate({"key": "k", "content": "body"})
     client.update_memory_metadata({"key": "k", "title": "Updated"})
     client.repair_memory_metadata({"keys": ["k"], "dry_run": False})
+    client.store_prepared_memory({"draft_id": "draft-a", "selected_items": [0], "force": True})
     client.delete_memory({"key": "k"})
 
     assert [call[1].rsplit("/", 1)[-1] for call in transport.calls] == [
@@ -65,6 +66,7 @@ def test_client_methods_map_to_daemon_routes():
         "check_duplicate",
         "update_memory_metadata",
         "repair_memory_metadata",
+        "store_prepared_memory",
         "delete_memory",
     ]
 

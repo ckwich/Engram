@@ -49,6 +49,7 @@ def test_daemon_status_checks_configured_daemon(monkeypatch):
     assert "check_duplicate" in payload["stable_tools_routed"]
     assert "update_memory_metadata" in payload["stable_tools_routed"]
     assert "repair_memory_metadata" in payload["stable_tools_routed"]
+    assert "store_prepared_memory" in payload["stable_tools_routed"]
     assert payload["error"] is None
 
 

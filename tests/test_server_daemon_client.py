@@ -104,6 +104,21 @@ class FakeDaemonClient:
             "error": None,
         }
 
+    def store_prepared_memory(self, payload):
+        self.calls.append(("store_prepared_memory", payload))
+        return {
+            "stored_count": 1,
+            "stored": [
+                {
+                    "index": 0,
+                    "key": "daemon_source_memory",
+                    "result": {"key": "daemon_source_memory", "chunk_count": 1},
+                }
+            ],
+            "skipped": [],
+            "error": None,
+        }
+
     def delete_memory(self, payload):
         self.calls.append(("delete_memory", payload))
         return {"key": payload["key"], "deleted": True, "error": None}
@@ -220,5 +235,24 @@ def test_repair_memory_metadata_uses_daemon_when_configured(monkeypatch):
         (
             "repair_memory_metadata",
             {"keys": ["daemon_memory"], "dry_run": False},
+        )
+    ]
+
+
+def test_store_prepared_memory_uses_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    payload = asyncio.run(
+        server.store_prepared_memory("draft-a", selected_items=[0], force=True)
+    )
+
+    assert payload["stored_count"] == 1
+    assert payload["stored"][0]["key"] == "daemon_source_memory"
+    assert client.calls == [
+        (
+            "store_prepared_memory",
+            {"draft_id": "draft-a", "selected_items": [0], "force": True},
         )
     ]

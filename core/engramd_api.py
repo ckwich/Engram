@@ -10,13 +10,19 @@ from typing import Any
 from urllib.parse import urlparse
 
 from core.memory_manager import DuplicateMemoryError, memory_manager
+from core.source_intake import source_intake_manager
 
 
 class EngramDaemonAPI:
     """Small request dispatcher for daemon-owned memory operations."""
 
-    def __init__(self, memory_manager=memory_manager):
+    def __init__(
+        self,
+        memory_manager=memory_manager,
+        source_intake_manager=source_intake_manager,
+    ):
         self.memory_manager = memory_manager
+        self.source_intake_manager = source_intake_manager
 
     def handle(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         """Handle one daemon request and return {status, body}."""
@@ -54,6 +60,8 @@ class EngramDaemonAPI:
                 return await self._retrieve_memory(request)
             if route == "/v1/store_memory":
                 return await self._store_memory(request)
+            if route == "/v1/store_prepared_memory":
+                return await self._store_prepared_memory(request)
             if route == "/v1/check_duplicate":
                 return await self._check_duplicate(request)
             if route == "/v1/update_memory_metadata":
@@ -162,6 +170,96 @@ class EngramDaemonAPI:
         except ValueError as exc:
             return self._error(400, "invalid_request", str(exc))
         return self._ok({"stored": True, "result": result, "error": None})
+
+    async def _store_prepared_memory(self, request: dict[str, Any]) -> dict[str, Any]:
+        draft_id = str(request.get("draft_id") or "").strip()
+        if not draft_id:
+            return self._ok(
+                {
+                    "stored_count": 0,
+                    "stored": [],
+                    "skipped": [],
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "draft_id is required",
+                    },
+                }
+            )
+        draft = self.source_intake_manager.get_source_draft(draft_id)
+        if draft is None:
+            return self._ok(
+                {
+                    "stored_count": 0,
+                    "stored": [],
+                    "skipped": [],
+                    "error": {
+                        "code": "not_found",
+                        "message": f"source draft not found: {draft_id}",
+                    },
+                }
+            )
+        if draft.get("status") == "rejected":
+            return self._ok(
+                {
+                    "stored_count": 0,
+                    "stored": [],
+                    "skipped": [],
+                    "error": {
+                        "code": "invalid_state",
+                        "message": "source draft is rejected and cannot be promoted",
+                    },
+                }
+            )
+
+        proposed_memories = draft.get("proposed_memories", [])
+        requested_indices = request.get("selected_items")
+        indices = (
+            requested_indices
+            if isinstance(requested_indices, list)
+            else list(range(len(proposed_memories)))
+        )
+        force = bool(request.get("force", False))
+        stored: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+
+        for index in indices:
+            if not isinstance(index, int) or index < 0 or index >= len(proposed_memories):
+                skipped.append({"index": index, "reason": "invalid_index"})
+                continue
+            memory = proposed_memories[index]
+            try:
+                result = await self.memory_manager.store_memory_async(
+                    key=memory["key"],
+                    content=memory["content"],
+                    tags=memory.get("tags", []),
+                    title=memory.get("title"),
+                    related_to=memory.get("related_to"),
+                    force=force,
+                    project=memory.get("project"),
+                    domain=memory.get("domain"),
+                    status=memory.get("status"),
+                    canonical=memory.get("canonical"),
+                )
+            except DuplicateMemoryError as exc:
+                skipped.append(
+                    {
+                        "index": index,
+                        "key": memory.get("key"),
+                        "reason": "duplicate",
+                        "message": str(exc),
+                    }
+                )
+                continue
+            stored.append({"index": index, "key": memory["key"], "result": result})
+
+        return self._ok(
+            {
+                "stored_count": len(stored),
+                "stored": stored,
+                "skipped": skipped,
+                "error": None,
+            }
+        )
 
     async def _check_duplicate(self, request: dict[str, Any]) -> dict[str, Any]:
         key = str(request.get("key") or "").strip()

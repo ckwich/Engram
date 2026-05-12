@@ -110,6 +110,32 @@ class FakeMemoryManager:
         return key == "daemon_memory"
 
 
+class FakeSourceIntakeManager:
+    def __init__(self, draft=None):
+        self.draft = draft or {
+            "draft_id": "draft-a",
+            "status": "draft",
+            "proposed_memories": [
+                {
+                    "key": "daemon_source_memory",
+                    "content": "Promoted source body.",
+                    "title": "Daemon Source Memory",
+                    "tags": ["source", "daemon"],
+                    "related_to": [],
+                    "project": "Engram",
+                    "domain": "source-intake",
+                    "status": "active",
+                    "canonical": False,
+                }
+            ],
+        }
+
+    def get_source_draft(self, draft_id):
+        if draft_id == self.draft.get("draft_id"):
+            return self.draft
+        return None
+
+
 def test_health_reports_daemon_and_storage_stats():
     api = EngramDaemonAPI(memory_manager=FakeMemoryManager())
 
@@ -274,6 +300,32 @@ def test_repair_memory_metadata_preserves_daemon_result_shape():
     assert response["body"]["requested_count"] == 1
     assert response["body"]["repaired_count"] == 1
     assert response["body"]["dry_run"] is False
+    assert response["body"]["error"] is None
+
+
+def test_store_prepared_memory_promotes_source_draft_via_daemon():
+    manager = FakeMemoryManager()
+    api = EngramDaemonAPI(
+        memory_manager=manager,
+        source_intake_manager=FakeSourceIntakeManager(),
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/store_prepared_memory",
+        {
+            "draft_id": "draft-a",
+            "selected_items": [0],
+            "force": True,
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["stored_count"] == 1
+    assert response["body"]["stored"][0]["key"] == "daemon_source_memory"
+    assert response["body"]["skipped"] == []
+    assert manager.stored["key"] == "daemon_source_memory"
+    assert manager.stored["force"] is True
     assert response["body"]["error"] is None
 
 
