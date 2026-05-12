@@ -287,6 +287,7 @@ def prepare_visual_extraction_request(
     normalized_extractor_id = _require_text(extractor_id, "extractor_id")
     normalized_extractor_kind = _normalize_extractor_kind(extractor_kind)
     normalized_instructions = _optional_text(instructions, "instructions")
+    external_framework_required = normalized_extractor_kind != "agent_native"
     request_seed = "|".join(
         [
             document_id,
@@ -308,10 +309,12 @@ def prepare_visual_extraction_request(
         "extractor": {
             "id": normalized_extractor_id,
             "kind": normalized_extractor_kind,
-            "external_framework_required": normalized_extractor_kind != "agent_native",
+            "external_framework_required": external_framework_required,
         },
-        "image_recognition_required": normalized_extractor_kind in {"vision", "ocr_vision"},
+        "image_recognition_required": True,
         "expected_observation_fields": list(EXPECTED_VISUAL_OBSERVATION_FIELDS),
+        "visual_evidence_contract": _visual_evidence_contract(),
+        "framework_strategy": _visual_framework_strategy(external_framework_required),
         "review_status": "request",
         "active_memory_write_performed": False,
         "promotion_required": True,
@@ -843,6 +846,26 @@ def _normalize_visual_capabilities(value: Any) -> list[str]:
             raise ValueError(f"Unsupported visual capability: {capability}. Valid: {valid}")
         normalized.add(capability)
     return sorted(normalized)
+
+
+def _visual_evidence_contract() -> dict[str, Any]:
+    return {
+        "preview_tool": "preview_visual_extraction",
+        "artifact_record_type": "visual_artifact",
+        "receipt_record_type": "extractor_receipt",
+        "expected_observation_fields": list(EXPECTED_VISUAL_OBSERVATION_FIELDS),
+        "trusted_memory": False,
+        "promotion_required": True,
+    }
+
+
+def _visual_framework_strategy(external_framework_required: bool) -> dict[str, Any]:
+    return {
+        "agent_native_allowed": not external_framework_required,
+        "external_framework_required": external_framework_required,
+        "return_tool": "preview_visual_extraction",
+        "promotion_path": "review_visual_artifacts_before_document_draft",
+    }
 
 
 def _normalize_document_outputs(value: Any) -> list[str]:

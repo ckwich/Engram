@@ -227,6 +227,65 @@ def test_prepare_visual_extraction_request_marks_external_framework_work_as_revi
     assert request["active_memory_write_performed"] is False
     assert request["promotion_required"] is True
     assert "artifact_type" in request["expected_observation_fields"]
+    assert request["visual_evidence_contract"]["preview_tool"] == "preview_visual_extraction"
+    assert request["visual_evidence_contract"]["artifact_record_type"] == "visual_artifact"
+    assert request["framework_strategy"] == {
+        "agent_native_allowed": False,
+        "external_framework_required": True,
+        "return_tool": "preview_visual_extraction",
+        "promotion_path": "review_visual_artifacts_before_document_draft",
+    }
+
+
+def test_prepare_visual_extraction_request_treats_ocr_as_image_recognition_work():
+    document = prepare_document_record(
+        title="Scanned Notes",
+        source_uri="file:///docs/scanned-notes.png",
+        source_type="image",
+        content_hash="sha256:" + "f" * 64,
+        media_type="image/png",
+    )
+
+    request = prepare_visual_extraction_request(
+        document_record=document,
+        image_refs=[{"source_uri": "file:///docs/scanned-notes.png", "image_hash": "sha256:" + "a" * 64}],
+        requested_capabilities=["ocr_text"],
+        extractor_id="local-ocr-v1",
+        extractor_kind="ocr",
+    )
+
+    assert request["image_recognition_required"] is True
+    assert request["extractor"]["external_framework_required"] is True
+    assert request["framework_strategy"]["agent_native_allowed"] is False
+    assert request["visual_evidence_contract"]["expected_observation_fields"] == request["expected_observation_fields"]
+
+
+def test_prepare_visual_extraction_request_allows_agent_native_vision_with_same_evidence_contract():
+    document = prepare_document_record(
+        title="UI Screenshot",
+        source_uri="file:///docs/ui.png",
+        source_type="screenshot",
+        content_hash="sha256:" + "a" * 64,
+        media_type="image/png",
+    )
+
+    request = prepare_visual_extraction_request(
+        document_record=document,
+        image_refs=[{"source_uri": "file:///docs/ui.png", "image_hash": "sha256:" + "b" * 64}],
+        requested_capabilities=["screenshot_state"],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    assert request["image_recognition_required"] is True
+    assert request["extractor"]["external_framework_required"] is False
+    assert request["framework_strategy"] == {
+        "agent_native_allowed": True,
+        "external_framework_required": False,
+        "return_tool": "preview_visual_extraction",
+        "promotion_path": "review_visual_artifacts_before_document_draft",
+    }
+    assert request["visual_evidence_contract"]["trusted_memory"] is False
 
 
 def test_prepare_visual_extraction_request_validates_images_and_capabilities():

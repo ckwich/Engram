@@ -1711,6 +1711,9 @@ def test_prepare_visual_extraction_request_tool_returns_no_write_request():
     assert payload["request"]["active_memory_write_performed"] is False
     assert payload["request"]["extractor"]["external_framework_required"] is True
     assert payload["request"]["requested_capabilities"] == ["diagram_description", "ocr_text"]
+    assert payload["request"]["image_recognition_required"] is True
+    assert payload["request"]["visual_evidence_contract"]["preview_tool"] == "preview_visual_extraction"
+    assert payload["request"]["framework_strategy"]["return_tool"] == "preview_visual_extraction"
 
 
 def test_prepare_visual_extraction_request_tool_returns_structured_invalid_request():

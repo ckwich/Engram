@@ -586,6 +586,13 @@ from an image should retain provenance to the rendered page or image artifact.
 Engram should allow provider-neutral local or external OCR/vision adapters, but
 the storage contract must not depend on one model vendor.
 
+Implementation status, 2026-05-12: visual extraction requests now always mark
+image recognition as required, including OCR-only and agent-native vision
+flows. Each request includes a `visual_evidence_contract` and
+`framework_strategy` so agents know whether native vision is enough, when an
+external OCR/vision framework is required, and that observations must return
+through `preview_visual_extraction` as reviewable visual artifacts.
+
 Document analysis should identify:
 
 - summary

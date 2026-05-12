@@ -93,7 +93,7 @@ where typed, and focused tests.
 | `preview_document_extraction` | beta | `dict{preview, error}` | No-write document evidence/chunk preview. |
 | `prepare_document_draft` | beta | `dict{draft, error}` | No-write document memory/graph proposal draft; does not promote. |
 | `prepare_document_promotion_transaction` | beta | `dict{transaction, error}` | No-write operation plan for reviewed document draft promotion; does not execute writes. |
-| `prepare_visual_extraction_request` | beta | `dict{request, error}` | No-write OCR/vision work request; does not run a provider. |
+| `prepare_visual_extraction_request` | beta | `dict{request, error}` | No-write OCR/vision work request with `visual_evidence_contract` and `framework_strategy`; does not run a provider. |
 | `preview_visual_extraction` | beta | `dict{preview, error}` | No-write caller-supplied OCR/vision observation preview; does not run a provider. |
 | `prepare_source_memory` | beta | `dict{draft, error}` | Draft only; malformed input returns structured errors. |
 | `list_source_drafts` | beta | `dict{count, drafts, error}` | Draft inventory. |
