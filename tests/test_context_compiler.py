@@ -64,6 +64,59 @@ def test_compile_context_packet_preserves_receipts_and_review_warnings():
     assert packet["next_actions"][0]["tool"] == "retrieve_chunk"
 
 
+def test_compile_context_packet_warns_about_active_conflict_edges():
+    context_payload = {
+        "query": "resume Engram rebuild",
+        "count": 1,
+        "chunks": [{"key": "current_decision", "chunk_id": 0, "text": "Use Memory OS workflow packets."}],
+        "citations": [],
+        "omitted": [],
+        "budget_chars": 4000,
+        "used_chars": 35,
+        "receipt": {"stale_policy": "included"},
+        "error": None,
+    }
+
+    packet = compile_context_packet(
+        task="resume Engram rebuild",
+        profile_id="repo_resume",
+        profile=list_context_profiles()["profiles"]["repo_resume"],
+        context_payload=context_payload,
+        project="C:/Dev/Engram",
+        query="resume Engram rebuild",
+        conflict_scans=[
+            {
+                "ref": {"kind": "memory", "key": "current_decision"},
+                "count": 1,
+                "conflicts": [
+                    {
+                        "edge_type": "contradicts",
+                        "from_ref": {"kind": "memory", "key": "current_decision"},
+                        "to_ref": {"kind": "memory", "key": "old_decision"},
+                        "evidence": "Current decision replaces old decision.",
+                    }
+                ],
+                "error": None,
+            }
+        ],
+    )
+
+    assert packet["warnings"] == [
+        {
+            "code": "conflict_edges_detected",
+            "message": "1 active conflict graph edge was found for selected context memories.",
+        }
+    ]
+    assert packet["receipt"]["conflict_scans"] == [
+        {
+            "key": "current_decision",
+            "count": 1,
+            "edge_types": ["contradicts"],
+            "error": None,
+        }
+    ]
+
+
 def test_build_handoff_packet_turns_context_into_resume_artifact():
     context_packet = {
         "record_type": "context_packet",

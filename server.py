@@ -191,6 +191,39 @@ def _payload_error_message(payload: Any) -> str | None:
     return str(error)
 
 
+def _collect_context_conflict_scans(
+    context_payload: dict[str, Any],
+    *,
+    enabled: bool,
+) -> list[dict[str, Any]]:
+    """Return compact conflict_scan payloads for selected context memory refs."""
+    if not enabled:
+        return []
+    scans: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for chunk in context_payload.get("chunks") or []:
+        key = str(chunk.get("key") or "").strip()
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        ref = {"kind": "memory", "key": key}
+        try:
+            scans.append(graph_manager.conflict_scan(ref=ref, status="active"))
+        except Exception as exc:
+            scans.append(
+                {
+                    "schema_version": None,
+                    "ref": ref,
+                    "status": "active",
+                    "edge_types": [],
+                    "count": 0,
+                    "conflicts": [],
+                    "error": _tool_error("runtime_error", str(exc)),
+                }
+            )
+    return scans
+
+
 def _record_usage(
     tool_name: str,
     input_payload: dict[str, Any],
@@ -2393,7 +2426,9 @@ async def prepare_context(
 
     This is an agent-workflow helper on top of context_pack(). It selects a
     retrieval profile, builds a task-focused query, returns bounded cited
-    chunks plus warnings/next actions, and never writes or promotes memory.
+    chunks plus stale/conflict warnings and next actions, and never writes or
+    promotes memory. Graph-enabled profiles run read-only conflict scans for
+    selected memory refs and return counts/types only, not neighbor bodies.
     """
     started_at = time.perf_counter()
     normalized_tags = _normalize_string_list(tags)
@@ -2468,6 +2503,10 @@ async def prepare_context(
     finally:
         _USAGE_METERING_ENABLED.reset(metering_token)
 
+    conflict_scans = _collect_context_conflict_scans(
+        context_payload,
+        enabled=selected_use_graph,
+    )
     packet = compile_context_packet(
         task=task,
         profile_id=profile_payload["id"],
@@ -2477,6 +2516,7 @@ async def prepare_context(
         domain=domain,
         tags=normalized_tags,
         query=query,
+        conflict_scans=conflict_scans,
     )
     payload = {
         "task": task,

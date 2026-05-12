@@ -2098,6 +2098,71 @@ def test_prepare_context_uses_profile_defaults_and_returns_context_packet(monkey
     assert payload["error"] is None
 
 
+def test_prepare_context_warns_about_graph_conflicts_for_selected_refs(monkeypatch):
+    server = load_server_module()
+    scanned_refs: list[tuple[dict[str, str], str]] = []
+
+    async def fake_context_pack(query: str, **kwargs):
+        return {
+            "query": query,
+            "count": 1,
+            "chunks": [
+                {
+                    "key": "current_decision",
+                    "chunk_id": 0,
+                    "title": "Current Decision",
+                    "text": "Use the Memory OS workflow packet contract.",
+                }
+            ],
+            "citations": [],
+            "omitted": [],
+            "budget_chars": kwargs["budget_chars"],
+            "used_chars": 43,
+            "receipt": {
+                "semantic_candidate_count": 1,
+                "graph_candidate_count": 0,
+                "selected_chunk_count": 1,
+                "omitted_count": 0,
+                "stale_policy": "included",
+            },
+            "error": None,
+        }
+
+    def fake_conflict_scan(*, ref=None, status="active"):
+        scanned_refs.append((ref, status))
+        return {
+            "schema_version": "2026-04-30.graph.v1.conflict-scan.v1",
+            "ref": ref,
+            "status": status,
+            "edge_types": ["contradicts", "invalidates", "supersedes"],
+            "count": 1,
+            "conflicts": [{"edge_type": "supersedes"}],
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "context_pack", fake_context_pack)
+    monkeypatch.setattr(server.graph_manager, "conflict_scan", fake_conflict_scan)
+
+    payload = asyncio.run(
+        server.prepare_context(
+            task="resume Engram rebuild",
+            project="C:/Dev/Engram",
+            profile="repo_resume",
+        )
+    )
+
+    assert scanned_refs == [({"kind": "memory", "key": "current_decision"}, "active")]
+    assert payload["packet"]["warnings"] == [
+        {
+            "code": "conflict_edges_detected",
+            "message": "1 active conflict graph edge was found for selected context memories.",
+        }
+    ]
+    assert payload["packet"]["receipt"]["conflict_scans"] == [
+        {"key": "current_decision", "count": 1, "edge_types": ["supersedes"], "error": None}
+    ]
+
+
 def test_prepare_context_rejects_unknown_profile_before_retrieval(monkeypatch):
     server = load_server_module()
 

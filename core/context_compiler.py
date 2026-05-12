@@ -112,13 +112,20 @@ def compile_context_packet(
     query: str,
     domain: str | None = None,
     tags: list[str] | None = None,
+    conflict_scans: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compile a no-write agent context packet from a context_pack payload."""
     chunks = list(context_payload.get("chunks") or [])
     citations = list(context_payload.get("citations") or [])
     omitted = list(context_payload.get("omitted") or [])
     context_receipt = dict(context_payload.get("receipt") or {})
-    warnings = _build_context_warnings(context_payload, context_receipt, omitted)
+    conflict_scan_receipts = _summarize_conflict_scans(conflict_scans or [])
+    warnings = _build_context_warnings(
+        context_payload,
+        context_receipt,
+        omitted,
+        conflict_scan_receipts,
+    )
 
     return {
         "schema_version": CONTEXT_PACKET_SCHEMA_VERSION,
@@ -150,6 +157,7 @@ def compile_context_packet(
         "receipt": {
             "profile_id": profile_id,
             "context_pack": context_receipt,
+            "conflict_scans": conflict_scan_receipts,
             "source": "context_pack",
             "write_policy": "no_write",
         },
@@ -214,6 +222,7 @@ def _build_context_warnings(
     context_payload: dict[str, Any],
     context_receipt: dict[str, Any],
     omitted: list[dict[str, Any]],
+    conflict_scan_receipts: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     warnings: list[dict[str, str]] = []
     error = context_payload.get("error")
@@ -237,7 +246,54 @@ def _build_context_warnings(
                 "message": "Some candidate chunks were omitted by budget, validation, or retrieval errors.",
             }
         )
+    conflict_count = sum(int(receipt.get("count") or 0) for receipt in conflict_scan_receipts)
+    if conflict_count:
+        edge_word = "edge was" if conflict_count == 1 else "edges were"
+        warnings.append(
+            {
+                "code": "conflict_edges_detected",
+                "message": f"{conflict_count} active conflict graph {edge_word} "
+                "found for selected context memories.",
+            }
+        )
+    if any(receipt.get("error") for receipt in conflict_scan_receipts):
+        warnings.append(
+            {
+                "code": "conflict_scan_error",
+                "message": "One or more selected context memories could not be checked for graph conflicts.",
+            }
+        )
     return warnings
+
+
+def _summarize_conflict_scans(conflict_scans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for scan in conflict_scans:
+        ref = scan.get("ref") or {}
+        conflicts = list(scan.get("conflicts") or [])
+        edge_types = sorted(
+            {
+                str(conflict.get("edge_type"))
+                for conflict in conflicts
+                if conflict.get("edge_type")
+            }
+        )
+        error = scan.get("error")
+        if isinstance(error, dict):
+            error_code: str | None = str(error.get("code") or "runtime_error")
+        elif error:
+            error_code = str(error)
+        else:
+            error_code = None
+        summaries.append(
+            {
+                "key": ref.get("key"),
+                "count": int(scan.get("count") or len(conflicts)),
+                "edge_types": edge_types,
+                "error": error_code,
+            }
+        )
+    return summaries
 
 
 def _build_next_actions(chunks: list[dict[str, Any]], omitted: list[dict[str, Any]]) -> list[dict[str, str]]:
