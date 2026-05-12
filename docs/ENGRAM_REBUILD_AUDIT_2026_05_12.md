@@ -13,9 +13,11 @@ Engram progress memory was migrated, the queued rebuild progress memory was
 stored in the rebuilt ledger, and the new readiness/status surfaces are
 documented and tested.
 
-Engram is not yet a finished daemon-backed Memory OS or hosted sellable service.
-The remaining blockers are architectural, not mystery bugs: `engramd`, real
-LanceDB/Kuzu corpus spikes, live backend switching, hosted tenant isolation,
+Engram is not yet a finished durable-job daemon runtime or hosted sellable
+service. The remaining blockers are architectural, not mystery bugs:
+expanding `engramd` from an opt-in local routing daemon into the single owner
+for imports, repairs, rebuilds, mappings, queues, and backend jobs; real
+LanceDB/Kuzu corpus spikes; live backend switching; hosted tenant isolation;
 and hosted export/delete/backup guarantees.
 
 ## Evidence Run
@@ -198,7 +200,9 @@ Strong:
 
 Residual risk:
 
-- no daemon yet
+- `engramd` exists as an opt-in local routing daemon, but it is not yet the
+  full durable-job owner for imports, repairs, rebuilds, mappings, queues, or
+  live backend switching
 - LanceDB/Kuzu not proven with real installed dependencies
 - hosted service security is not implemented
 - current-thread MCP transport can still be stale/closed after lazy-load

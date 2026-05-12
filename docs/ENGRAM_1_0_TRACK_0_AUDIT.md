@@ -57,7 +57,7 @@ Track this under Release Track 1 or Track 6. Decide the canonical version source
 
 Resolution update, 2026-05-06:
 
-Track 1 chose product version `1.0.0-dev` for the 1.0 development line while preserving MCP protocol `version: 2` and `schema_version: "2026-04-27"`. `server.py`, `memory_protocol()`, README, and release docs now use that split identity.
+Track 1 originally used a development product version during the 1.0 line. The release-docs slice promotes the local core product identity to `1.0.0` with stability `stable`, while preserving MCP protocol `version: 2` and `schema_version: "2026-04-27"`.
 
 ### P2: `plan.md` contains stale open work relative to the live WebUI
 

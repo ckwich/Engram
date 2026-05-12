@@ -1,8 +1,8 @@
 # Engram 1.0 Release Checklist
 
-Date: 2026-05-06
-Status: Active release checklist
-Scope: Public Engram core release gates
+Date: 2026-05-12
+Status: Engram 1.0 local core release checklist
+Scope: Public Engram core release gates; hosted, tenant, and collaboration product gates are post-1.0
 
 ## Operator Rules
 
@@ -28,6 +28,10 @@ $py = ".\venv\Scripts\python.exe"
 & $py -m pytest -q
 git diff --check
 ```
+
+Expected result: help output names `Engram 1.0.0`, `memory_protocol()`
+reports product stability `stable`, self-test proves the store/search/read/delete
+cycle, and agent eval includes the deterministic Book Dismantling Gate.
 
 When MCP registration or installer behavior changed:
 
@@ -149,6 +153,11 @@ tools are unavailable. When available, it runs `prepare_document_disassembly`
 against the first local PDF with `max_pages=5`, returns no active writes, and
 does not commit source PDFs or extracted copyrighted text.
 
+Manual release smoke may also target a known large PDF in the same directory
+with `max_pages` set low enough to prove page inventory and quality reporting
+without exporting copyrighted content. Record only counts, warning names,
+artifact record types, and whether visual candidates were produced.
+
 ## Final Release Gate
 
 Before tagging or announcing a 1.0 build, run:
@@ -164,3 +173,24 @@ git diff --check
 
 Then verify docs do not present the separate collaboration product as part of
 Engram core.
+
+Latest local validation, 2026-05-12:
+
+- `server.py --help`: reports `Engram 1.0.0`.
+- Memory manager import: reports `ok`.
+- `server.py --self-test`: passed store/search/chunk/context/delete, graph,
+  source drafts, usage meter, operation log, and protocol checks.
+- `server.py --agent-eval`: passed 3 scenarios and 2 workflow checks,
+  including the Book Dismantling Gate with 7 required fixture manifests passed
+  and 0 failed.
+- `pytest -q`: 402 passed, 2 skipped.
+- Manual local PDF smoke, not reproducible from committed fixtures, with
+  `max_pages=5`: two local design-book PDFs, including one large 76.92 MB file,
+  returned no active writes, page inventory, warning codes, visual candidates,
+  artifact manifests, and `pdfinfo`/`pdftotext`/`pdfimages` receipts. Treat
+  this as machine-local operator evidence; the committed reproducible gate is
+  the synthetic Book Dismantling Gate.
+
+1.0 does not require hosted tenant auth, billing, live LanceDB/Kuzu switching,
+team workspaces, rich pages, comments, assignments, mentions, or role-aware
+visibility. Those remain post-1.0 or separate collaboration-product work.

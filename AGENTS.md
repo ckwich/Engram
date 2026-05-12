@@ -4,7 +4,7 @@
 This file governs how AI agents (Codex, Claude Code, etc.) interact with the Engram codebase. Read this before making any changes.
 
 ## Project Overview
-Engram is a local-first MCP memory server with semantic search. Core stack: sentence-transformers + ChromaDB + FastMCP + Flask.
+Engram 1.0 is a local-first, agent-facing Memory OS exposed through MCP. Core stack: sentence-transformers + ChromaDB + FastMCP + Flask, with an opt-in loopback `engramd` daemon for shared local ownership.
 
 ## Required Reading Before Changes
 Always read `plan.md` before modifying core architecture. The three-tier retrieval pattern and chunking strategy are intentional design decisions — don't simplify them away.
@@ -97,13 +97,23 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 - Prefer `context_pack(query="agent memory", use_graph=False, retrieval_mode="semantic")` unless relationship expansion or hybrid identifier ranking is explicitly useful; keep budget accounting and citations visible.
 - Use `python server.py --agent-eval` when validating agent-facing retrieval behavior. It is an operator/CI harness, not an MCP tool; it writes only `_engram_eval_*` temporary memories and removes them during cleanup.
 
+## Engram 1.0 Memory OS Rules
+- Product identity is `Engram 1.0.0` / stability `stable`. MCP protocol identity remains `version: 2` and `schema_version: "2026-04-27"` until an explicit protocol migration is planned.
+- Local JSON memory files remain the authoritative store. ChromaDB remains a rebuildable live vector index. Migration dry runs and round-trip checks must not mutate active memories or ChromaDB.
+- `engramd` mode is opt-in through `ENGRAM_DAEMON_URL`. It routes stable memory operations, source draft lifecycle operations, metadata updates/repair/delete, and no-write document disassembly preparation through the daemon. Direct in-process MCP mode remains supported.
+- Codebase mapping is agent-facing and provider-neutral. Engram prepares source-hashed context and drift receipts; the connected agent writes the synthesis. Do not add hardcoded model subprocesses to mapping.
+- Document intelligence is evidence-first. Local PDF disassembly, artifact manifests, quality reports, visual/OCR requests, understanding packets, draft proposals, graph proposals, and promotion transactions are no-write review surfaces until explicit memory or graph promotion.
+- The Book Dismantling Gate in `server.py --agent-eval` is the minimum release proof for rich document-intelligence claims. Optional local PDF smoke tests may use `C:\Users\colek\Downloads\Design Books`, but never commit copyrighted PDFs, extracted book text, rendered page images, OCR output, or table exports.
+- Hosted auth, tenant isolation, billing, team collaboration, rich pages, comments, assignments, mentions, role-aware visibility, and team workflow UI remain outside Engram core unless a future spec changes the product boundary.
+
 ## Completion Gate
 Before marking any task done:
 1. `python server.py --help` runs without error
 2. `python -c "from core.memory_manager import memory_manager; print('ok')"` succeeds
-3. Store, search, retrieve, delete cycle works end-to-end
-4. No print() statements in server.py or memory_manager.py production paths
-5. If MCP registration or installer behavior changed, `codex mcp get engram` succeeds when the Codex CLI is available
+3. Store, search, retrieve, delete cycle works end-to-end through `python server.py --self-test`
+4. Agent-facing retrieval/source/document workflow gates pass through `python server.py --agent-eval`
+5. No new bare `print()` statements are introduced in `server.py` or `core/memory_manager.py` production paths
+6. If MCP registration or installer behavior changed, `codex mcp get engram` succeeds when the Codex CLI is available
 
 ## Development Environment
 - Python 3.10+

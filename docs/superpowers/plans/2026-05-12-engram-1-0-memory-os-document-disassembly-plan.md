@@ -472,7 +472,7 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_engramd_api.py tests/test_engramd_client.py tests/test_server_daemon_client.py tests/test_server_daemon_status.py tests/test_document_disassembly.py -q
 ```
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```powershell
 git add core/engramd_api.py core/engramd_client.py server.py tests/test_engramd_api.py tests/test_engramd_client.py tests/test_server_daemon_client.py tests/test_server_daemon_status.py README.md docs/ENGRAM_1_0_MCP_CONTRACT.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
@@ -488,12 +488,12 @@ git commit -m "feat: route document jobs through engramd"
 - Modify: `docs/ENGRAM_1_0_RELEASE_CHECKLIST.md`
 - Modify: `docs/ENGRAM_1_0_MIGRATION_NOTES.md`
 
-- [ ] **Step 1: Update public docs.**
+- [x] **Step 1: Update public docs.**
 
 Document local-first daemon mode, document disassembly, codebase mapping,
 migration, and no-collaboration boundary.
 
-- [ ] **Step 2: Run final commands.**
+- [x] **Step 2: Run final commands.**
 
 Run:
 
@@ -507,13 +507,13 @@ git diff --check
 codex mcp get engram
 ```
 
-- [ ] **Step 3: Optional large-book local smoke.**
+- [x] **Step 3: Optional large-book local smoke.**
 
 Run the environment-gated local smoke against the 250-page design book and the
 79 MB book if both files are available. The expected output is quality reports
 and manifests, not committed extracted text.
 
-- [ ] **Step 4: Commit release docs.**
+- [x] **Step 4: Commit release docs.**
 
 ```powershell
 git add README.md AGENTS.md plan.md docs/ENGRAM_1_0_RELEASE_CHECKLIST.md docs/ENGRAM_1_0_MIGRATION_NOTES.md

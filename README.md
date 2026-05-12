@@ -7,9 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
 
-Engram is a local Model Context Protocol (MCP) server that gives AI agents a durable, searchable memory across sessions.
+Engram 1.0 is a local Model Context Protocol (MCP) server that gives AI agents a durable, searchable memory across sessions.
 
-It stores memories as plain JSON, indexes them with local embeddings, and exposes agent-friendly tools for search, bounded context retrieval, source intake, codebase mapping, relationship tracking, and retrieval-quality checks.
+It stores memories as plain JSON, indexes them with local embeddings, and exposes agent-friendly tools for search, bounded context retrieval, source intake, document disassembly, codebase mapping, relationship tracking, and retrieval-quality checks.
 
 Engram is built around one simple idea: agents should retrieve the smallest useful context first, then expand only when needed.
 
@@ -25,6 +25,7 @@ Engram aims for a middle path:
 - Search semantically instead of relying on exact keywords.
 - Retrieve snippets before chunks, and chunks before full documents.
 - Give agents receipts for what they loaded and why.
+- Dismantle messy source material into reviewable evidence before it becomes memory.
 - Keep durable memory readable, editable, and recoverable.
 
 The result is a practical intersession memory layer for coding agents, research agents, local assistants, and MCP clients that need continuity without dumping an entire knowledge base into every prompt.
@@ -60,6 +61,15 @@ The result is a practical intersession memory layer for coding agents, research 
 - **Named ingestion pipelines** for common source types.
 - **Codebase mapping jobs** that gather bounded repository context while the connected agent performs synthesis.
 - **Source drift detection** so stale mapping results are blocked unless explicitly forced.
+
+### Document Intelligence
+
+- **Local PDF disassembly** that inventories pages, text coverage, image-bearing pages, and extraction receipts without writing active memories.
+- **Quality reports** that flag no-text pages, image-heavy pages, failed pages, and visual-review needs.
+- **Portable artifact manifests** with page-level resume states and content-addressed source references.
+- **OCR/vision work requests** for pages or regions that need external analysis, including expected provenance contracts.
+- **Understanding packets** that normalize agent-supplied summaries, claims, concepts, entities, high-value sections, draft memory proposals, and graph proposals.
+- **Review-first promotion plans** so document evidence becomes durable memory or graph edges only after explicit review.
 
 ### Web Dashboard
 
@@ -108,7 +118,7 @@ context_pack(
 Engram exposes structured MCP tools first. Text wrappers remain available for older clients, but new integrations should prefer the structured tools.
 
 Product release identity and protocol identity are intentionally separate:
-`memory_protocol()` reports product version `1.0.0-dev`, protocol `version: 2`,
+`memory_protocol()` reports product version `1.0.0`, protocol `version: 2`,
 and protocol `schema_version: "2026-04-27"`.
 
 ### Discovery and Retrieval
@@ -569,6 +579,7 @@ python -m core.memory_os_migration round-trip --legacy-dir data/memories --work-
 ```text
 Engram
 |-- server.py              # FastMCP server and MCP tools
+|-- engramd.py             # Optional loopback daemon for shared local ownership
 |-- webui.py               # Flask dashboard and REST API
 |-- engram_index.py        # Codebase mapping CLI
 |-- install.py             # Setup wizard
@@ -578,6 +589,9 @@ Engram
 |   |-- chunker.py         # Markdown-aware chunking
 |   |-- source_intake.py   # Reviewable source drafts
 |   |-- codebase_mapper.py # Agent-native codebase mapping jobs
+|   |-- document_extractors.py # Local no-write document disassembly
+|   |-- document_quality.py # Document quality warnings and next-tool guidance
+|   |-- document_artifacts.py # Portable artifact manifests
 |   |-- graph_manager.py   # Graph policy and traversal
 |   |-- graph_store.py     # Swappable graph persistence seam
 |   |-- graph_backend_status.py # No-write graph backend readiness report
@@ -655,14 +669,16 @@ python server.py --rebuild-index
 
 ## Roadmap
 
-Engram is moving toward a 1.0 release focused on the public, generic, local-first memory substrate: MCP contracts, JSON-first storage, source intake, graph relationships, retrieval receipts, reliability gates, WebUI review surfaces, and release documentation.
+Engram 1.0 is the public, generic, local-first Memory OS core: MCP contracts, JSON-first storage, source intake, document evidence, graph relationships, retrieval receipts, codebase mapping, opt-in daemon routing, migration checks, and reliability gates.
 
 The team collaboration product is planned separately. Engram will provide the memory substrate and adapter contracts; workspaces, rich pages, comments, assignments, mentions, role-aware visibility, and team workflow UI belong outside this repository.
 
 Planning docs:
 
 - `docs/ENGRAM_1_0_RELEASE_SPEC.md`
-- `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md`
+- `docs/ENGRAM_1_0_MIGRATION_NOTES.md`
+- `docs/ENGRAM_1_0_RELEASE_CHECKLIST.md`
+- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - `docs/COLLABORATION_PRODUCT_PRD.md`
 
 ---

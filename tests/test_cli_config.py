@@ -98,7 +98,7 @@ def test_help_uses_current_product_version_identity():
 
     combined_output = result.stdout + result.stderr
 
-    assert "Engram 1.0.0-dev — Semantic Memory MCP Server" in result.stdout
+    assert "Engram 1.0.0 — Semantic Memory MCP Server" in result.stdout
     assert "Engram v0.1" not in combined_output
 
 

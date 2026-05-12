@@ -1,13 +1,13 @@
 # Engram 1.0 Release Spec
 
 Date: 2026-05-05
-Updated: 2026-05-06
-Status: Active execution spec
-Scope: Public Engram core release readiness, contract freeze, reliability hardening, and collaboration substrate seams
+Updated: 2026-05-12
+Status: Engram 1.0 local core release spec
+Scope: Public Engram core release, contract freeze, Memory OS readiness, document intelligence, reliability gates, and collaboration substrate seams
 
 ## Purpose
 
-Engram 1.0 should be the stable public release of the local-first agent memory substrate: JSON-backed durable memory, ChromaDB-backed semantic retrieval, FastMCP tools, source-intake drafts, graph relationships, codebase mapping, retrieval receipts, and local review surfaces.
+Engram 1.0 is the stable public release of the local-first agent Memory OS core: JSON-backed durable memory, ChromaDB-backed semantic retrieval, FastMCP tools, source-intake drafts, document evidence, graph relationships, codebase mapping, migration checks, retrieval receipts, opt-in daemon routing, and local review surfaces.
 
 This spec deliberately stops before team collaboration. The collaboration product is planned separately in `docs/COLLABORATION_PRODUCT_PRD.md` and should integrate with Engram through stable contracts instead of pulling team-workspace concerns into this repository.
 
@@ -22,7 +22,7 @@ The shared program has two products and one integration contract:
 Recommended sequence:
 
 1. Finish and publish the current Engram planning branch. Local merge to `main` is complete as of 2026-05-06; remote publication remains a release-management step.
-2. Bring Engram to 1.0 with contract, storage, source-intake, graph, WebUI, docs, and release gates.
+2. Bring Engram to 1.0 with contract, storage, source-intake, document evidence, graph, codebase mapping, daemon, migration, docs, and release gates.
 3. Start the collaboration product in a separate repo/project with its own auth, workspace, and UI architecture.
 4. Build the first collaboration vertical slice as a thin app over stable Engram calls: source intake -> cited draft -> human review -> explicit memory promotion.
 5. Add richer pages, comments, assignments, mentions, and game-development knowledge spaces only after permission-aware retrieval and draft review are proven.
@@ -31,7 +31,7 @@ Coordination rule: Engram changes should be judged by whether they make the gene
 
 ## Product Thesis
 
-Engram 1.0 is ready when a fresh agent can discover how to use memory safely, retrieve bounded context with evidence, stage messy source material for review, inspect relationship evidence without token blowups, and validate the local store with repeatable commands.
+Engram 1.0 is ready when a fresh agent can discover how to use memory safely, retrieve bounded context with evidence, stage messy source and document material for review, inspect relationship evidence without token blowups, and validate the local store with repeatable commands.
 
 The release should feel boring in the best way: stable contracts, recoverable storage, explicit writes, clear docs, and a release checklist that future agents can run without folklore.
 
@@ -43,6 +43,7 @@ The release should feel boring in the best way: stable contracts, recoverable st
 - No direct replacement of JSON memories as the source of truth.
 - No graph database migration before the JSON-backed graph edge contract is frozen.
 - No provider-specific model subprocess for codebase mapping.
+- No hosted tenant auth, billing, or live backend switch. Backend readiness reports and hosted checklists are preparation, not live 1.0 feature promises.
 - No WebUI business logic layer; WebUI stays a local review and management surface over core managers.
 
 ## Binding Invariants
@@ -85,7 +86,7 @@ Acceptance gates:
 
 Purpose: make the MCP and data contracts dependable for agents, clients, and the future collaboration adapter.
 
-Product/protocol identity decision: the 1.0 development release reports product version `1.0.0-dev`. The MCP protocol remains a separate agent contract with `version: 2` and `schema_version: "2026-04-27"` until an explicit protocol migration is required.
+Product/protocol identity decision: the 1.0 local core release reports product version `1.0.0` and stability `stable`. The MCP protocol remains a separate agent contract with `version: 2` and `schema_version: "2026-04-27"` until an explicit protocol migration is required.
 
 Required outcomes:
 
@@ -146,32 +147,40 @@ Acceptance gates:
 - Draft promotion remains explicit and test-covered.
 - Retrieval surfaces can exclude stale records by default.
 
-### Track 4: WebUI 1.0 Readiness
+### Track 4: Codebase Mapping and Memory OS Migration Readiness
 
-Purpose: make the local dashboard a trustworthy review and operations surface without turning it into the collaboration app.
+Purpose: keep repository understanding and migration checks agent-facing, provider-neutral, and safe against data loss.
+
+Status: implemented during the 2026-05-12 Memory OS rebuild slices.
 
 Required outcomes:
 
-- Keep the dashboard create/edit form JSON-safe for special characters and multiline markdown.
-- Keep the dashboard content textarea aligned with server-side validation; do not reintroduce client-side silent truncation.
-- Preserve exposed-host auth requirements, write-token mutation protection, host/origin checks, request body limits, throttling, security headers, and CSP without unsafe inline script/style.
-- Surface source draft review, graph relationship browsing, retrieval receipt inspection, health/self-test status, stale warnings, and storage stats only as local Engram surfaces.
-- Keep WebUI logic calling core managers rather than becoming the domain layer.
+- Keep codebase mapping provider-neutral; Engram prepares bounded source context and source hashes, while the connected agent performs synthesis.
+- Keep mapping config draft/store/preview/prepare/read/store-result tools agent-facing and drift-aware.
+- Honor `ENGRAM_DATA_DIR` for mapping jobs.
+- Add no-write migration dry runs and round-trip checks for legacy JSON memory records.
+- Keep retrieval and graph backend status reports read-only until backend replacements pass real-corpus gates.
 
 Acceptance gates:
 
-- Browser form submissions safely handle backticks, angle brackets, dashes, quotes, and multiline markdown.
-- Exposed-host startup remains fail-closed without required tokens.
-- Security-sensitive WebUI tests remain green.
+- Mapping jobs include current Memory OS domains instead of the old pre-daemon shape.
+- Stale mapping results are blocked unless forced after review.
+- Migration dry runs and round-trip checks do not mutate active memories or ChromaDB.
+- Chroma/JSON remain live until backend replacement gates pass.
 
-### Track 5: Agent Reliability and Evaluation
+### Track 5: Document Intelligence and Agent Reliability
 
-Purpose: make agent-facing quality measurable instead of vibes.
+Purpose: make book-scale source understanding and agent-facing quality measurable instead of vibes.
+
+Status: implemented during the 2026-05-12 document disassembly slices.
 
 Required outcomes:
 
 - Keep `server.py --agent-eval` as the deterministic reliability gate.
-- Add golden retrieval scenarios for source intake, graph-aware context, stale exclusion, hybrid identifier lookup, and codebase mapping if coverage is thin.
+- Add a no-write local PDF disassembly path that inventories pages, text coverage, image-bearing pages, extraction receipts, quality seeds, artifact manifests, visual candidates, and visual/OCR work requests.
+- Add document quality reports that identify no-text pages, image-heavy pages, failed pages, and visual-review needs.
+- Add understanding packets that normalize connected-agent synthesis into summaries, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and graph proposals.
+- Add golden reliability scenarios for source intake, workflow packets, document disassembly, visual evidence requests, and the Book Dismantling Gate.
 - Keep context-pack budget receipts and citations visible in eval output.
 - Treat usage telemetry as Engram-attributed estimates, not provider billing truth.
 - Document expected warnings from the embedding model load so they do not become false failures.
@@ -181,6 +190,7 @@ Acceptance gates:
 - Agent eval passes on a clean checkout.
 - Evaluation failures identify the broken retrieval contract.
 - All temporary eval memories are cleaned up after the run.
+- Document intelligence paths report evidence and promotion plans without active memory writes.
 
 ### Track 6: Release Documentation
 
@@ -214,6 +224,19 @@ Before declaring Engram 1.0 ready:
 - `git diff --check`
 - `codex mcp get engram` when Codex CLI is available and MCP registration changed
 - Fresh-session MCP tool availability check when Codex visibility changed
+
+## Post-1.0 Work
+
+- Expand WebUI operator surfaces for document imports, graph proposals,
+  migration receipts, evals, and daemon/job health while preserving local-only
+  review boundaries.
+- Run real-corpus backend decision gates before replacing live Chroma or JSON
+  graph storage with LanceDB, Kuzu, or another backend.
+- Move more long-running work behind durable daemon jobs only after a job store,
+  resumability, and operator receipts exist.
+- Add hosted tenant auth, object authorization, billing, support-bundle
+  redaction, and hosted deletion/export semantics before any hosted Engram
+  claim.
 
 ## Release Risks
 

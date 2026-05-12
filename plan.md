@@ -167,7 +167,7 @@ Agents should always start at tier 1 and escalate only when needed.
 
 Engram 1.0 is the public, generic, local-first memory substrate release. The separate collaboration product should build on Engram through stable adapters, not inside this repository.
 
-Status update, 2026-05-11: the old 1.0 finish-line track is paused in favor of the Memory OS rebuild direction. Do not continue Track 4-6 implementation until the rebuild spec and migration-first plan are reviewed. The current JSON memory corpus must be easy to import into the new system before storage, graph, retrieval, or hosted-edition work proceeds.
+Status update, 2026-05-12: Engram 1.0 is the local agent-facing Memory OS core release. The release preserves the current JSON-first / Chroma-second runtime while adding migration dry runs, backend readiness reports, codebase mapping modernization, opt-in daemon routing, document disassembly, visual/OCR request contracts, document understanding packets, and reliability gates. Hosted operation, tenant auth, live backend switching, and the collaboration product remain post-1.0 work.
 
 Tracked planning docs:
 
@@ -181,19 +181,23 @@ Tracked planning docs:
 - `docs/POST_1_COLLABORATION_PRODUCT_HANDOFF.md` — boundary handoff for the separate collaboration product.
 - `docs/COLLABORATION_PRODUCT_PRD.md` — draft PRD for that separate product.
 
-Current release tracks:
+1.0 release tracks:
 
 - [x] Track 0: repo and branch hygiene audit; local `main` has been fast-forwarded to the planning/audit branch.
 - [x] Track 1: freeze MCP/tool/data contracts, version identity, docstrings, README tables, and alias behavior.
 - [x] Track 2: prove storage rebuild, import/export, backup/repair, JSON-first/Chroma-second ordering, migration round trip, and graph audit readiness.
 - [x] Track 3: harden source intake, lifecycle metadata, stale exclusion, explicit draft promotion, and daemon-routed source draft lifecycle.
-- [ ] Track 4: modernize codebase mapping for the Memory OS runtime, including current daemon/document/migration/backend domains and data-root-aware mapping jobs.
-- [ ] Track 5: implement book-scale document disassembly: local PDF/DOCX/text/HTML evidence, page inventory, quality reports, visual/OCR requests, artifact manifests, chunk provenance, and review-first promotion.
-- [ ] Track 6: finish daemon ownership for stable browsing, document jobs, mapping jobs, imports, repairs, and rebuild jobs.
-- [ ] Track 7: run backend decision gates for retrieval and graph storage. Keep Chroma/JSON live until LanceDB/Kuzu or alternatives pass real-corpus Windows spikes.
-- [ ] Track 8: expand agent reliability evaluation coverage for source intake, graph-aware context, stale exclusion, hybrid lookup, codebase mapping, document disassembly, and visual evidence.
-- [ ] Track 9: finish WebUI 1.0 operator surfaces for health, drafts, document imports, graph proposals, migration receipts, and evals without turning the dashboard into the collaboration app.
-- [ ] Track 10: publish release docs, checklist, migration notes, AGENTS.md updates, public README 1.0 framing, and the Book Dismantling Gate results.
+- [x] Track 4: modernize codebase mapping for the Memory OS runtime, including current daemon/document/migration/backend domains and data-root-aware mapping jobs.
+- [x] Track 5: implement book-scale document disassembly for the local core: PDF page/text/image inventory, quality reports, visual/OCR requests, artifact manifests, chunk provenance, no-write understanding packets, graph proposals, and review-first promotion plans.
+- [x] Track 6: add opt-in daemon ownership for stable memory operations, source draft lifecycle operations, metadata updates/repair/delete, and no-write document disassembly preparation. Direct in-process mode remains supported; mapping jobs, import/export, rebuild, and live backend switching stay direct or operator-gated until a future durable job store.
+- [x] Track 8: expand release reliability coverage for source intake, workflow packets, retrieval receipts, document disassembly, visual evidence requests, and the Book Dismantling Gate.
+- [x] Track 10: publish release docs, checklist, migration notes, AGENTS.md updates, public README 1.0 framing, and the Book Dismantling Gate results.
+
+Post-1.0 tracks:
+
+- [ ] Track 7: run real-corpus backend decision gates for retrieval and graph storage. Keep Chroma/JSON live until LanceDB/Kuzu or alternatives pass Windows corpus spikes, migration, rebuild, and rollback gates.
+- [ ] Track 9: expand WebUI operator surfaces for health, drafts, document imports, graph proposals, migration receipts, and evals without turning the dashboard into the collaboration app.
+- [ ] Hosted readiness: add tenant auth, object-level authorization, queue/job health, backup/restore, support-bundle redaction, and hosted deletion/export semantics before selling hosted Engram.
 
 1.0 does not include multi-user workspaces, permissions, comments, assignments, mentions, or rich collaboration pages. Those belong to the separate collaboration product.
 

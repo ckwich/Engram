@@ -164,7 +164,8 @@ runtime:
 - large central files such as `server.py` and `memory_manager.py` must not be
   silently excluded by a too-low `max_file_size_kb`
 - mapping jobs must honor `ENGRAM_DATA_DIR`
-- mapping jobs must be daemon-routable before 1.0 if daemon mode is enabled
+- mapping jobs must honor `ENGRAM_DATA_DIR` before 1.0; daemon-routed
+  mapping jobs require a future durable job store and are post-1.0
 - stored architecture memories must be produced by the connected agent, not a
   provider-specific subprocess
 - source drift must block stale stores unless the agent explicitly forces after
@@ -239,7 +240,8 @@ The following fixes are binding:
 Engram 1.0 is ready when a fresh agent can:
 
 - discover the protocol with `memory_protocol`
-- use daemon mode without owning Chroma or draft stores directly
+- use direct MCP mode or opt-in daemon mode without corrupting Chroma or draft
+  stores
 - import or round-trip the current JSON memory corpus without loss
 - map the Engram codebase with current Memory OS domains
 - dismantle a book-style PDF into evidence records, chunks, quality reports,

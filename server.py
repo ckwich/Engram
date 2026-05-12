@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Engram 1.0.0-dev — MCP Server
+Engram 1.0.0 — MCP Server
 Provides semantic memory tools to AI agents via the Model Context Protocol.
 
 Three-tier retrieval pattern (agents should follow this):
@@ -81,9 +81,9 @@ from core.workflow_templates import list_workflow_templates as build_workflow_te
 mcp = FastMCP("engram")
 session_pin_store = SessionPinStore()
 PRODUCT_NAME = "Engram"
-PRODUCT_VERSION = "1.0.0-dev"
+PRODUCT_VERSION = "1.0.0"
 PRODUCT_RELEASE_TRACK = "1.0"
-PRODUCT_STABILITY = "development"
+PRODUCT_STABILITY = "stable"
 PROTOCOL_VERSION = 2
 PROTOCOL_SCHEMA_VERSION = "2026-04-27"
 DEFAULT_SSE_HOST = "127.0.0.1"

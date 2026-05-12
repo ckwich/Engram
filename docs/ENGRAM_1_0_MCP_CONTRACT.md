@@ -1,7 +1,7 @@
 # Engram 1.0 MCP Contract
 
-Date: 2026-05-06
-Status: Track 1 contract inventory
+Date: 2026-05-12
+Status: Engram 1.0 contract inventory
 Source of truth: `server.py` MCP tool definitions plus `memory_protocol()`
 
 ## Product and Protocol Identity
@@ -11,9 +11,9 @@ Product release identity and MCP protocol identity are separate contracts.
 | Field | Value | Contract |
 |---|---|---|
 | Product name | `Engram` | Public product identity. |
-| Product version | `1.0.0-dev` | Development identity for the 1.0 release track. |
+| Product version | `1.0.0` | Stable identity for the local Engram 1.0 Memory OS release. |
 | Product release track | `1.0` | Public release readiness track. |
-| Product stability | `development` | Not a final release tag. |
+| Product stability | `stable` | Stable local core release; hosted and collaboration surfaces remain future work. |
 | Protocol version | `2` | Agent-facing MCP protocol payload version. |
 | Protocol schema version | `2026-04-27` | Date-stamped protocol schema identity. |
 

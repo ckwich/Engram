@@ -23,9 +23,9 @@ def test_memory_protocol_describes_agent_retrieval_contract():
     assert payload["name"] == "Engram memory protocol"
     assert payload["product"] == {
         "name": "Engram",
-        "version": "1.0.0-dev",
+        "version": "1.0.0",
         "release_track": "1.0",
-        "stability": "development",
+        "stability": "stable",
     }
     assert payload["version"] == 2
     assert [step["tool"] for step in payload["retrieval_ladder"]] == [
