@@ -64,6 +64,16 @@ class FakeSmokeClient:
             "error": None,
         }
 
+    def repair_memory_metadata(self, payload):
+        self.calls.append(("repair_memory_metadata", payload))
+        return {
+            "requested_count": len(payload["keys"]),
+            "repaired_count": 0,
+            "dry_run": payload["dry_run"],
+            "repairs": [{"key": payload["keys"][0], "repaired": False}],
+            "error": None,
+        }
+
     def search_memories(self, payload):
         self.calls.append(("search_memories", payload))
         return {
@@ -116,6 +126,7 @@ def test_run_daemon_smoke_exercises_full_memory_cycle():
         "check_duplicate",
         "store_memory",
         "update_memory_metadata",
+        "repair_memory_metadata",
         "search_memories",
         "retrieve_chunk",
         "retrieve_memory",

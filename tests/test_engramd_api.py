@@ -90,6 +90,21 @@ class FakeMemoryManager:
             "canonical": changes.get("canonical"),
         }
 
+    async def repair_memory_metadata_async(self, keys, dry_run=True):
+        return {
+            "requested_count": len(keys),
+            "repaired_count": 0 if dry_run else len(keys),
+            "dry_run": dry_run,
+            "repairs": [
+                {
+                    "key": key,
+                    "repaired": not dry_run,
+                    "issues": [],
+                }
+                for key in keys
+            ],
+        }
+
     async def delete_memory_async(self, key):
         self.deleted.append(key)
         return key == "daemon_memory"
@@ -241,6 +256,25 @@ def test_update_memory_metadata_preserves_daemon_result_shape():
     assert response["body"]["memory"]["title"] == "Updated Daemon Memory"
     assert manager.updated["key"] == "daemon_memory"
     assert manager.updated["changes"]["tags"] == ["daemon", "metadata"]
+
+
+def test_repair_memory_metadata_preserves_daemon_result_shape():
+    api = EngramDaemonAPI(memory_manager=FakeMemoryManager())
+
+    response = api.handle(
+        "POST",
+        "/v1/repair_memory_metadata",
+        {
+            "keys": ["daemon_memory"],
+            "dry_run": False,
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["requested_count"] == 1
+    assert response["body"]["repaired_count"] == 1
+    assert response["body"]["dry_run"] is False
+    assert response["body"]["error"] is None
 
 
 def test_unknown_route_returns_structured_not_found_error():

@@ -48,6 +48,7 @@ def test_daemon_status_checks_configured_daemon(monkeypatch):
     assert payload["health"]["stats"]["total_chunks"] == 9
     assert "check_duplicate" in payload["stable_tools_routed"]
     assert "update_memory_metadata" in payload["stable_tools_routed"]
+    assert "repair_memory_metadata" in payload["stable_tools_routed"]
     assert payload["error"] is None
 
 

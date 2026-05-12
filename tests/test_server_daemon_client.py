@@ -94,6 +94,16 @@ class FakeDaemonClient:
             "error": None,
         }
 
+    def repair_memory_metadata(self, payload):
+        self.calls.append(("repair_memory_metadata", payload))
+        return {
+            "requested_count": len(payload["keys"]),
+            "repaired_count": 0 if payload.get("dry_run", True) else len(payload["keys"]),
+            "dry_run": payload.get("dry_run", True),
+            "repairs": [{"key": key, "repaired": not payload.get("dry_run", True)} for key in payload["keys"]],
+            "error": None,
+        }
+
     def delete_memory(self, payload):
         self.calls.append(("delete_memory", payload))
         return {"key": payload["key"], "deleted": True, "error": None}
@@ -191,5 +201,24 @@ def test_update_memory_metadata_uses_daemon_when_configured(monkeypatch):
                 "title": "Updated Daemon Memory",
                 "tags": ["daemon", "metadata"],
             },
+        )
+    ]
+
+
+def test_repair_memory_metadata_uses_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    payload = asyncio.run(
+        server.repair_memory_metadata(keys="daemon_memory", dry_run=False)
+    )
+
+    assert payload["repaired_count"] == 1
+    assert payload["dry_run"] is False
+    assert client.calls == [
+        (
+            "repair_memory_metadata",
+            {"keys": ["daemon_memory"], "dry_run": False},
         )
     ]

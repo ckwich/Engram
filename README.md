@@ -361,8 +361,9 @@ Smoke test a running daemon:
 python engramd.py --smoke-test --host 127.0.0.1 --port 8765
 ```
 
-The smoke test checks duplicate risk, writes, updates metadata, searches, reads,
-and deletes a temporary `_engramd_smoke_*` memory through the daemon.
+The smoke test checks duplicate risk, writes, updates metadata, dry-runs
+metadata repair, searches, reads, and deletes a temporary `_engramd_smoke_*`
+memory through the daemon.
 
 Generate MCP client config for daemon-client mode:
 
@@ -374,9 +375,9 @@ This emits `ENGRAM_DAEMON_URL` in the generated MCP server environment. The
 daemon URL is normalized by trimming trailing slashes.
 
 Daemon mode currently routes stable memory search, duplicate checks, chunk/full
-reads, writes, metadata updates, and deletes through `engramd`. Direct
-in-process MCP mode remains the default unless `ENGRAM_DAEMON_URL` is set. This
-is not a LanceDB/Kuzu backend switch and does not add hosted tenant
+reads, writes, metadata updates, metadata repair, and deletes through `engramd`.
+Direct in-process MCP mode remains the default unless `ENGRAM_DAEMON_URL` is
+set. This is not a LanceDB/Kuzu backend switch and does not add hosted tenant
 authorization.
 
 ---

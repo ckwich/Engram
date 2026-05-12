@@ -917,6 +917,7 @@ async def daemon_status() -> dict[str, Any]:
             "write_memory",
             "check_duplicate",
             "update_memory_metadata",
+            "repair_memory_metadata",
             "delete_memory",
         ] if configured_url else [],
         "error": None,
@@ -4238,6 +4239,24 @@ async def repair_memory_metadata(
                 "message": "❌ keys must include at least one memory key.",
             },
         }
+
+    if _daemon_enabled():
+        try:
+            return await _call_daemon(
+                "repair_memory_metadata",
+                {
+                    "keys": normalized_keys,
+                    "dry_run": dry_run,
+                },
+            )
+        except EngramDaemonClientError as e:
+            return _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                requested_count=len(normalized_keys),
+                repaired_count=0,
+                dry_run=dry_run,
+                repairs=[],
+            )
 
     try:
         payload = await memory_manager.repair_memory_metadata_async(

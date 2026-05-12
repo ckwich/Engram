@@ -821,3 +821,40 @@ def test_audit_and_repair_metadata_tools_return_structured_payloads(monkeypatch)
     assert audit_payload["error"] is None
     assert repair_payload["repaired_count"] == 1
     assert repair_payload["error"] is None
+
+
+def test_repair_memory_metadata_tool_uses_daemon_when_configured(monkeypatch):
+    server = load_server_module()
+
+    class FakeDaemonClient:
+        def __init__(self):
+            self.calls = []
+
+        def repair_memory_metadata(self, payload):
+            self.calls.append(payload)
+            return {
+                "requested_count": len(payload["keys"]),
+                "repaired_count": len(payload["keys"]),
+                "dry_run": payload["dry_run"],
+                "repairs": [{"key": payload["keys"][0], "repaired": True}],
+                "error": None,
+            }
+
+    client = FakeDaemonClient()
+
+    async def fail_direct_repair(*args, **kwargs):
+        raise AssertionError("repair_memory_metadata should route through daemon")
+
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+    monkeypatch.setattr(server.memory_manager, "repair_memory_metadata_async", fail_direct_repair)
+
+    payload = asyncio.run(
+        server.repair_memory_metadata(keys="legacy-drift", dry_run=False)
+    )
+
+    assert payload["repaired_count"] == 1
+    assert payload["error"] is None
+    assert client.calls == [
+        {"keys": ["legacy-drift"], "dry_run": False}
+    ]

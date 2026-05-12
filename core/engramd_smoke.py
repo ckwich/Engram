@@ -108,6 +108,22 @@ def run_daemon_smoke(client: Any, *, key: str | None = None) -> dict[str, Any]:
             )
         record("update_memory_metadata", "ok", {"key": smoke_key})
 
+        repair_response = client.repair_memory_metadata(
+            {
+                "keys": [smoke_key],
+                "dry_run": True,
+            }
+        )
+        _raise_for_daemon_error("repair_memory_metadata", repair_response)
+        if repair_response.get("requested_count") != 1:
+            raise _SmokeFailure(
+                "repair_memory_metadata",
+                "repair_request_mismatch",
+                "Daemon metadata repair did not inspect the smoke memory.",
+                repair_response,
+            )
+        record("repair_memory_metadata", "ok", {"key": smoke_key, "dry_run": True})
+
         search_response = client.search_memories(
             {
                 "query": SMOKE_MARKER,

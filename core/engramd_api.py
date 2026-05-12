@@ -58,6 +58,8 @@ class EngramDaemonAPI:
                 return await self._check_duplicate(request)
             if route == "/v1/update_memory_metadata":
                 return await self._update_memory_metadata(request)
+            if route == "/v1/repair_memory_metadata":
+                return await self._repair_memory_metadata(request)
             if route == "/v1/delete_memory":
                 return await self._delete_memory(request)
             return self._error(404, "not_found", f"Unknown daemon route: {route}")
@@ -242,6 +244,26 @@ class EngramDaemonAPI:
                 }
             )
         return self._ok({"key": key, "updated": True, "memory": memory, "error": None})
+
+    async def _repair_memory_metadata(self, request: dict[str, Any]) -> dict[str, Any]:
+        keys = _string_list(request.get("keys"))
+        dry_run = bool(request.get("dry_run", True))
+        if not keys:
+            return self._ok(
+                {
+                    "requested_count": 0,
+                    "repaired_count": 0,
+                    "dry_run": dry_run,
+                    "repairs": [],
+                    "error": {
+                        "code": "invalid_keys",
+                        "message": "keys must include at least one memory key.",
+                    },
+                }
+            )
+        payload = await self.memory_manager.repair_memory_metadata_async(keys, dry_run=dry_run)
+        payload["error"] = None
+        return self._ok(payload)
 
     async def _delete_memory(self, request: dict[str, Any]) -> dict[str, Any]:
         key = str(request.get("key") or "").strip()
