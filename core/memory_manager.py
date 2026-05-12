@@ -65,12 +65,22 @@ _chroma_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="chroma"
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent.parent
-JSON_DIR = PROJECT_ROOT / "data" / "memories"
-CHROMA_DIR = PROJECT_ROOT / "data" / "chroma"
+
+
+def _data_root() -> Path:
+    configured = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+    if not configured:
+        return PROJECT_ROOT / "data"
+    return Path(configured).expanduser().resolve()
+
+
+DATA_ROOT = _data_root()
+JSON_DIR = DATA_ROOT / "memories"
+CHROMA_DIR = DATA_ROOT / "chroma"
 JSON_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-CHROMA_PROCESS_LOCK_PATH = PROJECT_ROOT / "data" / "chroma.lock"
-CHROMA_OWNER_LOCK_PATH = PROJECT_ROOT / "data" / "chroma.owner.lock"
+CHROMA_PROCESS_LOCK_PATH = DATA_ROOT / "chroma.lock"
+CHROMA_OWNER_LOCK_PATH = DATA_ROOT / "chroma.owner.lock"
 CHROMA_PROCESS_LOCK_TIMEOUT = float(os.environ.get("ENGRAM_CHROMA_LOCK_TIMEOUT", "45"))
 CHROMA_PROCESS_LOCK_POLL_SECONDS = float(os.environ.get("ENGRAM_CHROMA_LOCK_POLL_SECONDS", "0.05"))
 CHROMA_PROCESS_LOCK_STALE_SECONDS = float(os.environ.get("ENGRAM_CHROMA_LOCK_STALE_SECONDS", "300"))

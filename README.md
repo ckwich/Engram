@@ -330,6 +330,11 @@ Terminal 1:
 python engramd.py --host 127.0.0.1 --port 8765
 ```
 
+By default, Engram stores local data under this repo's `data/` directory. For
+isolated daemon smoke tests or alternate local stores, set `ENGRAM_DATA_DIR`
+before starting `engramd` or `server.py`; memory JSON, ChromaDB, and Chroma lock
+files will live under that directory.
+
 Terminal 2, before starting the MCP server process:
 
 ```bash
