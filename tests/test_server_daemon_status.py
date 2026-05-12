@@ -46,6 +46,7 @@ def test_daemon_status_checks_configured_daemon(monkeypatch):
     assert payload["reachable"] is True
     assert payload["health"]["status"] == "ok"
     assert payload["health"]["stats"]["total_chunks"] == 9
+    assert "update_memory_metadata" in payload["stable_tools_routed"]
     assert payload["error"] is None
 
 

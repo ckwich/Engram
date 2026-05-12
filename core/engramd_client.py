@@ -78,6 +78,9 @@ class EngramDaemonClient:
     def store_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/store_memory", payload)
 
+    def update_memory_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/update_memory_metadata", payload)
+
     def delete_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/delete_memory", payload)
 

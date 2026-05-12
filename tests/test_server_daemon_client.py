@@ -67,6 +67,19 @@ class FakeDaemonClient:
             "error": None,
         }
 
+    def update_memory_metadata(self, payload):
+        self.calls.append(("update_memory_metadata", payload))
+        return {
+            "key": payload["key"],
+            "updated": True,
+            "memory": {
+                "key": payload["key"],
+                "title": payload["title"],
+                "tags": payload["tags"],
+            },
+            "error": None,
+        }
+
     def delete_memory(self, payload):
         self.calls.append(("delete_memory", payload))
         return {"key": payload["key"], "deleted": True, "error": None}
@@ -122,3 +135,30 @@ def test_write_and_delete_tools_use_daemon_when_configured(monkeypatch):
     assert "Stored: 'Daemon Memory'" in stored
     assert "Deleted memory: 'daemon_memory'" in deleted
     assert [call[0] for call in client.calls] == ["store_memory", "delete_memory"]
+
+
+def test_update_memory_metadata_uses_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    payload = asyncio.run(
+        server.update_memory_metadata(
+            key="daemon_memory",
+            title="Updated Daemon Memory",
+            tags=["daemon", "metadata"],
+        )
+    )
+
+    assert payload["updated"] is True
+    assert payload["memory"]["title"] == "Updated Daemon Memory"
+    assert client.calls == [
+        (
+            "update_memory_metadata",
+            {
+                "key": "daemon_memory",
+                "title": "Updated Daemon Memory",
+                "tags": ["daemon", "metadata"],
+            },
+        )
+    ]

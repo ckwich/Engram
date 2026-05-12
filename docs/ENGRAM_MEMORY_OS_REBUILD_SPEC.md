@@ -373,12 +373,12 @@ First implementation slice, 2026-05-12:
 - The daemon owns the current live `memory_manager` path, including JSON memory
   writes and legacy Chroma indexing.
 - MCP stdio sessions can set `ENGRAM_DAEMON_URL` to route stable memory search,
-  chunk/full reads, writes, and deletes through the daemon.
+  chunk/full reads, writes, metadata updates, and deletes through the daemon.
 - Direct in-process MCP mode remains the default while daemon mode is proven in
   real sessions.
-- `engramd.py --smoke-test` verifies a running daemon by writing, searching,
-  reading, and deleting a temporary `_engramd_smoke_*` memory. Pair it with
-  `ENGRAM_DATA_DIR` for disposable daemon smoke runs.
+- `engramd.py --smoke-test` verifies a running daemon by writing, updating
+  metadata, searching, reading, and deleting a temporary `_engramd_smoke_*`
+  memory. Pair it with `ENGRAM_DATA_DIR` for disposable daemon smoke runs.
 - This slice does not switch live retrieval to LanceDB, switch graph storage to
   Kuzu, add tenant authorization, or complete the full SQLite/content-addressed
   Memory OS runtime.

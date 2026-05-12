@@ -54,6 +54,8 @@ class EngramDaemonAPI:
                 return await self._retrieve_memory(request)
             if route == "/v1/store_memory":
                 return await self._store_memory(request)
+            if route == "/v1/update_memory_metadata":
+                return await self._update_memory_metadata(request)
             if route == "/v1/delete_memory":
                 return await self._delete_memory(request)
             return self._error(404, "not_found", f"Unknown daemon route: {route}")
@@ -156,6 +158,51 @@ class EngramDaemonAPI:
         except ValueError as exc:
             return self._error(400, "invalid_request", str(exc))
         return self._ok({"stored": True, "result": result, "error": None})
+
+    async def _update_memory_metadata(self, request: dict[str, Any]) -> dict[str, Any]:
+        key = str(request.get("key") or "").strip()
+        if not key:
+            return self._error(400, "invalid_request", "key is required")
+        changes = {
+            name: value
+            for name, value in {
+                "title": request.get("title") if "title" in request else None,
+                "tags": _string_list(request.get("tags")) if "tags" in request else None,
+                "related_to": _string_list(request.get("related_to")) if "related_to" in request else None,
+                "project": request.get("project") if "project" in request else None,
+                "domain": request.get("domain") if "domain" in request else None,
+                "status": request.get("status") if "status" in request else None,
+                "canonical": request.get("canonical") if "canonical" in request else None,
+            }.items()
+            if value is not None
+        }
+        try:
+            memory = await self.memory_manager.update_memory_metadata_async(key, **changes)
+        except KeyError:
+            return self._ok(
+                {
+                    "key": key,
+                    "updated": False,
+                    "memory": None,
+                    "error": {
+                        "code": "not_found",
+                        "message": f"❌ Memory not found: '{key}'",
+                    },
+                }
+            )
+        except ValueError as exc:
+            return self._ok(
+                {
+                    "key": key,
+                    "updated": False,
+                    "memory": None,
+                    "error": {
+                        "code": "invalid_metadata",
+                        "message": str(exc),
+                    },
+                }
+            )
+        return self._ok({"key": key, "updated": True, "memory": memory, "error": None})
 
     async def _delete_memory(self, request: dict[str, Any]) -> dict[str, Any]:
         key = str(request.get("key") or "").strip()

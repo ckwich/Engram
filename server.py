@@ -915,6 +915,7 @@ async def daemon_status() -> dict[str, Any]:
             "retrieve_memory",
             "store_memory",
             "write_memory",
+            "update_memory_metadata",
             "delete_memory",
         ] if configured_url else [],
         "error": None,
@@ -4091,6 +4092,17 @@ async def update_memory_metadata(
         }.items()
         if value is not None
     }
+
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("update_memory_metadata", {"key": key, **changes})
+        except EngramDaemonClientError as e:
+            return _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                key=key,
+                updated=False,
+                memory=None,
+            )
 
     try:
         memory = await memory_manager.update_memory_metadata_async(key, **changes)

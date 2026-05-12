@@ -42,6 +42,19 @@ class FakeSmokeClient:
             "error": None,
         }
 
+    def update_memory_metadata(self, payload):
+        self.calls.append(("update_memory_metadata", payload))
+        return {
+            "key": payload["key"],
+            "updated": True,
+            "memory": {
+                "key": payload["key"],
+                "title": payload["title"],
+                "tags": payload["tags"],
+            },
+            "error": None,
+        }
+
     def search_memories(self, payload):
         self.calls.append(("search_memories", payload))
         return {
@@ -92,6 +105,7 @@ def test_run_daemon_smoke_exercises_full_memory_cycle():
     assert [call[0] for call in client.calls] == [
         "health",
         "store_memory",
+        "update_memory_metadata",
         "search_memories",
         "retrieve_chunk",
         "retrieve_memory",

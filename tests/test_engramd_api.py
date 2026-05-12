@@ -7,6 +7,7 @@ class FakeMemoryManager:
     def __init__(self):
         self.stored = None
         self.deleted = []
+        self.updated = None
 
     def get_stats(self):
         return {
@@ -63,6 +64,18 @@ class FakeMemoryManager:
             "title": kwargs["title"],
             "chunk_count": 1,
             "chars": len(kwargs["content"]),
+        }
+
+    async def update_memory_metadata_async(self, key, **changes):
+        self.updated = {"key": key, "changes": changes}
+        return {
+            "key": key,
+            "title": changes.get("title", "Daemon Memory"),
+            "tags": changes.get("tags", []),
+            "project": changes.get("project"),
+            "domain": changes.get("domain"),
+            "status": changes.get("status", "active"),
+            "canonical": changes.get("canonical"),
         }
 
     async def delete_memory_async(self, key):
@@ -154,6 +167,31 @@ def test_store_memory_preserves_json_first_result_shape():
     assert response["body"]["result"]["chunk_count"] == 1
     assert manager.stored["tags"] == ["daemon", "runtime"]
     assert manager.stored["canonical"] is True
+
+
+def test_update_memory_metadata_preserves_daemon_result_shape():
+    manager = FakeMemoryManager()
+    api = EngramDaemonAPI(memory_manager=manager)
+
+    response = api.handle(
+        "POST",
+        "/v1/update_memory_metadata",
+        {
+            "key": "daemon_memory",
+            "title": "Updated Daemon Memory",
+            "tags": ["daemon", "metadata"],
+            "project": "Engram",
+            "domain": "daemon",
+            "status": "active",
+            "canonical": True,
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["updated"] is True
+    assert response["body"]["memory"]["title"] == "Updated Daemon Memory"
+    assert manager.updated["key"] == "daemon_memory"
+    assert manager.updated["changes"]["tags"] == ["daemon", "metadata"]
 
 
 def test_unknown_route_returns_structured_not_found_error():

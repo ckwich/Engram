@@ -71,6 +71,27 @@ def run_daemon_smoke(client: Any, *, key: str | None = None) -> dict[str, Any]:
         stored = True
         record("store_memory", "ok", {"key": smoke_key})
 
+        update_response = client.update_memory_metadata(
+            {
+                "key": smoke_key,
+                "title": "Updated Engramd Smoke Test",
+                "tags": ["engramd", "smoke-test", "updated"],
+                "project": "Engram",
+                "domain": "daemon",
+                "status": "active",
+                "canonical": False,
+            }
+        )
+        _raise_for_daemon_error("update_memory_metadata", update_response)
+        if update_response.get("updated") is not True:
+            raise _SmokeFailure(
+                "update_memory_metadata",
+                "metadata_update_failed",
+                "Daemon did not update the smoke memory metadata.",
+                update_response,
+            )
+        record("update_memory_metadata", "ok", {"key": smoke_key})
+
         search_response = client.search_memories(
             {
                 "query": SMOKE_MARKER,
