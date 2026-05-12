@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+from core.document_extractors import ExtractorCommandResult, prepare_document_disassembly
+
+
+def _fake_poppler_runner(args: list[str], timeout_seconds: int) -> ExtractorCommandResult:
+    command = Path(args[0]).name.lower()
+    assert timeout_seconds > 0
+    if command == "pdfinfo":
+        return ExtractorCommandResult(
+            returncode=0,
+            stdout="\n".join(
+                [
+                    "Title:          Sample Book",
+                    "Pages:          3",
+                    "Encrypted:      no",
+                    "Page size:      612 x 792 pts",
+                ]
+            ),
+            stderr="",
+        )
+    if command == "pdftotext":
+        return ExtractorCommandResult(
+            returncode=0,
+            stdout=(
+                "Page one has enough text to be a normal text page with useful content.\n"
+                "\f"
+                "   \n"
+                "\f"
+                "Figure page caption only\n"
+            ),
+            stderr="",
+        )
+    if command == "pdfimages":
+        return ExtractorCommandResult(
+            returncode=0,
+            stdout="\n".join(
+                [
+                    "page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio",
+                    "--------------------------------------------------------------------------------------------",
+                    "2       0 image     640   480  rgb     3   8  jpeg   no        12  0   144   144 20K  5%",
+                    "3       1 image     320   200  gray    1   8  image  no        13  0    72    72 10K  4%",
+                ]
+            ),
+            stderr="",
+        )
+    raise AssertionError(f"unexpected command: {args}")
+
+
+def test_prepare_pdf_disassembly_uses_poppler_inventory_without_writes(tmp_path):
+    pdf = tmp_path / "sample.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n% sample")
+
+    payload = prepare_document_disassembly(
+        source_path=pdf,
+        tool_paths={"pdfinfo": "pdfinfo", "pdftotext": "pdftotext", "pdfimages": "pdfimages"},
+        runner=_fake_poppler_runner,
+    )
+
+    expected_hash = "sha256:" + hashlib.sha256(pdf.read_bytes()).hexdigest()
+    assert payload["error"] is None
+    assert payload["write_performed"] is False
+    assert payload["active_memory_write_performed"] is False
+    assert payload["source"]["content_hash"] == expected_hash
+    assert payload["source"]["media_type"] == "application/pdf"
+    assert payload["document"]["title"] == "Sample Book"
+    assert payload["document"]["page_count"] == 3
+    assert payload["document"]["encrypted"] is False
+    assert payload["text"]["page_count"] == 3
+    assert payload["image_inventory"]["image_count"] == 2
+    assert payload["image_inventory"]["pages_with_images"] == [2, 3]
+    assert [page["page_number"] for page in payload["pages"]] == [1, 2, 3]
+    assert payload["pages"][0]["text_status"] == "text"
+    assert payload["pages"][1]["text_status"] == "no_text"
+    assert payload["pages"][1]["visual_review_needed"] is True
+    assert payload["pages"][2]["image_count"] == 1
+    assert payload["quality_seed"]["no_text_pages"] == [2]
+    assert payload["quality_seed"]["image_pages"] == [2, 3]
+    assert payload["promotion_guidance"]["auto_promote"] is False
+    assert {receipt["tool"] for receipt in payload["extraction_receipts"]} == {
+        "pdfinfo",
+        "pdftotext",
+        "pdfimages",
+    }
+
+
+def test_prepare_pdf_disassembly_reports_missing_local_tools(tmp_path):
+    pdf = tmp_path / "sample.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n% sample")
+
+    payload = prepare_document_disassembly(
+        source_path=pdf,
+        tool_paths={"pdfinfo": None, "pdftotext": None, "pdfimages": None},
+        runner=_fake_poppler_runner,
+    )
+
+    assert payload["write_performed"] is False
+    assert payload["active_memory_write_performed"] is False
+    assert payload["error"] == {
+        "code": "missing_extractor",
+        "message": "Missing local PDF tools: pdfinfo, pdftotext, pdfimages",
+    }
+    assert payload["capabilities"]["pdfinfo"]["available"] is False
+    assert payload["capabilities"]["pdftotext"]["available"] is False
+    assert payload["capabilities"]["pdfimages"]["available"] is False

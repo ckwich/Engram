@@ -1591,6 +1591,39 @@ def test_list_document_extractors_tool_returns_no_write_catalog():
         and extractor["external_framework_required"] is True
         for extractor in payload["catalog"]["extractors"]
     )
+    assert any(
+        extractor["id"] == "engram-local-pdf-disassembly"
+        and extractor["runs_inside_engram"] is True
+        for extractor in payload["catalog"]["extractors"]
+    )
+
+
+def test_prepare_document_disassembly_tool_returns_no_write_preview(tmp_path, monkeypatch):
+    server = load_server_module()
+    pdf = tmp_path / "sample.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n% sample")
+    observed: dict[str, object] = {}
+
+    def fake_disassembly(**kwargs):
+        observed.update(kwargs)
+        return {
+            "record_type": "document_disassembly_preview",
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "source": {"path": str(pdf)},
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "build_document_disassembly", fake_disassembly)
+
+    payload = asyncio.run(server.prepare_document_disassembly(str(pdf), max_pages=2))
+
+    assert payload["error"] is None
+    assert payload["disassembly"]["record_type"] == "document_disassembly_preview"
+    assert payload["disassembly"]["write_performed"] is False
+    assert observed["source_path"] == str(pdf)
+    assert observed["source_type"] == "pdf"
+    assert observed["max_pages"] == 2
 
 
 def test_prepare_document_extraction_request_tool_returns_no_write_request():

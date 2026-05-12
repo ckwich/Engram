@@ -44,6 +44,7 @@ from core.document_intelligence import (
     preview_document_extraction as build_document_extraction_preview,
     preview_visual_extraction as build_visual_extraction_preview,
 )
+from core.document_extractors import prepare_document_disassembly as build_document_disassembly
 from core.embedder import embedder
 from core.engramd_client import EngramDaemonClient, EngramDaemonClientError
 from core.graph_backend_status import build_graph_backend_status
@@ -674,6 +675,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "cost_class": "medium",
                 "tools": [
                     "list_document_extractors",
+                    "prepare_document_disassembly",
                     "prepare_document_draft",
                     "prepare_document_extraction_request",
                     "prepare_document_extraction_result",
@@ -777,6 +779,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "chunk boundary review": "preview_memory_chunks",
                 "document extraction": "preview_document_extraction",
                 "document extractor discovery": "list_document_extractors",
+                "document disassembly": "prepare_document_disassembly",
                 "document extraction request": "prepare_document_extraction_request",
                 "document extraction result": "prepare_document_extraction_result",
                 "document source connector": "preview_document_source_connector",
@@ -810,6 +813,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_memory_chunks": "Show reviewable chunk boundaries before storing or promoting source material.",
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
             "list_document_extractors": "List bundled and external document extraction capabilities without running providers.",
+            "prepare_document_disassembly": "Prepare a no-write local PDF page/text/image inventory using local tools when available.",
             "preview_document_source_connector": "Preview local Markdown/text/HTML extraction arguments plus URL/external parser request arguments without writing memory.",
             "prepare_document_extraction_request": "Prepare a no-write external document parsing request for PDF/DOCX/image-bearing sources.",
             "prepare_document_extraction_result": "Normalize external parser output into no-write preview arguments and provenance.",
@@ -866,6 +870,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
             "list_document_extractors() before choosing a local parser, OCR/vision adapter, or agent-native preview path",
             "preview_document_source_connector(connector_type='local_path', target='docs') before document extraction",
+            "prepare_document_disassembly(source_path='C:/docs/book.pdf') for no-write local PDF page/text/image inventory",
             "prepare_document_extraction_request(source_ref={'source_uri': 'file:///notes.pdf'}, source_type='pdf', requested_outputs=['markdown', 'page_images']) before running a local parser",
             "prepare_document_extraction_result(extraction_request=req, title='Notes', content=markdown, media_type='text/markdown') before preview_document_extraction",
             "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
@@ -1464,6 +1469,46 @@ async def list_document_extractors() -> dict[str, Any]:
             "error": _tool_error("runtime_error", f"Unexpected document extractor catalog failure: {e}"),
         }
     _record_usage_for_payload("list_document_extractors", {}, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_disassembly(
+    source_path: str,
+    source_type: str = "pdf",
+    max_pages: int | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write local document disassembly preview.
+
+    This beta helper currently supports PDF files through local Poppler-style
+    tools (`pdfinfo`, `pdftotext`, and `pdfimages`). It inventories pages,
+    available text, image-bearing pages, extraction receipts, and quality seed
+    signals without storing memory or promoting graph edges. Review the returned
+    evidence before using preview_document_extraction, visual extraction, or
+    document draft promotion.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"source_path": source_path, "source_type": source_type, "max_pages": max_pages}
+    try:
+        payload = {
+            "disassembly": build_document_disassembly(
+                source_path=source_path,
+                source_type=source_type,
+                max_pages=max_pages,
+            ),
+            "error": None,
+        }
+        if payload["disassembly"].get("error") is not None:
+            payload["error"] = payload["disassembly"]["error"]
+    except ValueError as e:
+        payload = {"disassembly": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "disassembly": None,
+            "error": _tool_error("runtime_error", f"Unexpected document disassembly failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_disassembly", input_payload, payload, started_at)
     return payload
 
 

@@ -65,7 +65,11 @@ def test_preview_document_source_connector_omits_external_extractor_formats(tmp_
             "relative_path": "scan.pdf",
             "reason": "external_extractor_required",
             "media_type": "application/pdf",
-            "recommended_next": "use an external PDF/OCR extractor, then preview_document_extraction or preview_visual_extraction",
+            "recommended_next": "use prepare_document_disassembly for local PDF inventory, or an external PDF/OCR extractor when local tools are unavailable",
+            "document_disassembly_arguments": {
+                "source_path": str(pdf.resolve()),
+                "source_type": "pdf",
+            },
             "document_extraction_request_arguments": {
                 "source_ref": {
                     "source_uri": pdf.resolve().as_uri(),

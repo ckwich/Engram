@@ -135,18 +135,23 @@ git commit -m "feat: modernize codebase mapping for Memory OS"
 **Files:**
 - Create: `core/document_extractors.py`
 - Modify: `core/document_intelligence.py`
+- Modify: `core/source_connectors.py`
 - Modify: `server.py`
 - Test: `tests/test_document_disassembly.py`
+- Test: `tests/test_document_source_connectors.py`
+- Test: `tests/test_agent_protocol_tools.py`
 - Test: `tests/test_server_structured_tools.py`
+- Modify: `docs/ENGRAM_1_0_MCP_CONTRACT.md`
+- Modify: `AGENTS.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Write failing tests for PDF inventory.**
+- [x] **Step 1: Write failing tests for PDF inventory.**
 
 Create tests using a tiny fixture PDF or a synthetic extractor fixture that
 expects page count, file hash, media type, text coverage, and image count
 fields in a no-write extraction result.
 
-- [ ] **Step 2: Verify red.**
+- [x] **Step 2: Verify red.**
 
 Run:
 
@@ -156,23 +161,23 @@ Run:
 
 Expected: tests fail because `core.document_extractors` does not exist.
 
-- [ ] **Step 3: Implement local extractor capability detection.**
+- [x] **Step 3: Implement local extractor capability detection.**
 
 Add adapter discovery for Poppler CLI tools already present on Windows:
 `pdfinfo`, `pdftotext`, and `pdfimages`. If unavailable, return a structured
 capability warning rather than raising.
 
-- [ ] **Step 4: Implement no-write PDF inventory.**
+- [x] **Step 4: Implement no-write PDF inventory.**
 
 Expose a function that returns `source`, `document`, `pages`, `receipts`, and
 `quality_seed` without writing active memory.
 
-- [ ] **Step 5: Add MCP helper.**
+- [x] **Step 5: Add MCP helper.**
 
 Add `prepare_document_disassembly` or equivalent MCP route with docstrings that
 state it is no-write and review-first.
 
-- [ ] **Step 6: Verify.**
+- [x] **Step 6: Verify.**
 
 Run:
 
@@ -180,7 +185,7 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_document_disassembly.py tests/test_document_intelligence.py tests/test_server_structured_tools.py -q
 ```
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```powershell
 git add core/document_extractors.py core/document_intelligence.py server.py tests/test_document_disassembly.py tests/test_server_structured_tools.py README.md

@@ -23,7 +23,18 @@ def test_list_document_extractors_reports_bundled_and_external_boundaries():
     assert payload["schema_version"] == "2026-05-11.document-intelligence.extractors.v1"
     assert payload["write_performed"] is False
     extractor_ids = {extractor["id"] for extractor in payload["extractors"]}
-    assert {"engram-text-preview", "external-document-parser", "external-ocr-vision"} <= extractor_ids
+    assert {
+        "engram-text-preview",
+        "engram-local-pdf-disassembly",
+        "external-document-parser",
+        "external-ocr-vision",
+    } <= extractor_ids
+    local_pdf = next(
+        extractor for extractor in payload["extractors"] if extractor["id"] == "engram-local-pdf-disassembly"
+    )
+    assert local_pdf["runs_inside_engram"] is True
+    assert local_pdf["external_framework_required"] is False
+    assert "prepare_document_disassembly" in local_pdf["next_tools"]
     external = next(
         extractor for extractor in payload["extractors"] if extractor["id"] == "external-document-parser"
     )

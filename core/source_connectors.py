@@ -294,12 +294,25 @@ def _external_extractor_omission(path: Path, relative_path: str, media_type: str
     suffix = path.suffix.lower()
     source_uri = _file_uri(path)
     content_hash = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
-    return {
+    local_pdf_arguments = (
+        {
+            "source_path": str(path),
+            "source_type": "pdf",
+        }
+        if suffix == ".pdf"
+        else None
+    )
+    recommended_next = (
+        "use prepare_document_disassembly for local PDF inventory, or an external PDF/OCR extractor when local tools are unavailable"
+        if suffix == ".pdf"
+        else "use an external document extractor, then preview_document_extraction or preview_visual_extraction"
+    )
+    payload = {
         "path": str(path),
         "relative_path": relative_path,
         "reason": "external_extractor_required",
         "media_type": media_type,
-        "recommended_next": "use an external PDF/OCR extractor, then preview_document_extraction or preview_visual_extraction",
+        "recommended_next": recommended_next,
         "document_extraction_request_arguments": {
             "source_ref": {
                 "source_uri": source_uri,
@@ -314,6 +327,9 @@ def _external_extractor_omission(path: Path, relative_path: str, media_type: str
             "instructions": "Extract text and page images as needed, then feed reviewed outputs into preview_document_extraction or preview_visual_extraction.",
         },
     }
+    if local_pdf_arguments is not None:
+        payload["document_disassembly_arguments"] = local_pdf_arguments
+    return payload
 
 
 def _preview_document_url(target: str) -> dict[str, Any]:

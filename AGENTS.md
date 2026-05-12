@@ -23,6 +23,8 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 | `core/ingestion_pipelines.py` | Named no-write source intake presets | Pipeline ids are agent-facing contracts |
 | `core/source_connectors.py` | Preview-only source connector helpers | Must not import or promote memory without a separate explicit store flow |
 | `core/source_intake.py` | Reviewable source draft preparation | Draft-only until explicit promotion |
+| `core/document_intelligence.py` | Provider-neutral document evidence and draft records | Document extraction, visual/OCR evidence, drafts, and promotion plans stay no-write until explicit promotion |
+| `core/document_extractors.py` | Local no-write document disassembly adapters | PDF page/text/image inventory uses local tools when available and returns evidence, receipts, and quality seeds only |
 | `core/hybrid_retrieval.py` | Lexical scoring helpers for opt-in hybrid retrieval | Semantic retrieval remains the default |
 | `core/memory_quality.py` | Metadata-only quality audit signals | Read-only scope/lifecycle/chunking risk report; must not load memory bodies or write repairs |
 | `core/retrieval_eval.py` | Agent/WebUI wrapper for deterministic retrieval evals | Delegates to the reliability harness |
@@ -70,6 +72,7 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 - `retrieval_mode="semantic"` is the stable default. Use `retrieval_mode="hybrid"` only for identifier-heavy queries where exact symbols, filenames, class names, or domain terms should influence ranking.
 - `context_pack()` returns grounded citation entries for every returned chunk. Use citations to justify which memory/chunk shaped an answer; do not treat citations as permission to load full memories automatically.
 - `list_ingestion_pipelines()`, `preview_memory_chunks()`, `preview_source_connector()`, and `list_workflow_templates()` are review/helper surfaces. They must remain no-write.
+- `list_document_extractors()`, `preview_document_source_connector()`, `prepare_document_disassembly()`, `prepare_document_extraction_request()`, `prepare_document_extraction_result()`, `preview_document_extraction()`, `prepare_document_draft()`, `prepare_document_promotion_transaction()`, `prepare_visual_extraction_request()`, and `preview_visual_extraction()` are review/helper surfaces. They must remain no-write and must report evidence/provenance rather than promoting active memories.
 - `prepare_source_memory(..., pipeline="transcript"|"code_scan"|"design_doc"|"handoff"|"generic")` stages draft memories only. Pair it with chunk preview when source shape matters.
 - `retrieval_eval()` is the MCP-facing quality check. It may seed temporary `_engram_eval_*` memories through the reliability harness and should clean them up.
 - Codebase mapping is fully agent-facing: use `read_codebase_mapping_config()`, `draft_codebase_mapping_config()`, `store_codebase_mapping_config()`, and `preview_codebase_mapping()` before `prepare_codebase_mapping()` when a repo has not been configured. Use `install_codebase_mapping_hook()` only when the agent has explicit intent to write `.git/hooks/post-commit`.

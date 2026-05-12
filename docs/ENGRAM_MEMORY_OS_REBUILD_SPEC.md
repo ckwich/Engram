@@ -646,6 +646,13 @@ artifacts and page-level receipts. A 79 MB image-heavy book must not require a
 single all-or-nothing in-memory parse. Failed or skipped pages must be recorded
 as evidence with recommended next actions.
 
+Implementation status, 2026-05-12: `prepare_document_disassembly` now provides
+a no-write local PDF page/text/image inventory through Poppler-compatible
+`pdfinfo`, `pdftotext`, and `pdfimages` tools when available. It returns source
+hashes, page text status, image-bearing pages, extraction receipts, and quality
+seed signals without promoting memory. It is the first disassembly slice, not
+the final OCR/table/artifact-manifest pipeline.
+
 ## Watchers
 
 Watchers should be review-first.

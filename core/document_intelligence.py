@@ -105,6 +105,21 @@ def list_document_extractors() -> dict[str, Any]:
                 "next_tools": ["preview_document_extraction"],
             },
             {
+                "id": "engram-local-pdf-disassembly",
+                "kind": "pdf",
+                "label": "Bundled local PDF inventory and text extraction",
+                "source_types": ["pdf"],
+                "requested_outputs": ["metadata", "plain_text", "image_inventory"],
+                "runs_inside_engram": True,
+                "external_framework_required": False,
+                "required_tools": ["pdfinfo", "pdftotext", "pdfimages"],
+                "next_tools": [
+                    "prepare_document_disassembly",
+                    "preview_document_extraction",
+                    "prepare_visual_extraction_request",
+                ],
+            },
+            {
                 "id": "external-document-parser",
                 "kind": "external_document",
                 "label": "External PDF/DOCX parser",
