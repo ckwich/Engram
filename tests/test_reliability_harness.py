@@ -56,6 +56,15 @@ def test_agent_reliability_harness_reports_pass_for_expected_retrieval(isolated_
         "handoff_packet": "2026-05-11.handoff-packet.v1",
         "project_capsule": "2026-05-11.project-capsule.v1",
         "memory_quality": "2026-05-11.memory-quality.v1",
+        "workflow_templates": {
+            "schema_version": "2026-04-30.workflow-templates.v1",
+            "template_ids": [
+                "compile_task_context",
+                "prepare_session_handoff",
+                "prepare_project_capsule_review",
+                "review_memory_health",
+            ],
+        },
     }
     assert manager.retrieve_memory("_engram_eval_context_budget_smoke") is None
 

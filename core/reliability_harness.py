@@ -15,6 +15,7 @@ from core.context_compiler import (
 from core.memory_quality import audit_memory_quality
 from core.project_capsule import build_project_capsule_draft
 from core.usage_meter import ESTIMATE_METHOD, estimate_tokens
+from core.workflow_templates import list_workflow_templates
 
 
 SCHEMA_VERSION = "2026-04-28.agent-reliability.v1"
@@ -361,11 +362,50 @@ def _run_workflow_primitive_check() -> dict[str, Any]:
             quality_payload=quality,
         )
 
+        workflow_templates = list_workflow_templates()
+        templates_by_id = {template["id"]: template for template in workflow_templates["templates"]}
+        required_workflow_tools = {
+            "compile_task_context": {"list_context_profiles", "prepare_context"},
+            "prepare_session_handoff": {"prepare_context", "make_handoff"},
+            "prepare_project_capsule_review": {"audit_memory_quality", "prepare_project_capsule"},
+            "review_memory_health": {"audit_memory_quality", "conflict_scan", "retrieval_eval"},
+        }
+        for template_id, required_tools in required_workflow_tools.items():
+            template = templates_by_id.get(template_id)
+            if template is None:
+                findings.append(
+                    {
+                        "code": "workflow_template_missing",
+                        "message": f"Workflow template {template_id} is missing.",
+                    }
+                )
+                continue
+            missing_tools = sorted(required_tools - set(template.get("recommended_tools", [])))
+            if missing_tools:
+                findings.append(
+                    {
+                        "code": "workflow_template_tool_missing",
+                        "message": f"Workflow template {template_id} is missing tools: {', '.join(missing_tools)}.",
+                    }
+                )
+            template_text = " ".join([template.get("purpose", ""), *template.get("steps", [])]).lower()
+            if "no-write" not in template_text and "explicit" not in template_text:
+                findings.append(
+                    {
+                        "code": "workflow_template_review_boundary_missing",
+                        "message": f"Workflow template {template_id} does not state a no-write or explicit-review boundary.",
+                    }
+                )
+
         artifacts = {
             "context_packet": context_packet["schema_version"],
             "handoff_packet": handoff["schema_version"],
             "project_capsule": capsule["schema_version"],
             "memory_quality": quality["schema_version"],
+            "workflow_templates": {
+                "schema_version": workflow_templates["schema_version"],
+                "template_ids": list(required_workflow_tools),
+            },
         }
         for name, artifact in [
             ("context_packet", context_packet),
