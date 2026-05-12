@@ -120,11 +120,11 @@ git diff --check
 Progress, 2026-05-11:
 
 - Added read-only WebUI inspector APIs for memory quality, graph edges/audit,
-  and operation jobs/events.
+  source drafts, and operation jobs/events.
 - Added an Inspector tab that summarizes memory quality, graph audit, and
-  operation receipts without adding collaboration state or bypassing review
-  flows.
-- Remaining work: source/draft review surfaces, migration receipts,
+  operation receipts, with source draft queue visibility, without adding
+  collaboration state or bypassing review flows.
+- Remaining work: draft promotion/rejection ergonomics, migration receipts,
   graph-browse ergonomics, health/self-test display, and browser screenshot
   verification when a browser automation surface is available.
 

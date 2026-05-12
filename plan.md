@@ -184,7 +184,7 @@ Current release tracks:
 - [ ] Track 1: freeze MCP/tool/data contracts, version identity, docstrings, README tables, and alias behavior.
 - [ ] Track 2: prove storage rebuild, import/export, backup/repair, JSON-first/Chroma-second ordering, and graph audit readiness.
 - [ ] Track 3: harden source intake, lifecycle metadata, stale exclusion, and explicit draft promotion.
-- [ ] Track 4: finish WebUI 1.0 review/operations surfaces without turning the dashboard into the collaboration app. Initial Memory Inspector APIs/tab now cover memory quality, graph audit, and operation receipts; source/draft/migration/health surfaces still need finishing.
+- [ ] Track 4: finish WebUI 1.0 review/operations surfaces without turning the dashboard into the collaboration app. Initial Memory Inspector APIs/tab now cover memory quality, graph audit, source draft visibility, and operation receipts; draft actions, migration, graph browsing, and health surfaces still need finishing.
 - [ ] Track 5: expand agent reliability evaluation coverage for source intake, graph-aware context, stale exclusion, hybrid lookup, and codebase mapping. Current eval coverage now includes workflow packets/templates, stale-distractor exclusion, and reviewed/source-backed metadata targeting.
 - [ ] Track 6: publish release docs, checklist, migration notes, AGENTS.md updates, and public README 1.0 framing.
 

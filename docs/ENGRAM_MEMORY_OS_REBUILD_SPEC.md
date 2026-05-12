@@ -1032,13 +1032,13 @@ Acceptance gates:
 
 Implementation checkpoint, 2026-05-11:
 
-- Initial local inspector APIs expose memory quality, graph audit/edges, and
-  operation jobs/events as read-only WebUI routes.
+- Initial local inspector APIs expose memory quality, graph audit/edges, source
+  drafts, and operation jobs/events as read-only WebUI routes.
 - The dashboard has an Inspector tab for quality, graph, and operation receipt
-  summaries.
-- Remaining inspector work includes richer source/draft review, migration
-  receipts, graph relationship browsing, health/self-test display, and any
-  visual polish needed after browser screenshot review.
+  summaries, plus draft queue visibility.
+- Remaining inspector work includes draft promotion/rejection ergonomics,
+  migration receipts, graph relationship browsing, health/self-test display,
+  and any visual polish needed after browser screenshot review.
 
 ### Phase 7: Hosted Readiness
 
