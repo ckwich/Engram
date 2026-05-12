@@ -95,3 +95,23 @@ def test_workflow_templates_are_agent_facing_and_actionable():
     resume = next(template for template in payload["templates"] if template["id"] == "resume_repo")
     assert resume["recommended_tools"][0] == "memory_protocol"
     assert any("context_pack" in step for step in resume["steps"])
+
+
+def test_workflow_templates_cover_memory_os_agent_workflows():
+    from core.workflow_templates import list_workflow_templates
+
+    payload = list_workflow_templates()
+    templates = {template["id"]: template for template in payload["templates"]}
+
+    expected_tools = {
+        "compile_task_context": {"list_context_profiles", "prepare_context"},
+        "prepare_session_handoff": {"prepare_context", "make_handoff"},
+        "prepare_project_capsule_review": {"audit_memory_quality", "prepare_project_capsule"},
+        "review_memory_health": {"audit_memory_quality", "conflict_scan", "retrieval_eval"},
+    }
+
+    for template_id, tools in expected_tools.items():
+        template = templates[template_id]
+        assert tools.issubset(set(template["recommended_tools"]))
+        text = " ".join([template["purpose"], *template["steps"]]).lower()
+        assert "no-write" in text or "explicit" in text
