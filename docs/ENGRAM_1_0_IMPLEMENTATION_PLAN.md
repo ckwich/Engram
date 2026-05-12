@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+Status, 2026-05-12: this file is retained as legacy finish-line history. The
+active 1.0 rebuild plan is
+`docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md`,
+with the binding design in
+`docs/superpowers/specs/2026-05-12-engram-1-0-memory-os-document-disassembly-design.md`.
+
 **Goal:** Finish Engram 1.0 as a stable public, generic, local-first agent memory substrate.
 
 **Architecture:** Keep JSON memories authoritative, ChromaDB rebuildable, graph/source/codebase mapping seams explicit, and MCP tools discoverable through `memory_protocol()`. The collaboration product remains separate and consumes Engram through adapters instead of adding team-workspace features here.

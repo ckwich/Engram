@@ -630,6 +630,22 @@ Document analysis should identify:
 No document import should automatically become durable memory. Imports create
 evidence and drafts first.
 
+### Book Dismantling Gate
+
+Engram 1.0 must pass the Book Dismantling Gate before claiming rich document
+intelligence. The current binding design is
+`docs/superpowers/specs/2026-05-12-engram-1-0-memory-os-document-disassembly-design.md`.
+
+The gate requires book-scale imports to produce page inventory, extracted text,
+visual/OCR work requests, table and figure artifact candidates, quality
+warnings, chunk manifests, draft memory proposals, graph edge proposals, and
+explicit promotion transactions without automatic durable memory writes.
+
+Large documents must be processed as resumable jobs with content-addressed
+artifacts and page-level receipts. A 79 MB image-heavy book must not require a
+single all-or-nothing in-memory parse. Failed or skipped pages must be recorded
+as evidence with recommended next actions.
+
 ## Watchers
 
 Watchers should be review-first.

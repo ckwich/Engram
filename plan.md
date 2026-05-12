@@ -172,8 +172,10 @@ Status update, 2026-05-11: the old 1.0 finish-line track is paused in favor of t
 Tracked planning docs:
 
 - `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence including optional OCR/vision extraction, and optional hosted-edition direction.
+- `docs/superpowers/specs/2026-05-12-engram-1-0-memory-os-document-disassembly-design.md` — binding 1.0 Memory OS and book-scale document disassembly design, including the Book Dismantling Gate, steelman review, and post-steelman addendums.
+- `docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md` — current executable implementation plan for getting Engram to 1.0 under the Memory OS/document-disassembly direction.
 - `docs/ENGRAM_1_0_RELEASE_SPEC.md` — binding Engram 1.0 scope, invariants, release tracks, and validation gate.
-- `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md` — execution plan for finishing 1.0 in small, validated commits.
+- `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md` — legacy finish-line history superseded by the Memory OS/document-disassembly implementation plan above.
 - `docs/ENGRAM_1_0_TRACK_0_AUDIT.md` — repo/branch hygiene audit and evidence.
 - `docs/ENGRAM_HOSTED_SELLABLE_CHECKLIST.md` — optional hosted/self-hosted readiness and commercial packaging checklist for Engram without weakening local-first core boundaries.
 - `docs/POST_1_COLLABORATION_PRODUCT_HANDOFF.md` — boundary handoff for the separate collaboration product.
@@ -182,12 +184,16 @@ Tracked planning docs:
 Current release tracks:
 
 - [x] Track 0: repo and branch hygiene audit; local `main` has been fast-forwarded to the planning/audit branch.
-- [ ] Track 1: freeze MCP/tool/data contracts, version identity, docstrings, README tables, and alias behavior.
-- [ ] Track 2: prove storage rebuild, import/export, backup/repair, JSON-first/Chroma-second ordering, and graph audit readiness.
-- [ ] Track 3: harden source intake, lifecycle metadata, stale exclusion, and explicit draft promotion.
-- [ ] Track 4: finish WebUI 1.0 review/operations surfaces without turning the dashboard into the collaboration app. Initial Memory Inspector APIs/tab now cover memory quality, graph audit, source draft visibility, and operation receipts; draft actions, migration, graph browsing, and health surfaces still need finishing.
-- [ ] Track 5: expand agent reliability evaluation coverage for source intake, graph-aware context, stale exclusion, hybrid lookup, and codebase mapping. Current eval coverage now includes workflow packets/templates, stale-distractor exclusion, and reviewed/source-backed metadata targeting.
-- [ ] Track 6: publish release docs, checklist, migration notes, AGENTS.md updates, and public README 1.0 framing.
+- [x] Track 1: freeze MCP/tool/data contracts, version identity, docstrings, README tables, and alias behavior.
+- [x] Track 2: prove storage rebuild, import/export, backup/repair, JSON-first/Chroma-second ordering, migration round trip, and graph audit readiness.
+- [x] Track 3: harden source intake, lifecycle metadata, stale exclusion, explicit draft promotion, and daemon-routed source draft lifecycle.
+- [ ] Track 4: modernize codebase mapping for the Memory OS runtime, including current daemon/document/migration/backend domains and data-root-aware mapping jobs.
+- [ ] Track 5: implement book-scale document disassembly: local PDF/DOCX/text/HTML evidence, page inventory, quality reports, visual/OCR requests, artifact manifests, chunk provenance, and review-first promotion.
+- [ ] Track 6: finish daemon ownership for stable browsing, document jobs, mapping jobs, imports, repairs, and rebuild jobs.
+- [ ] Track 7: run backend decision gates for retrieval and graph storage. Keep Chroma/JSON live until LanceDB/Kuzu or alternatives pass real-corpus Windows spikes.
+- [ ] Track 8: expand agent reliability evaluation coverage for source intake, graph-aware context, stale exclusion, hybrid lookup, codebase mapping, document disassembly, and visual evidence.
+- [ ] Track 9: finish WebUI 1.0 operator surfaces for health, drafts, document imports, graph proposals, migration receipts, and evals without turning the dashboard into the collaboration app.
+- [ ] Track 10: publish release docs, checklist, migration notes, AGENTS.md updates, public README 1.0 framing, and the Book Dismantling Gate results.
 
 1.0 does not include multi-user workspaces, permissions, comments, assignments, mentions, or rich collaboration pages. Those belong to the separate collaboration product.
 
