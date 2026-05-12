@@ -1007,6 +1007,17 @@ Acceptance gates:
 - stale/conflicting memories are warned about.
 - evals prove current/reviewed/source-backed memories are preferred.
 
+Implementation checkpoint, 2026-05-11:
+
+- Current-stack Phase 5 primitives are implemented as no-write agent workflow
+  helpers: `prepare_context`, `make_handoff`, `prepare_project_capsule`,
+  `audit_memory_quality`, `conflict_scan`, and expanded workflow templates.
+- Graph-enabled context packets now run compact conflict scans over selected
+  memory refs and warn with counts/types only.
+- `retrieval_eval` now includes workflow-packet checks, workflow-template
+  checks, stale-distractor exclusion, and reviewed/source-backed metadata
+  targeting scenarios.
+
 ### Phase 6: Local Inspector
 
 - Rebuild WebUI as Memory Inspector.
@@ -1018,6 +1029,16 @@ Acceptance gates:
 - inspector never bypasses review-first promotion.
 - exposed-host security remains fail-closed.
 - no hosted collaboration features leak into local core.
+
+Implementation checkpoint, 2026-05-11:
+
+- Initial local inspector APIs expose memory quality, graph audit/edges, and
+  operation jobs/events as read-only WebUI routes.
+- The dashboard has an Inspector tab for quality, graph, and operation receipt
+  summaries.
+- Remaining inspector work includes richer source/draft review, migration
+  receipts, graph relationship browsing, health/self-test display, and any
+  visual polish needed after browser screenshot review.
 
 ### Phase 7: Hosted Readiness
 

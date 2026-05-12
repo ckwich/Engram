@@ -117,6 +117,17 @@ git diff --check
 
 - [ ] Commit with a message like `feat: finish 1.0 webui review surface`.
 
+Progress, 2026-05-11:
+
+- Added read-only WebUI inspector APIs for memory quality, graph edges/audit,
+  and operation jobs/events.
+- Added an Inspector tab that summarizes memory quality, graph audit, and
+  operation receipts without adding collaboration state or bypassing review
+  flows.
+- Remaining work: source/draft review surfaces, migration receipts,
+  graph-browse ergonomics, health/self-test display, and browser screenshot
+  verification when a browser automation surface is available.
+
 ## Task 5: Agent Reliability Coverage
 
 **Files:**
@@ -137,6 +148,15 @@ git diff --check
 ```
 
 - [ ] Commit with a message like `test: expand agent reliability gate`.
+
+Progress, 2026-05-11:
+
+- `retrieval_eval` now preserves workflow checks from the reliability harness.
+- The reliability harness now verifies no-write workflow packet schemas,
+  workflow recipe coverage, stale-distractor exclusion, and
+  reviewed/source-backed metadata targeting.
+- Remaining work: source-intake golden scenarios, hybrid identifier lookup,
+  graph-aware context ranking, and codebase mapping eval coverage.
 
 ## Task 6: Release Docs and Final Gate
 
