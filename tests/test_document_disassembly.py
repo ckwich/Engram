@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
+import pytest
+
 from core.document_extractors import ExtractorCommandResult, prepare_document_disassembly
+from core.reliability_harness import (
+    REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS,
+    default_book_dismantling_fixture_manifests,
+    run_book_dismantling_gate,
+)
 
 
 def _fake_poppler_runner(args: list[str], timeout_seconds: int) -> ExtractorCommandResult:
@@ -125,3 +133,58 @@ def test_prepare_pdf_disassembly_reports_missing_local_tools(tmp_path):
     assert payload["capabilities"]["pdfinfo"]["available"] is False
     assert payload["capabilities"]["pdftotext"]["available"] is False
     assert payload["capabilities"]["pdfimages"]["available"] is False
+
+
+def test_book_dismantling_gate_validates_required_fixture_manifests():
+    report = run_book_dismantling_gate(default_book_dismantling_fixture_manifests())
+
+    assert report["schema_version"] == "2026-05-12.book-dismantling-gate.v1"
+    assert report["summary"] == {
+        "status": "pass",
+        "fixture_count": 7,
+        "passed": 7,
+        "failed": 0,
+        "required_fixture_count": 7,
+        "missing_required_count": 0,
+    }
+    assert report["required_fixture_ids"] == REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS
+    assert {fixture["fixture_id"] for fixture in report["fixtures"]} == set(REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS)
+    image_only = next(fixture for fixture in report["fixtures"] if fixture["fixture_id"] == "image_only_pdf")
+    assert image_only["status"] == "pass"
+    assert image_only["checks"]["warning_codes"] == ["no_text_pages", "visual_review_needed"]
+    table_heavy = next(fixture for fixture in report["fixtures"] if fixture["fixture_id"] == "table_heavy_page")
+    assert "table_structure" in table_heavy["checks"]["visual_request_capabilities"]
+
+
+def test_book_dismantling_fixture_readme_documents_no_copyrighted_pdf_policy():
+    readme = Path(__file__).parent / "fixtures" / "document_books" / "README.md"
+    text = readme.read_text(encoding="utf-8")
+
+    assert "Do not commit copyrighted PDFs" in text
+    for fixture_id in REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS:
+        assert fixture_id in text
+
+
+def test_optional_local_design_book_smoke_is_env_gated():
+    fixture_dir = os.environ.get("ENGRAM_DOCUMENT_FIXTURE_DIR")
+    if not fixture_dir:
+        pytest.skip("Set ENGRAM_DOCUMENT_FIXTURE_DIR to run local PDF smoke tests.")
+
+    directory = Path(fixture_dir)
+    if not directory.exists():
+        pytest.skip(f"ENGRAM_DOCUMENT_FIXTURE_DIR does not exist: {directory}")
+    pdfs = sorted(directory.glob("*.pdf"))
+    if not pdfs:
+        pytest.skip(f"No PDFs found in ENGRAM_DOCUMENT_FIXTURE_DIR: {directory}")
+
+    payload = prepare_document_disassembly(source_path=pdfs[0], max_pages=5)
+    error = payload.get("error")
+    if isinstance(error, dict) and error.get("code") == "missing_extractor":
+        pytest.skip(error["message"])
+
+    assert error is None
+    assert payload["write_performed"] is False
+    assert payload["active_memory_write_performed"] is False
+    assert payload["document"]["page_count"] >= len(payload["pages"])
+    assert payload["artifact_manifest"]["record_type"] == "document_artifact_manifest"
+    assert "content" in payload["text"]

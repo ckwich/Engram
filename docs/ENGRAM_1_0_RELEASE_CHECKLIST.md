@@ -121,6 +121,34 @@ print(json.dumps(graph_manager.audit_graph(), indent=2))
 Expected result: malformed edge records are reported by edge index and field
 without loading memory bodies.
 
+## Document Intelligence Gate
+
+Run the deterministic Book Dismantling Gate:
+
+```powershell
+& $py -m pytest tests/test_document_disassembly.py tests/test_reliability_harness.py -q
+& $py server.py --agent-eval
+```
+
+Expected result: the synthetic fixture manifests cover `clean_text_pdf`,
+`book_style_pdf`, `image_only_pdf`, `table_heavy_page`,
+`figure_caption_page`, `rotated_page`, and `ocr_noise_page`. The gate must
+report page inventory, text coverage, visual-needed pages, quality warnings,
+chunk provenance, and reviewable draft proposals without active memory writes.
+
+Optional local large-book smoke:
+
+```powershell
+$env:ENGRAM_DOCUMENT_FIXTURE_DIR = "C:\Users\colek\Downloads\Design Books"
+& $py -m pytest tests/test_document_disassembly.py::test_optional_local_design_book_smoke_is_env_gated -q
+Remove-Item Env:\ENGRAM_DOCUMENT_FIXTURE_DIR
+```
+
+Expected result: the smoke skips cleanly when the directory, PDFs, or local PDF
+tools are unavailable. When available, it runs `prepare_document_disassembly`
+against the first local PDF with `max_pages=5`, returns no active writes, and
+does not commit source PDFs or extracted copyrighted text.
+
 ## Final Release Gate
 
 Before tagging or announcing a 1.0 build, run:

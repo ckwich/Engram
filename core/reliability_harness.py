@@ -12,6 +12,11 @@ from core.context_compiler import (
     compile_context_packet,
     get_context_profile,
 )
+from core.document_intelligence import (
+    prepare_document_draft,
+    prepare_visual_artifact_record,
+    preview_document_extraction,
+)
 from core.memory_quality import audit_memory_quality
 from core.project_capsule import build_project_capsule_draft
 from core.usage_meter import ESTIMATE_METHOD, estimate_tokens
@@ -19,10 +24,20 @@ from core.workflow_templates import list_workflow_templates
 
 
 SCHEMA_VERSION = "2026-04-28.agent-reliability.v1"
+BOOK_DISMANTLING_GATE_SCHEMA_VERSION = "2026-05-12.book-dismantling-gate.v1"
 DEFAULT_PROJECT = "C:/Dev/Engram"
 DEFAULT_DOMAIN = "agent-reliability"
 EVAL_KEY_PREFIX = "_engram_eval_"
 LOGGER = logging.getLogger(__name__)
+REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS = [
+    "clean_text_pdf",
+    "book_style_pdf",
+    "image_only_pdf",
+    "table_heavy_page",
+    "figure_caption_page",
+    "rotated_page",
+    "ocr_noise_page",
+]
 
 
 @dataclass(frozen=True)
@@ -151,7 +166,7 @@ def run_agent_reliability_harness(
 
     passed = sum(1 for report in reports if report["status"] == "pass")
     failed = len(reports) - passed
-    workflow_checks = [_run_workflow_primitive_check()]
+    workflow_checks = [_run_workflow_primitive_check(), _run_book_dismantling_gate_check()]
     workflow_failed = sum(1 for check in workflow_checks if check["status"] != "pass")
     return {
         "schema_version": SCHEMA_VERSION,
@@ -370,6 +385,334 @@ def _select_budgeted_chunks(chunks: list[dict[str, Any]], budget_chars: int) -> 
         selected.append(chunk)
         used_chars += len(text)
     return selected
+
+
+def default_book_dismantling_fixture_manifests() -> list[dict[str, Any]]:
+    """Return synthetic no-copyright manifests for the Book Dismantling Gate."""
+    return [
+        _book_fixture(
+            "clean_text_pdf",
+            title="Clean Text PDF",
+            page_statuses=["text", "text", "text"],
+            image_pages=[],
+            expected_warnings=[],
+            content="# Clean Text\n\nPlain text pages with stable section chunks.",
+        ),
+        _book_fixture(
+            "book_style_pdf",
+            title="Book Style PDF",
+            page_statuses=["text", "text", "low_text", "text"],
+            image_pages=[3],
+            expected_warnings=["low_text_pages", "image_heavy_pages", "visual_review_needed"],
+            content="# Chapter\n\nA chapter with heading structure.\n\n## Example\n\nA figure needs review.",
+        ),
+        _book_fixture(
+            "image_only_pdf",
+            title="Image Only PDF",
+            page_statuses=["no_text", "no_text"],
+            image_pages=[1, 2],
+            expected_warnings=["no_text_pages", "visual_review_needed"],
+            content="# Image Only\n\nOCR required before claims can be trusted.",
+        ),
+        _book_fixture(
+            "table_heavy_page",
+            title="Table Heavy Page",
+            page_statuses=["text", "low_text"],
+            image_pages=[2],
+            expected_warnings=["low_text_pages", "image_heavy_pages", "visual_review_needed"],
+            content="# Tables\n\nA dense comparison table needs structure extraction.",
+        ),
+        _book_fixture(
+            "figure_caption_page",
+            title="Figure Caption Page",
+            page_statuses=["text", "low_text"],
+            image_pages=[2],
+            expected_warnings=["low_text_pages", "image_heavy_pages", "visual_review_needed"],
+            content="# Figures\n\nA figure and caption need linked visual evidence.",
+        ),
+        _book_fixture(
+            "rotated_page",
+            title="Rotated Page",
+            page_statuses=["text", "low_text"],
+            image_pages=[2],
+            expected_warnings=["low_text_pages", "visual_review_needed"],
+            content="# Rotated Page\n\nRotation should be represented as review-needed evidence.",
+        ),
+        _book_fixture(
+            "ocr_noise_page",
+            title="OCR Noise Page",
+            page_statuses=["text", "low_text", "text"],
+            image_pages=[2],
+            expected_warnings=["low_text_pages", "visual_review_needed"],
+            content="# OCR Noise\n\nNoisy OCR text requires lower-confidence review.",
+        ),
+    ]
+
+
+def run_book_dismantling_gate(fixtures: Iterable[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Validate synthetic or local-only book disassembly manifests without writes."""
+    fixture_list = list(fixtures or default_book_dismantling_fixture_manifests())
+    fixture_reports = [_evaluate_book_fixture(fixture) for fixture in fixture_list]
+    present_ids = {report["fixture_id"] for report in fixture_reports}
+    missing_required = [
+        fixture_id for fixture_id in REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS if fixture_id not in present_ids
+    ]
+    passed = sum(1 for report in fixture_reports if report["status"] == "pass")
+    failed = len(fixture_reports) - passed
+    status = "pass" if failed == 0 and not missing_required else "fail"
+    return {
+        "schema_version": BOOK_DISMANTLING_GATE_SCHEMA_VERSION,
+        "summary": {
+            "status": status,
+            "fixture_count": len(fixture_reports),
+            "passed": passed,
+            "failed": failed,
+            "required_fixture_count": len(REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS),
+            "missing_required_count": len(missing_required),
+        },
+        "required_fixture_ids": list(REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS),
+        "missing_required_fixture_ids": missing_required,
+        "fixtures": fixture_reports,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+    }
+
+
+def _run_book_dismantling_gate_check() -> dict[str, Any]:
+    try:
+        report = run_book_dismantling_gate()
+        return {
+            "id": "book_dismantling_gate",
+            "description": "Verify synthetic book-scale document disassembly manifests satisfy the 1.0 gate.",
+            "status": report["summary"]["status"],
+            "summary": report["summary"],
+            "required_fixture_ids": report["required_fixture_ids"],
+            "findings": _book_gate_findings(report),
+        }
+    except Exception as exc:
+        return {
+            "id": "book_dismantling_gate",
+            "description": "Verify synthetic book-scale document disassembly manifests satisfy the 1.0 gate.",
+            "status": "fail",
+            "summary": {},
+            "required_fixture_ids": list(REQUIRED_BOOK_DISMANTLING_FIXTURE_IDS),
+            "findings": [{"code": "book_gate_runtime_error", "message": str(exc)}],
+        }
+
+
+def _book_gate_findings(report: dict[str, Any]) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    for fixture_id in report.get("missing_required_fixture_ids", []):
+        findings.append(
+            {
+                "code": "missing_required_fixture",
+                "message": f"Required book dismantling fixture is missing: {fixture_id}",
+            }
+        )
+    for fixture in report.get("fixtures", []):
+        for finding in fixture.get("findings", []):
+            findings.append(
+                {
+                    "code": finding["code"],
+                    "message": f"{fixture['fixture_id']}: {finding['message']}",
+                }
+            )
+    return findings
+
+
+def _evaluate_book_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
+    fixture_id = str(fixture.get("fixture_id") or "")
+    disassembly = dict(fixture.get("disassembly") or {})
+    expected = dict(fixture.get("expected") or {})
+    chunks = list(fixture.get("chunks") or [])
+    draft = dict(fixture.get("document_draft") or {})
+    findings: list[dict[str, str]] = []
+
+    pages = list(disassembly.get("pages") or [])
+    if not pages:
+        findings.append({"code": "missing_page_inventory", "message": "Page inventory is empty."})
+    coverage = dict((disassembly.get("quality_report") or {}).get("coverage") or {})
+    min_text_ratio = float(expected.get("min_text_page_ratio", 0))
+    if float(coverage.get("text_page_ratio", 0)) < min_text_ratio:
+        findings.append(
+            {
+                "code": "text_coverage_below_gate",
+                "message": f"Text page ratio is below {min_text_ratio}.",
+            }
+        )
+    quality_seed = dict(disassembly.get("quality_seed") or {})
+    visual_pages = list(quality_seed.get("visual_review_needed_pages") or [])
+    expected_visual_pages = list(expected.get("visual_review_needed_pages") or [])
+    if visual_pages != expected_visual_pages:
+        findings.append(
+            {
+                "code": "visual_page_mismatch",
+                "message": f"Expected visual pages {expected_visual_pages}, got {visual_pages}.",
+            }
+        )
+    warning_codes = [
+        warning.get("code")
+        for warning in (disassembly.get("quality_report") or {}).get("warnings", [])
+        if warning.get("code")
+    ]
+    missing_warnings = sorted(set(expected.get("warning_codes") or []) - set(warning_codes))
+    if missing_warnings:
+        findings.append(
+            {
+                "code": "quality_warning_missing",
+                "message": f"Missing quality warnings: {', '.join(missing_warnings)}.",
+            }
+        )
+    if not all(isinstance(chunk.get("provenance"), dict) and "document_id" in chunk["provenance"] for chunk in chunks):
+        findings.append({"code": "chunk_provenance_missing", "message": "Chunk provenance is incomplete."})
+    if expected_visual_pages:
+        request = disassembly.get("visual_extraction_request") or {}
+        if request.get("record_type") != "visual_extraction_request":
+            findings.append({"code": "visual_request_missing", "message": "Visual extraction request is missing."})
+    if draft.get("record_type") != "document_draft" or draft.get("active_memory_write_performed") is not False:
+        findings.append({"code": "promotion_draft_missing", "message": "Reviewable document draft is missing."})
+
+    return {
+        "fixture_id": fixture_id,
+        "status": "pass" if not findings else "fail",
+        "checks": {
+            "page_count": len(pages),
+            "text_page_ratio": coverage.get("text_page_ratio"),
+            "visual_review_needed_pages": visual_pages,
+            "warning_codes": warning_codes,
+            "chunk_count": len(chunks),
+            "visual_request_capabilities": (
+                disassembly.get("visual_extraction_request") or {}
+            ).get("requested_capabilities", []),
+        },
+        "findings": findings,
+    }
+
+
+def _book_fixture(
+    fixture_id: str,
+    *,
+    title: str,
+    page_statuses: list[str],
+    image_pages: list[int],
+    expected_warnings: list[str],
+    content: str,
+) -> dict[str, Any]:
+    preview = preview_document_extraction(
+        title=title,
+        source_uri=f"fixture://document_books/{fixture_id}.pdf",
+        source_type="pdf",
+        content=content,
+        media_type="text/markdown",
+        metadata={"project": DEFAULT_PROJECT, "domain": "document-intelligence", "fixture_id": fixture_id},
+    )
+    pages = [
+        {
+            "page_number": index + 1,
+            "text_chars": 120 if status == "text" else (20 if status == "low_text" else 0),
+            "non_whitespace_chars": 100 if status == "text" else (15 if status == "low_text" else 0),
+            "text_status": status,
+            "image_count": 1 if index + 1 in image_pages else 0,
+            "visual_review_needed": status != "text" or index + 1 in image_pages,
+        }
+        for index, status in enumerate(page_statuses)
+    ]
+    visual_pages = [page["page_number"] for page in pages if page["visual_review_needed"]]
+    text_pages = [page["page_number"] for page in pages if page["text_status"] == "text"]
+    visual_artifacts = [
+        prepare_visual_artifact_record(
+            document_id=preview["document_record"]["document_id"],
+            artifact_type="page_crop",
+            source_ref={
+                "source_uri": f"fixture://document_books/{fixture_id}.pdf",
+                "source_artifact_id": f"document_artifacts/sources/{fixture_id}.pdf",
+            },
+            extractor_id="fixture",
+            extractor_kind="agent_native",
+            page_number=page,
+            confidence=0.8,
+            description=f"Synthetic page crop for {fixture_id} page {page}.",
+        )
+        for page in visual_pages
+    ]
+    draft = prepare_document_draft(
+        document_record=preview["document_record"],
+        analysis={
+            "summary": f"Synthetic {title} fixture.",
+            "claims": [f"{title} has deterministic document disassembly evidence."],
+        },
+        chunk_refs=[chunk["provenance"] for chunk in preview["chunks"]],
+        visual_artifacts=visual_artifacts,
+    )
+    warnings = [{"code": code, "message": f"Synthetic fixture warning: {code}."} for code in expected_warnings]
+    disassembly = {
+        "record_type": "document_disassembly_preview",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "document": {
+            "document_id": preview["document_record"]["document_id"],
+            "title": title,
+            "page_count": len(pages),
+        },
+        "pages": pages,
+        "quality_seed": {
+            "page_count": len(pages),
+            "pages_reported": len(pages),
+            "text_pages": text_pages,
+            "low_text_pages": [page["page_number"] for page in pages if page["text_status"] == "low_text"],
+            "no_text_pages": [page["page_number"] for page in pages if page["text_status"] == "no_text"],
+            "image_pages": list(image_pages),
+            "visual_review_needed_pages": visual_pages,
+        },
+        "quality_report": {
+            "record_type": "document_quality_report",
+            "status": "pass" if not expected_warnings else "warn",
+            "coverage": {
+                "text_page_ratio": round(len(text_pages) / len(pages), 3),
+                "no_text_page_count": sum(1 for page in pages if page["text_status"] == "no_text"),
+            },
+            "warnings": warnings,
+        },
+        "artifact_manifest": {
+            "record_type": "document_artifact_manifest",
+            "resume": {
+                "page_count": len(pages),
+                "pages_recorded": len(pages),
+                "states": {
+                    str(page["page_number"]): (
+                        "visual_needed" if page["visual_review_needed"] else "text_extracted"
+                    )
+                    for page in pages
+                },
+            },
+        },
+        "visual_extraction_request": (
+            {
+                "record_type": "visual_extraction_request",
+                "image_refs": [{"page_number": page} for page in visual_pages],
+                "requested_capabilities": [
+                    "caption_alt_text",
+                    "diagram_description",
+                    "figure_description",
+                    "ocr_text",
+                    "table_structure",
+                ],
+            }
+            if visual_pages
+            else None
+        ),
+    }
+    return {
+        "fixture_id": fixture_id,
+        "disassembly": disassembly,
+        "chunks": preview["chunks"],
+        "document_draft": draft,
+        "expected": {
+            "visual_review_needed_pages": visual_pages,
+            "warning_codes": expected_warnings,
+            "min_text_page_ratio": 0 if fixture_id == "image_only_pdf" else 0.25,
+        },
+    }
 
 
 def _run_workflow_primitive_check() -> dict[str, Any]:

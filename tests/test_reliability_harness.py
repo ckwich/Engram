@@ -36,7 +36,7 @@ def test_agent_reliability_harness_reports_pass_for_expected_retrieval(isolated_
         "scenario_count": 1,
         "passed": 1,
         "failed": 0,
-        "workflow_check_count": 1,
+        "workflow_check_count": 2,
         "workflow_failed": 0,
     }
 
@@ -66,6 +66,9 @@ def test_agent_reliability_harness_reports_pass_for_expected_retrieval(isolated_
             ],
         },
     }
+    assert report["workflow_checks"][1]["id"] == "book_dismantling_gate"
+    assert report["workflow_checks"][1]["status"] == "pass"
+    assert report["workflow_checks"][1]["summary"]["fixture_count"] == 7
     assert manager.retrieve_memory("_engram_eval_context_budget_smoke") is None
 
 
@@ -169,3 +172,22 @@ def test_default_agent_reliability_scenarios_are_seeded_and_bounded():
         scenario for scenario in scenarios if scenario.scenario_id == "reviewed_source_backed_metadata_preference"
     )
     assert {"source-backed", "reviewed"} <= set(source_backed.tags)
+
+
+def test_book_dismantling_gate_reports_missing_required_fixture():
+    from core.reliability_harness import (
+        default_book_dismantling_fixture_manifests,
+        run_book_dismantling_gate,
+    )
+
+    fixtures = [
+        fixture
+        for fixture in default_book_dismantling_fixture_manifests()
+        if fixture["fixture_id"] != "ocr_noise_page"
+    ]
+
+    report = run_book_dismantling_gate(fixtures)
+
+    assert report["summary"]["status"] == "fail"
+    assert report["summary"]["missing_required_count"] == 1
+    assert report["missing_required_fixture_ids"] == ["ocr_noise_page"]

@@ -377,7 +377,7 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_document_intelligence.py tests/test_memory_os_migration.py -q
 ```
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```powershell
 git add core/document_intelligence.py core/graph_manager.py core/memory_os_migration.py server.py tests/test_document_intelligence.py tests/test_memory_os_migration.py tests/test_server_structured_tools.py AGENTS.md README.md docs/ENGRAM_1_0_MCP_CONTRACT.md docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
@@ -392,13 +392,13 @@ git commit -m "feat: add document understanding graph proposals"
 - Modify: `core/reliability_harness.py`
 - Modify: `docs/ENGRAM_1_0_RELEASE_CHECKLIST.md`
 
-- [ ] **Step 1: Write fixture manifest tests.**
+- [x] **Step 1: Write fixture manifest tests.**
 
 Add synthetic or local-only fixture manifests for clean text PDF, book-style
 PDF, image-only PDF, table-heavy page, figure/caption page, rotated page, and
 OCR-noise page. Do not commit copyrighted PDFs.
 
-- [ ] **Step 2: Verify red.**
+- [x] **Step 2: Verify red.**
 
 Run:
 
@@ -406,12 +406,12 @@ Run:
 .\venv\Scripts\python.exe -m pytest tests/test_document_disassembly.py -q
 ```
 
-- [ ] **Step 3: Implement gate runner.**
+- [x] **Step 3: Implement gate runner.**
 
 Add a deterministic test helper that validates page inventory, text coverage,
 visual-needed flags, quality warnings, chunk provenance, and promotion drafts.
 
-- [ ] **Step 4: Add optional local large-book smoke.**
+- [x] **Step 4: Add optional local large-book smoke.**
 
 Document an environment-variable gated smoke for local PDFs such as the 79 MB
 book. The smoke must not require the file in CI and must not commit extracted
@@ -419,7 +419,7 @@ copyrighted text. The default local corpus directory for Cole's machine is
 `C:\Users\colek\Downloads\Design Books`; test code must treat it as optional
 and skip cleanly when `ENGRAM_DOCUMENT_FIXTURE_DIR` is unset or unavailable.
 
-- [ ] **Step 5: Verify.**
+- [x] **Step 5: Verify.**
 
 Run:
 
@@ -431,7 +431,7 @@ Run:
 - [ ] **Step 6: Commit.**
 
 ```powershell
-git add tests/fixtures/document_books/README.md tests/test_document_disassembly.py core/reliability_harness.py docs/ENGRAM_1_0_RELEASE_CHECKLIST.md
+git add tests/fixtures/document_books/README.md tests/test_document_disassembly.py tests/test_reliability_harness.py tests/test_retrieval_eval.py core/reliability_harness.py docs/ENGRAM_1_0_RELEASE_CHECKLIST.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
 git commit -m "test: add book dismantling release gate"
 ```
 
