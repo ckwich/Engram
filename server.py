@@ -85,6 +85,7 @@ PRODUCT_STABILITY = "development"
 PROTOCOL_VERSION = 2
 PROTOCOL_SCHEMA_VERSION = "2026-04-27"
 DEFAULT_SSE_HOST = "127.0.0.1"
+DAEMON_STATUS_SCHEMA_VERSION = "2026-05-12.daemon-status.v1"
 _USAGE_METERING_ENABLED: ContextVar[bool] = ContextVar(
     "engram_usage_metering_enabled",
     default=True,
@@ -111,6 +112,10 @@ async def _call_daemon(method_name: str, payload: dict[str, Any]) -> dict[str, A
     client = _daemon_client()
     method = getattr(client, method_name)
     return await asyncio.to_thread(method, payload)
+
+
+async def _daemon_health() -> dict[str, Any]:
+    return await asyncio.to_thread(_daemon_client().health)
 
 
 def _clamp_search_limit(limit: int) -> int:
@@ -570,6 +575,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "usage": "beta",
             "operations": "beta",
             "migration": "beta",
+            "daemon_status": "beta",
         },
         "retrieval_ladder": [
             {
@@ -721,6 +727,12 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "cost_class": "low",
                 "tools": ["list_operation_jobs", "list_operation_events"],
             },
+            "daemon_runtime": {
+                "purpose": "Inspect whether this MCP server is using direct in-process storage or an opt-in local engramd daemon.",
+                "stability": "beta",
+                "cost_class": "low",
+                "tools": ["daemon_status"],
+            },
             "migration": {
                 "purpose": "Validate Memory OS migration readiness without touching active memories.",
                 "stability": "beta",
@@ -773,6 +785,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "migration dry run": "migration_dry_run",
                 "migration round trip": "memory_os_round_trip_check",
                 "retrieval backend status": "retrieval_backend_status",
+                "daemon status": "daemon_status",
                 "metadata browsing": "list_memories",
                 "memory writing": "prepare_memory",
             },
@@ -825,6 +838,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "usage_summary": "Engram-attributed token estimate rollups; not billed model usage.",
             "list_operation_jobs": "List recent local operation/job receipts.",
             "list_operation_events": "List recent local operation event records.",
+            "daemon_status": "Report whether stable memory tools will run direct in-process or through a configured ENGRAM_DAEMON_URL daemon.",
             "migration_dry_run": "Validate legacy JSON memories against the Memory OS ledger schema without writing.",
             "memory_os_round_trip_check": "Run legacy import/export/restore parity checks in a migration work directory without active memory writes.",
             "retrieval_backend_status": "Report legacy Chroma, optional LanceDB, migrated-store, and rebuild-probe readiness without changing live retrieval.",
@@ -855,6 +869,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "memory_os_round_trip_check(legacy_dir='data/memories', work_root='.engram/migration-round-trip-check') for migration parity proof",
             "retrieval_backend_status(store_root='.engram/migration-round-trip-check/store', include_rebuild_probe=True) before considering a retrieval backend switch",
             "graph_backend_status(store_root='.engram/migration-round-trip-check/store') before considering a graph backend switch",
+            "daemon_status() before assuming this MCP server is using engramd daemon-client mode",
             "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
         ],
         "warnings": [
@@ -863,9 +878,56 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "Use retrieval_mode='hybrid' intentionally for identifier-heavy queries; semantic remains the cheaper default.",
             "Use list_memories for browsing metadata, not topic lookup.",
             "Codex clients may lazy-load Engram; if mcp__engram__ tools are not initially visible, use tool discovery/search for Engram before concluding it is unavailable.",
+            "ENGRAM_DAEMON_URL opt-in daemon mode routes stable memory tools through engramd; call daemon_status() to verify direct vs daemon-client mode.",
             "When multiple stdio Engram servers are live, only one process owns ChromaDB; secondary processes keep JSON-first writes available, and vector search/context tools return a runtime error until the owner exits.",
         ],
     }
+
+
+@mcp.tool()
+async def daemon_status() -> dict[str, Any]:
+    """
+    Report whether this MCP server is using direct storage or engramd.
+
+    `ENGRAM_DAEMON_URL` enables daemon-client mode for stable memory tools.
+    This status tool verifies the configured mode and, when a daemon URL is
+    present, performs a daemon health request without reading or writing memory.
+    """
+    configured_url = _daemon_url()
+    base_payload: dict[str, Any] = {
+        "schema_version": DAEMON_STATUS_SCHEMA_VERSION,
+        "mode": "daemon_client" if configured_url else "direct",
+        "daemon_enabled": configured_url is not None,
+        "configured_url": configured_url,
+        "reachable": False,
+        "health": None,
+        "stable_tools_routed": [
+            "search_memories",
+            "retrieve_chunk",
+            "retrieve_chunks",
+            "retrieve_memory",
+            "store_memory",
+            "write_memory",
+            "delete_memory",
+        ] if configured_url else [],
+        "error": None,
+    }
+    if configured_url is None:
+        return base_payload
+
+    try:
+        health = await _daemon_health()
+    except Exception as exc:
+        base_payload["error"] = _tool_error("runtime_error", str(exc))
+        return base_payload
+
+    base_payload["health"] = health
+    base_payload["reachable"] = health.get("error") is None and health.get("status") == "ok"
+    if not base_payload["reachable"]:
+        error = health.get("error")
+        if error:
+            base_payload["error"] = error
+    return base_payload
 
 
 @mcp.tool()

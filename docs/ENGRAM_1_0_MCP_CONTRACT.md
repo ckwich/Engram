@@ -105,6 +105,7 @@ where typed, and focused tests.
 | `list_workflow_templates` | beta | `dict{templates, error}` | Static workflow recipes. |
 | `list_operation_jobs` | beta | `dict{count, jobs, error}` | Local operation receipts. |
 | `list_operation_events` | beta | `dict{count, events, error}` | Local operation events. |
+| `daemon_status` | beta | `dict{schema_version, mode, daemon_enabled, configured_url, reachable, health, stable_tools_routed, error}` | No-write runtime status for direct mode versus opt-in `ENGRAM_DAEMON_URL` daemon-client mode. |
 | `migration_dry_run` | beta | `dict{schema_version, operation, source_count, valid_count, invalid_count, would_import_count, chunk_count_mismatch_count, unsupported_fields, write_performed, active_memory_write_performed, error}` | No-write validation of legacy JSON memories against the Memory OS migration ledger. |
 | `memory_os_round_trip_check` | beta | `dict{schema_version, operation, status, source_count, imported_count, bundle_memory_count, restored_count, parity, write_performed, active_memory_write_performed, error}` | Writes only migration work artifacts while proving import/export/restore parity; does not touch active memories or ChromaDB. |
 | `retrieval_backend_status` | beta | `dict{schema_version, operation, current_live_backend, candidate_backend, store_probe, rebuild_probe, readiness_gates, write_performed, active_memory_write_performed, live_retrieval_changed, error}` | No-write readiness report for legacy Chroma, optional LanceDB, migrated-store vector sources, and deterministic rebuild probes. |

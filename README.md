@@ -156,6 +156,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `clear_pins` | Clear session pins. |
 | `audit_memory_metadata` | Read-only metadata hygiene audit. |
 | `repair_memory_metadata` | Dry-run-first metadata repair. |
+| `daemon_status` | Report direct mode versus opt-in `ENGRAM_DAEMON_URL` daemon-client mode. |
 
 ### Source, Graph, and Evaluation
 
