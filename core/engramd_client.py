@@ -78,6 +78,9 @@ class EngramDaemonClient:
     def store_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/store_memory", payload)
 
+    def check_duplicate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/check_duplicate", payload)
+
     def update_memory_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/update_memory_metadata", payload)
 

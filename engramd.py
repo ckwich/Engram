@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     check_group.add_argument(
         "--smoke-test",
         action="store_true",
-        help="Run a write/update/search/read/delete smoke test against a running daemon and exit",
+        help="Run a duplicate/write/update/search/read/delete smoke test against a running daemon and exit",
     )
     args = parser.parse_args(argv)
 

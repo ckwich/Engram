@@ -34,6 +34,18 @@ class FakeMemoryManager:
             "kwargs": kwargs,
         }
 
+    async def check_duplicate_async(self, key, content):
+        return {
+            "key": key,
+            "duplicate": True,
+            "match": {
+                "status": "duplicate",
+                "existing_key": "daemon_memory",
+                "existing_title": "Daemon Memory",
+                "score": 0.97,
+            },
+        }
+
     async def retrieve_chunks_async(self, requests):
         return [
             {
@@ -123,6 +135,43 @@ def test_search_passes_filters_to_memory_manager():
     assert body["kwargs"]["retrieval_mode"] == "hybrid"
     assert body["kwargs"]["pinned_keys"] == ["daemon_memory"]
     assert body["kwargs"]["pinned_first"] is True
+
+
+def test_check_duplicate_returns_daemon_duplicate_payload():
+    api = EngramDaemonAPI(memory_manager=FakeMemoryManager())
+
+    response = api.handle(
+        "POST",
+        "/v1/check_duplicate",
+        {
+            "key": "candidate_memory",
+            "content": "Candidate body",
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["key"] == "candidate_memory"
+    assert response["body"]["duplicate"] is True
+    assert response["body"]["match"]["existing_key"] == "daemon_memory"
+    assert response["body"]["error"] is None
+
+
+def test_check_duplicate_invalid_request_preserves_tool_payload_shape():
+    api = EngramDaemonAPI(memory_manager=FakeMemoryManager())
+
+    response = api.handle(
+        "POST",
+        "/v1/check_duplicate",
+        {
+            "key": "",
+            "content": "",
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["duplicate"] is False
+    assert response["body"]["match"] is None
+    assert response["body"]["error"]["code"] == "invalid_request"
 
 
 def test_retrieve_chunks_wraps_chunk_payloads():

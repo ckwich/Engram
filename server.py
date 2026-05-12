@@ -915,6 +915,7 @@ async def daemon_status() -> dict[str, Any]:
             "retrieve_memory",
             "store_memory",
             "write_memory",
+            "check_duplicate",
             "update_memory_metadata",
             "delete_memory",
         ] if configured_url else [],
@@ -3856,6 +3857,23 @@ async def check_duplicate(key: str, content: str) -> dict[str, Any]:
         Structured payload: {key, duplicate, match, error}. When duplicate is true,
         match includes the existing key, title, and similarity score.
     """
+    if _daemon_enabled():
+        try:
+            return await _call_daemon(
+                "check_duplicate",
+                {
+                    "key": key,
+                    "content": content,
+                },
+            )
+        except EngramDaemonClientError as e:
+            return _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                key=key,
+                duplicate=False,
+                match=None,
+            )
+
     try:
         result = await memory_manager.check_duplicate_async(key, content)
     except Exception as e:
@@ -3955,7 +3973,16 @@ async def prepare_memory(
             status=resolved_status,
             canonical=resolved_canonical,
         )
-        duplicate = await memory_manager.check_duplicate_async(resolved_key, content)
+        if _daemon_enabled():
+            duplicate = await _call_daemon(
+                "check_duplicate",
+                {
+                    "key": resolved_key,
+                    "content": content,
+                },
+            )
+        else:
+            duplicate = await memory_manager.check_duplicate_async(resolved_key, content)
     except Exception as e:
         return _runtime_error_payload(
             f"❌ Engram error: {e}",

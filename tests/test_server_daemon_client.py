@@ -18,6 +18,20 @@ class FakeDaemonClient:
             "error": None,
         }
 
+    def check_duplicate(self, payload):
+        self.calls.append(("check_duplicate", payload))
+        return {
+            "key": payload["key"],
+            "duplicate": True,
+            "match": {
+                "status": "duplicate",
+                "existing_key": "daemon_memory",
+                "existing_title": "Daemon Memory",
+                "score": 0.97,
+            },
+            "error": None,
+        }
+
     def retrieve_chunk(self, payload):
         self.calls.append(("retrieve_chunk", payload))
         return {
@@ -95,6 +109,23 @@ def test_search_memories_uses_daemon_when_configured(monkeypatch):
     assert result["results"][0]["key"] == "daemon_memory"
     assert client.calls[0][0] == "search_memories"
     assert client.calls[0][1]["retrieval_mode"] == "hybrid"
+
+
+def test_check_duplicate_uses_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    payload = asyncio.run(server.check_duplicate("candidate_memory", "Candidate body"))
+
+    assert payload["duplicate"] is True
+    assert payload["match"]["existing_key"] == "daemon_memory"
+    assert client.calls == [
+        (
+            "check_duplicate",
+            {"key": "candidate_memory", "content": "Candidate body"},
+        )
+    ]
 
 
 def test_read_tools_use_daemon_when_configured(monkeypatch):

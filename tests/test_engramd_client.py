@@ -52,6 +52,7 @@ def test_client_methods_map_to_daemon_routes():
     client.retrieve_chunks({"requests": [{"key": "k", "chunk_id": 0}]})
     client.retrieve_memory({"key": "k"})
     client.store_memory({"key": "k", "content": "body"})
+    client.check_duplicate({"key": "k", "content": "body"})
     client.update_memory_metadata({"key": "k", "title": "Updated"})
     client.delete_memory({"key": "k"})
 
@@ -60,6 +61,7 @@ def test_client_methods_map_to_daemon_routes():
         "retrieve_chunks",
         "retrieve_memory",
         "store_memory",
+        "check_duplicate",
         "update_memory_metadata",
         "delete_memory",
     ]

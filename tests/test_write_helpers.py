@@ -618,6 +618,77 @@ def test_prepare_memory_tool_builds_ready_draft(monkeypatch):
     assert payload["error"] is None
 
 
+def test_prepare_memory_uses_daemon_duplicate_check_when_configured(monkeypatch):
+    server = load_server_module()
+
+    class FakeDaemonClient:
+        def __init__(self):
+            self.calls = []
+
+        def check_duplicate(self, payload):
+            self.calls.append(payload)
+            return {
+                "key": payload["key"],
+                "duplicate": False,
+                "match": None,
+                "error": None,
+            }
+
+    client = FakeDaemonClient()
+
+    async def fake_suggest(content: str):
+        return {
+            "title": "Agent Protocol",
+            "tags": ["agent"],
+            "project": None,
+            "domain": None,
+            "status": "draft",
+            "canonical": False,
+            "related_to": [],
+        }
+
+    async def fake_validate(**kwargs):
+        return {
+            "valid": True,
+            "errors": [],
+            "normalized": {
+                "title": kwargs["title"],
+                "tags": kwargs["tags"],
+                "related_to": kwargs["related_to"],
+                "project": kwargs["project"],
+                "domain": kwargs["domain"],
+                "status": kwargs["status"],
+                "canonical": kwargs["canonical"],
+                "content_chars": len(kwargs["content"]),
+            },
+        }
+
+    async def fail_direct_duplicate(*args, **kwargs):
+        raise AssertionError("prepare_memory should use daemon duplicate check")
+
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+    monkeypatch.setattr(server.memory_manager, "suggest_memory_metadata_async", fake_suggest)
+    monkeypatch.setattr(server.memory_manager, "validate_memory_async", fake_validate)
+    monkeypatch.setattr(server.memory_manager, "check_duplicate_async", fail_direct_duplicate)
+
+    payload = asyncio.run(
+        server.prepare_memory(
+            content="# Agent Protocol\n\nBody",
+            title="Agent Protocol",
+            tags="agent,protocol",
+            project="Engram",
+            domain="memory",
+            status="active",
+        )
+    )
+
+    assert payload["ready"] is True
+    assert payload["duplicate"]["duplicate"] is False
+    assert client.calls == [
+        {"key": "agent_protocol", "content": "# Agent Protocol\n\nBody"}
+    ]
+
 def test_memory_manager_audits_and_repairs_metadata_drift(mm_module):
     key = "legacy-drift"
     mm_module._json_path(key).write_text(

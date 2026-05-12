@@ -42,6 +42,15 @@ class FakeSmokeClient:
             "error": None,
         }
 
+    def check_duplicate(self, payload):
+        self.calls.append(("check_duplicate", payload))
+        return {
+            "key": payload["key"],
+            "duplicate": False,
+            "match": None,
+            "error": None,
+        }
+
     def update_memory_metadata(self, payload):
         self.calls.append(("update_memory_metadata", payload))
         return {
@@ -104,6 +113,7 @@ def test_run_daemon_smoke_exercises_full_memory_cycle():
     assert payload["error"] is None
     assert [call[0] for call in client.calls] == [
         "health",
+        "check_duplicate",
         "store_memory",
         "update_memory_metadata",
         "search_memories",

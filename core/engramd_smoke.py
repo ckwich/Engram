@@ -48,6 +48,22 @@ def run_daemon_smoke(client: Any, *, key: str | None = None) -> dict[str, Any]:
             )
         record("health", "ok", {"status": health.get("status")})
 
+        duplicate_response = client.check_duplicate(
+            {
+                "key": smoke_key,
+                "content": content,
+            }
+        )
+        _raise_for_daemon_error("check_duplicate", duplicate_response)
+        if duplicate_response.get("duplicate") is True:
+            raise _SmokeFailure(
+                "check_duplicate",
+                "unexpected_duplicate",
+                "Daemon reported the smoke memory as a duplicate before storage.",
+                duplicate_response,
+            )
+        record("check_duplicate", "ok", {"key": smoke_key})
+
         store_payload = {
             "key": smoke_key,
             "content": content,

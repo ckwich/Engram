@@ -54,6 +54,8 @@ class EngramDaemonAPI:
                 return await self._retrieve_memory(request)
             if route == "/v1/store_memory":
                 return await self._store_memory(request)
+            if route == "/v1/check_duplicate":
+                return await self._check_duplicate(request)
             if route == "/v1/update_memory_metadata":
                 return await self._update_memory_metadata(request)
             if route == "/v1/delete_memory":
@@ -158,6 +160,43 @@ class EngramDaemonAPI:
         except ValueError as exc:
             return self._error(400, "invalid_request", str(exc))
         return self._ok({"stored": True, "result": result, "error": None})
+
+    async def _check_duplicate(self, request: dict[str, Any]) -> dict[str, Any]:
+        key = str(request.get("key") or "").strip()
+        content = request.get("content")
+        if not key:
+            return self._ok(
+                {
+                    "key": key,
+                    "duplicate": False,
+                    "match": None,
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "key is required",
+                    },
+                }
+            )
+        if not isinstance(content, str) or not content.strip():
+            return self._ok(
+                {
+                    "key": key,
+                    "duplicate": False,
+                    "match": None,
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "content is required",
+                    },
+                }
+            )
+        result = await self.memory_manager.check_duplicate_async(key, content)
+        return self._ok(
+            {
+                "key": result.get("key", key),
+                "duplicate": bool(result.get("duplicate", False)),
+                "match": result.get("match"),
+                "error": None,
+            }
+        )
 
     async def _update_memory_metadata(self, request: dict[str, Any]) -> dict[str, Any]:
         key = str(request.get("key") or "").strip()
