@@ -416,6 +416,14 @@ Engram can prepare codebase mapping jobs for agents.
 
 It does not secretly spawn a provider-specific model to write architecture summaries. Instead, it collects bounded repository context, tracks source hashes, and asks the connected agent to synthesize and store the result.
 
+Mapping jobs are data-root aware: when `ENGRAM_DATA_DIR` is set, prepared job
+records are written under `ENGRAM_DATA_DIR/codebase_mapping_jobs` instead of the
+default repo `data/` folder. Engram's own draft mapping config uses Memory OS
+domains for daemon runtime, document intelligence, migration, backend status,
+graph, source intake, codebase mapping, reliability, WebUI, server tools, and
+storage so agents can map the current 1.0 architecture instead of the older
+pre-daemon shape.
+
 Typical MCP flow:
 
 1. `read_codebase_mapping_config(project_root)`
@@ -467,7 +475,7 @@ Example `.engram/config.json`:
     }
   },
   "planning_paths": ["docs/"],
-  "max_file_size_kb": 100
+  "max_file_size_kb": 512
 }
 ```
 

@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 CODEBASE_MAPPING_DIR = PROJECT_ROOT / "data" / "codebase_mapping_jobs"
 CODEBASE_MAPPING_SCHEMA_VERSION = "2026-04-29.agent-native-codebase-mapping.v1"
 JOB_ID_PATTERN = re.compile(r"^sha256:[a-f0-9]{64}$")
-DEFAULT_MAX_FILE_SIZE_KB = 100
+DEFAULT_MAX_FILE_SIZE_KB = 512
 DEFAULT_PLANNING_PATHS = ["PROJECT.md", "ROADMAP.md", "AGENTS.md"]
 DEFAULT_DRAFT_PLANNING_PATHS = [
     "PROJECT.md",
@@ -158,6 +158,136 @@ DEFAULT_SECRET_FILE_NAMES = {
 DEFAULT_SECRET_NAME_PARTS = {"credential", "credentials", "password", "secret", "secrets", "token", "tokens"}
 DEFAULT_SECRET_FILE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 DEFAULT_SECRET_NAME_PART_SUFFIXES = CODEBASE_CONFIG_SUFFIXES | {".json", ".yaml", ".yml"}
+ENGRAM_MEMORY_OS_PLANNING_PATHS = [
+    "plan.md",
+    "AGENTS.md",
+    "README.md",
+    "docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md",
+    "docs/superpowers/specs/2026-05-12-engram-1-0-memory-os-document-disassembly-design.md",
+    "docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md",
+]
+ENGRAM_MEMORY_OS_DOMAINS: dict[str, dict[str, Any]] = {
+    "server_tools": {
+        "file_globs": ["server.py", "tests/test_server*.py"],
+        "questions": [
+            "What MCP tools are exposed and which manager or daemon route owns each one?",
+            "What docstrings are agent-facing contracts?",
+            "What compatibility aliases or protocol fields must remain stable?",
+        ],
+    },
+    "daemon_runtime": {
+        "file_globs": [
+            "core/engramd_*.py",
+            "server.py",
+            "tests/test_engramd*.py",
+            "tests/test_server_daemon*.py",
+        ],
+        "questions": [
+            "Which mutable operations run through engramd and which remain direct?",
+            "How does daemon-client mode preserve MCP transport safety?",
+            "What must stay data-root aware?",
+        ],
+    },
+    "storage": {
+        "file_globs": [
+            "core/memory_manager.py",
+            "core/embedder.py",
+            "core/chunker.py",
+            "tests/test_memory*.py",
+            "tests/test_storage*.py",
+        ],
+        "questions": [
+            "How are JSON-first writes and rebuildable vector indexes preserved?",
+            "What failure modes must not close MCP transport?",
+            "What storage invariants must a backend migration keep?",
+        ],
+    },
+    "document_intelligence": {
+        "file_globs": ["core/document_*.py", "tests/test_document*.py"],
+        "questions": [
+            "How does document intelligence keep extraction evidence review-first?",
+            "What records preserve page, visual, table, chunk, and quality provenance?",
+            "Where are external OCR or vision adapters allowed to plug in?",
+        ],
+    },
+    "memory_os_migration": {
+        "file_globs": ["core/memory_os_migration.py", "tests/test_memory_os_migration.py"],
+        "questions": [
+            "How does the migration ledger import existing memories without loss?",
+            "What parity checks prove rollback and restore behavior?",
+            "Which fields are durable migration contracts?",
+        ],
+    },
+    "backend_status": {
+        "file_globs": [
+            "core/*backend_status.py",
+            "core/lancedb_vector_index.py",
+            "core/kuzu_graph_store.py",
+            "tests/test_*backend*.py",
+        ],
+        "questions": [
+            "What gates decide whether Chroma or JSON can be replaced?",
+            "What real-corpus and Windows checks are required?",
+            "How are optional backend failures reported?",
+        ],
+    },
+    "graph": {
+        "file_globs": ["core/graph*.py", "core/kuzu_graph_store.py", "tests/test_graph*.py"],
+        "questions": [
+            "How are graph edges validated, persisted, and traversed?",
+            "What evidence comes back from traversal without loading memory bodies?",
+            "What must a graph DB adapter preserve?",
+        ],
+    },
+    "source_intake": {
+        "file_globs": [
+            "core/source_*.py",
+            "core/ingestion_pipelines.py",
+            "core/chunk_preview.py",
+            "tests/test_source*.py",
+        ],
+        "questions": [
+            "How do source drafts remain reviewable before promotion?",
+            "What validation prevents malformed agent inputs from escaping the MCP boundary?",
+            "How does draft promotion preserve JSON-first storage?",
+        ],
+    },
+    "codebase_mapping": {
+        "file_globs": ["core/codebase_mapper.py", "engram_index.py", "tests/test_codebase_mapper.py"],
+        "questions": [
+            "How does Engram prepare source-hashed repo context for connected agents?",
+            "How are stale stores blocked?",
+            "How are mapping jobs stored and made data-root aware?",
+        ],
+    },
+    "reliability": {
+        "file_globs": [
+            "core/reliability_harness.py",
+            "core/retrieval_eval.py",
+            "tests/test_retrieval*.py",
+            "tests/test_agent*.py",
+        ],
+        "questions": [
+            "Which deterministic evals prove agent-facing retrieval quality?",
+            "How are temporary eval memories seeded and cleaned up?",
+            "What regressions should block 1.0?",
+        ],
+    },
+    "webui": {
+        "file_globs": [
+            "webui.py",
+            "templates/**/*.html",
+            "static/**/*.js",
+            "static/**/*.css",
+            "tests/test_webui*.py",
+        ],
+        "questions": [
+            "Which dashboard surfaces are operator review tools rather than collaboration features?",
+            "How is exposed-host auth enforced?",
+            "What client-side patterns avoid unsafe inline handlers?",
+        ],
+    },
+}
 
 
 class SourceDriftError(RuntimeError):
@@ -180,7 +310,20 @@ def _sha256_text(value: str) -> str:
 def _job_path(job_id: str) -> Path:
     normalized_id = _normalize_job_id(job_id)
     safe_id = normalized_id.replace(":", "_")
-    return CODEBASE_MAPPING_DIR / f"{safe_id}.json"
+    return _codebase_mapping_dir() / f"{safe_id}.json"
+
+
+def _engram_data_root() -> Path:
+    configured = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return PROJECT_ROOT / "data"
+
+
+def _codebase_mapping_dir() -> Path:
+    if os.environ.get("ENGRAM_DATA_DIR", "").strip():
+        return _engram_data_root() / "codebase_mapping_jobs"
+    return CODEBASE_MAPPING_DIR
 
 
 def _normalize_job_id(job_id: str) -> str:
@@ -483,7 +626,40 @@ def _draft_planning_paths(project_root: Path) -> list[str]:
     return paths or DEFAULT_PLANNING_PATHS
 
 
+def _is_engram_memory_os_repo(project_root: Path) -> bool:
+    required = [
+        project_root / "server.py",
+        project_root / "core" / "memory_manager.py",
+        project_root / "core" / "codebase_mapper.py",
+    ]
+    return all(path.exists() for path in required)
+
+
+def _existing_relative_paths(project_root: Path, candidates: list[str]) -> list[str]:
+    paths: list[str] = []
+    for candidate in candidates:
+        path = project_root / candidate
+        if path.exists() and not _should_skip_mapping_path(path, project_root):
+            paths.append(candidate)
+    return paths
+
+
+def _draft_engram_memory_os_config(project_root: Path, project_name: str | None = None) -> dict[str, Any]:
+    planning_paths = _existing_relative_paths(project_root, ENGRAM_MEMORY_OS_PLANNING_PATHS)
+    if not planning_paths:
+        planning_paths = _draft_planning_paths(project_root)
+    return {
+        "project_name": project_name or project_root.name,
+        "max_file_size_kb": DEFAULT_MAX_FILE_SIZE_KB,
+        "planning_paths": planning_paths,
+        "domains": ENGRAM_MEMORY_OS_DOMAINS,
+    }
+
+
 def draft_mapping_config(project_root: Path, project_name: str | None = None) -> dict[str, Any]:
+    if _is_engram_memory_os_repo(project_root):
+        return _draft_engram_memory_os_config(project_root, project_name=project_name)
+
     max_kb = DEFAULT_MAX_FILE_SIZE_KB
     candidates = _iter_candidate_files(project_root, max_kb)
     grouped_files: dict[str, list[Path]] = {}

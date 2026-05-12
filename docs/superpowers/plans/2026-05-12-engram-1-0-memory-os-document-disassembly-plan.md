@@ -78,16 +78,16 @@ git commit -m "docs: define Memory OS 1.0 document disassembly plan"
 **Files:**
 - Modify: `core/codebase_mapper.py`
 - Modify: `tests/test_codebase_mapper.py`
-- Modify: `.engram/config.json`
 - Modify: `README.md`
+- Regenerate local ignored operator file after merge: `.engram/config.json`
 
-- [ ] **Step 1: Write failing tests for data-root jobs.**
+- [x] **Step 1: Write failing tests for data-root jobs.**
 
 Add a test that sets `ENGRAM_DATA_DIR` before importing or constructing the
 mapping manager and expects prepared jobs to be written under that data root,
 not `C:\Dev\Engram\data`.
 
-- [ ] **Step 2: Verify red.**
+- [x] **Step 2: Verify red.**
 
 Run:
 
@@ -98,19 +98,20 @@ Run:
 Expected: the new data-root test fails because `CODEBASE_MAPPING_DIR` is still
 project-root based.
 
-- [ ] **Step 3: Implement data-root mapping job storage.**
+- [x] **Step 3: Implement data-root mapping job storage.**
 
 Move mapping job path resolution behind a function that honors
 `ENGRAM_DATA_DIR` and defaults to `PROJECT_ROOT / "data"`.
 
-- [ ] **Step 4: Update config domains.**
+- [x] **Step 4: Update config domains.**
 
-Update `.engram/config.json` with domains for `daemon_runtime`,
+Update the Engram draft mapping template and regenerate local `.engram/config.json`
+with domains for `daemon_runtime`,
 `document_intelligence`, `memory_os_migration`, `backend_status`,
 `graph`, `webui`, `reliability`, and `codebase_mapping`. Raise
 `max_file_size_kb` high enough to include `server.py` and `memory_manager.py`.
 
-- [ ] **Step 5: Verify green and preview.**
+- [x] **Step 5: Verify green and preview.**
 
 Run:
 
@@ -122,10 +123,10 @@ Run:
 Then call `preview_codebase_mapping(project_root="C:\\Dev\\Engram")` and confirm
 the new domains include daemon and document intelligence files.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```powershell
-git add core/codebase_mapper.py tests/test_codebase_mapper.py .engram/config.json README.md
+git add core/codebase_mapper.py tests/test_codebase_mapper.py README.md docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md
 git commit -m "feat: modernize codebase mapping for Memory OS"
 ```
 

@@ -115,6 +115,66 @@ def _write_fanout_game_project(tmp_path):
     return project
 
 
+def _write_engram_like_project(tmp_path):
+    project = tmp_path / "Engram"
+    (project / "core").mkdir(parents=True)
+    (project / "tests").mkdir()
+    (project / "templates").mkdir()
+    (project / "static").mkdir()
+    (project / "docs" / "superpowers" / "specs").mkdir(parents=True)
+    (project / "docs" / "superpowers" / "plans").mkdir(parents=True)
+    (project / "README.md").write_text("# Engram\n", encoding="utf-8")
+    (project / "AGENTS.md").write_text("# Agent contract\n", encoding="utf-8")
+    (project / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    (project / "docs" / "ENGRAM_MEMORY_OS_REBUILD_SPEC.md").write_text("# Rebuild\n", encoding="utf-8")
+    (project / "docs" / "superpowers" / "specs" / "2026-05-12-engram-1-0-memory-os-document-disassembly-design.md").write_text(
+        "# Design\n",
+        encoding="utf-8",
+    )
+    (project / "docs" / "superpowers" / "plans" / "2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md").write_text(
+        "# Plan\n",
+        encoding="utf-8",
+    )
+    for relative_path in [
+        "server.py",
+        "webui.py",
+        "engram_index.py",
+        "core/memory_manager.py",
+        "core/embedder.py",
+        "core/chunker.py",
+        "core/engramd_api.py",
+        "core/engramd_client.py",
+        "core/document_intelligence.py",
+        "core/memory_os_migration.py",
+        "core/retrieval_backend_status.py",
+        "core/graph_backend_status.py",
+        "core/lancedb_vector_index.py",
+        "core/kuzu_graph_store.py",
+        "core/graph_manager.py",
+        "core/graph_store.py",
+        "core/source_intake.py",
+        "core/source_connectors.py",
+        "core/ingestion_pipelines.py",
+        "core/chunk_preview.py",
+        "core/codebase_mapper.py",
+        "core/reliability_harness.py",
+        "core/retrieval_eval.py",
+        "tests/test_codebase_mapper.py",
+        "tests/test_document_intelligence.py",
+        "tests/test_memory_os_migration.py",
+        "tests/test_server_daemon_client.py",
+        "tests/test_webui.py",
+        "templates/index.html",
+        "static/app.js",
+        "static/style.css",
+    ]:
+        path = project / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {relative_path}\n", encoding="utf-8")
+    (project / "server.py").write_text("# server\n" + ("x = 1\n" * 25000), encoding="utf-8")
+    return project
+
+
 def test_prepare_codebase_mapping_creates_agent_job_without_synthesis(tmp_path, monkeypatch):
     import core.codebase_mapper as mapper_module
 
@@ -142,6 +202,26 @@ def test_prepare_codebase_mapping_creates_agent_job_without_synthesis(tmp_path, 
     rendered = json.dumps(job)
     assert "PlayerController" not in rendered
     assert "do-not-index" not in rendered
+
+
+def test_prepare_codebase_mapping_jobs_honor_engram_data_dir(tmp_path, monkeypatch):
+    import core.codebase_mapper as mapper_module
+
+    data_root = tmp_path / "custom_data"
+    monkeypatch.setenv("ENGRAM_DATA_DIR", str(data_root))
+    project = _write_project(tmp_path)
+
+    manager = mapper_module.CodebaseMappingManager()
+    payload = manager.prepare_mapping(
+        project_root=project,
+        mode="bootstrap",
+        domain=None,
+        budget_chars=400,
+    )
+
+    assert payload["error"] is None
+    assert list((data_root / "codebase_mapping_jobs").glob("*.json"))
+    assert list((tmp_path / "mapping_jobs").glob("*.json")) == []
 
 
 def test_read_codebase_mapping_context_returns_bounded_secret_safe_context(tmp_path, monkeypatch):
@@ -282,6 +362,34 @@ def test_draft_codebase_mapping_config_captures_gradle_docs_and_message_assets(t
     assert {"src/**/*.java", "src/**/*.properties"}.issubset(set(config["domains"]["src"]["file_globs"]))
     assert "local.properties" not in rendered_config
     assert "build" not in rendered_config
+
+
+def test_draft_codebase_mapping_config_uses_memory_os_domains_for_engram(tmp_path):
+    import core.codebase_mapper as mapper_module
+
+    project = _write_engram_like_project(tmp_path)
+
+    payload = mapper_module.CodebaseMappingManager().draft_config(project_root=project)
+
+    config = payload["config"]
+    domains = config["domains"]
+    assert payload["error"] is None
+    assert config["project_name"] == "Engram"
+    assert config["max_file_size_kb"] >= 512
+    assert {
+        "daemon_runtime",
+        "document_intelligence",
+        "memory_os_migration",
+        "backend_status",
+        "graph",
+        "webui",
+        "reliability",
+        "codebase_mapping",
+        "server_tools",
+        "storage",
+    }.issubset(domains)
+    server_files = mapper_module.collect_mapping_files(project, domains["server_tools"], config["max_file_size_kb"])
+    assert "server.py" in {path.relative_to(project).as_posix() for path in server_files}
 
 
 def test_preview_codebase_mapping_counts_drafted_gradle_and_message_assets(tmp_path, monkeypatch):
