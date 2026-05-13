@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from core.backend_config import load_backend_config
 from core.memory_os_migration import LEDGER_FILENAME, MemoryOSMigrationKernel
 from core.vector_index_rebuild import run_vector_index_rebuild_dry_run
 
@@ -31,6 +32,7 @@ def build_retrieval_backend_status(
     if rebuild_batch_size < 1:
         raise ValueError("rebuild_batch_size must be positive")
 
+    backend_config = load_backend_config()
     module_available = dependency_probe or _module_available
     chroma_installed = module_available("chromadb")
     lancedb_installed = module_available("lancedb")
@@ -59,10 +61,12 @@ def build_retrieval_backend_status(
             "available": chroma_installed,
             "source_of_truth": "legacy JSON memory files remain authoritative; Chroma is rebuildable index state",
         },
+        "backend_config": backend_config.to_dict(),
         "candidate_backend": {
             "backend": "lancedb",
             "role": "memory_os_candidate_retrieval_index",
             "required": False,
+            "requested": backend_config.retrieval_backend == "lancedb",
             "promotion_ready": False,
             "availability": {
                 "installed": lancedb_installed,

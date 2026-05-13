@@ -72,3 +72,19 @@ def test_graph_backend_status_reports_json_live_and_optional_kuzu_gate(tmp_path)
     assert status["readiness_gates"]["graph_store_contract"]["status"] == "pass"
     assert status["readiness_gates"]["kuzu_dependency"]["status"] == "blocked"
     assert status["readiness_gates"]["live_backend_switch"]["status"] == "blocked"
+
+
+def test_graph_backend_status_reports_configured_kuzu_without_switching(monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGRAM_GRAPH_BACKEND", "kuzu")
+
+    status = build_graph_backend_status(
+        graph_path=tmp_path / "missing" / "edges.json",
+        dependency_probe=lambda name: name == "kuzu",
+    )
+
+    assert status["backend_config"]["graph_backend"] == "kuzu"
+    assert status["backend_config"]["graph_candidate_requested"] is True
+    assert status["backend_config"]["live_switch_performed"] is False
+    assert status["current_live_backend"]["backend"] == "json_graph_store"
+    assert status["candidate_backend"]["requested"] is True
+    assert status["readiness_gates"]["live_backend_switch"]["status"] == "blocked"

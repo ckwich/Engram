@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from core.backend_config import load_backend_config
 from core.graph_store import EDGES_PATH, JsonGraphStore
 from core.memory_os_migration import LEDGER_FILENAME, MemoryOSMigrationKernel
 
@@ -26,6 +27,7 @@ def build_graph_backend_status(
     dependency_probe: DependencyProbe | None = None,
 ) -> dict[str, Any]:
     """Return a no-write graph backend readiness report."""
+    backend_config = load_backend_config()
     module_available = dependency_probe or _module_available
     kuzu_installed = module_available("kuzu")
     live_probe = _build_live_graph_probe(graph_path)
@@ -50,10 +52,12 @@ def build_graph_backend_status(
             "available": live_probe["error"] is None,
             "source_of_truth": "JSON graph document remains the local-first live graph store.",
         },
+        "backend_config": backend_config.to_dict(),
         "candidate_backend": {
             "backend": "kuzu",
             "role": "memory_os_candidate_graph_store",
             "required": False,
+            "requested": backend_config.graph_backend == "kuzu",
             "promotion_ready": False,
             "availability": {
                 "installed": kuzu_installed,

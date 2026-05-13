@@ -77,3 +77,18 @@ def test_retrieval_backend_status_can_run_deterministic_rebuild_probe(tmp_path):
     assert status["rebuild_probe"]["document_count"] == 2
     assert status["rebuild_probe"]["batch_count"] == 2
     assert status["readiness_gates"]["deterministic_rebuild_probe"]["status"] == "pass"
+
+
+def test_retrieval_backend_status_reports_configured_lancedb_without_switching(monkeypatch):
+    monkeypatch.setenv("ENGRAM_RETRIEVAL_BACKEND", "lancedb")
+
+    status = build_retrieval_backend_status(
+        dependency_probe=lambda name: name in {"chromadb", "lancedb"},
+    )
+
+    assert status["backend_config"]["retrieval_backend"] == "lancedb"
+    assert status["backend_config"]["retrieval_candidate_requested"] is True
+    assert status["backend_config"]["live_switch_performed"] is False
+    assert status["current_live_backend"]["backend"] == "chroma"
+    assert status["candidate_backend"]["requested"] is True
+    assert status["readiness_gates"]["live_backend_switch"]["status"] == "blocked"
