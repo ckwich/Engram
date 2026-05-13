@@ -1,0 +1,548 @@
+#!/usr/bin/env python3
+"""Engram thin daemon-client MCP server.
+
+This entrypoint is for multi-session agent clients. It does not import the
+local storage manager, ChromaDB, sentence-transformers, graph stores, or
+document extractors. Every tool delegates to a loopback `engramd` daemon so one
+process owns mutable Engram storage and indexes.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import os
+from pathlib import Path
+from typing import Any
+
+from fastmcp import FastMCP
+
+from core.engramd_client import EngramDaemonClient, EngramDaemonClientError
+
+
+mcp = FastMCP("engram")
+PRODUCT_NAME = "Engram"
+PRODUCT_VERSION = "1.0.0"
+PRODUCT_RELEASE_TRACK = "1.0"
+PRODUCT_STABILITY = "stable"
+PROTOCOL_VERSION = 2
+PROTOCOL_SCHEMA_VERSION = "2026-04-27"
+DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
+
+
+def _daemon_url() -> str:
+    configured = os.environ.get("ENGRAM_DAEMON_URL", "").strip().rstrip("/")
+    return configured or DEFAULT_DAEMON_URL
+
+
+def _daemon_client() -> EngramDaemonClient:
+    return EngramDaemonClient(_daemon_url())
+
+
+async def _call_daemon(method_name: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    client = _daemon_client()
+    method = getattr(client, method_name)
+    if payload is None:
+        return await asyncio.to_thread(method)
+    return await asyncio.to_thread(method, payload)
+
+
+def _tool_error(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    raw_items = value.split(",") if isinstance(value, str) else list(value)
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _format_daemon_store_response(key: str, response: dict[str, Any]) -> str:
+    error = response.get("error")
+    if error:
+        message = error.get("message") if isinstance(error, dict) else str(error)
+        return f"Failed to store '{key}': {message}"
+    if not response.get("stored"):
+        return f"Failed to store '{key}': daemon did not store memory"
+    result = response.get("result")
+    if not isinstance(result, dict):
+        return f"Failed to store '{key}': daemon returned an invalid response"
+    title = result.get("title") or key
+    chunk_count = result.get("chunk_count", 0)
+    chars = result.get("chars", 0)
+    return f"Stored: '{title}' ({chunk_count} chunks, {chars} chars)"
+
+
+@mcp.tool()
+def memory_protocol() -> dict[str, Any]:
+    """Describe the daemon-client Engram MCP contract for agents."""
+    return {
+        "product": {
+            "name": PRODUCT_NAME,
+            "version": PRODUCT_VERSION,
+            "release_track": PRODUCT_RELEASE_TRACK,
+            "stability": PRODUCT_STABILITY,
+        },
+        "protocol": {
+            "version": PROTOCOL_VERSION,
+            "schema_version": PROTOCOL_SCHEMA_VERSION,
+            "entrypoint": "server_daemon_client.py",
+            "mode": "daemon_client",
+        },
+        "daemon": {
+            "url": _daemon_url(),
+            "single_owner_rule": (
+                "This MCP process is a thin client. It never opens local ChromaDB, "
+                "Kuzu, LanceDB, memory JSON, graph JSON, or document extraction state."
+            ),
+        },
+        "retrieval_ladder": [
+            "search_memories(query, limit=5) returns scored snippets and key/chunk_id refs.",
+            "retrieve_chunk(key, chunk_id) reads one cited chunk.",
+            "retrieve_memory(key) reads a full memory only when chunks are insufficient.",
+        ],
+        "preferred_shortcut": "context_pack is available on the full server; this thin entrypoint keeps stable daemon-owned CRUD/search tools only.",
+        "aliases": {
+            "find_memories": "search_memories",
+            "read_chunk": "retrieve_chunk",
+            "read_memory": "retrieve_memory",
+            "write_memory": "store_memory",
+        },
+        "warnings": [
+            "Start or autostart engramd before using this entrypoint.",
+            "Use daemon_status() to prove daemon reachability before blaming missing memory.",
+            "Backend promotion remains config-gated; live storage belongs to engramd.",
+        ],
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def daemon_status() -> dict[str, Any]:
+    """Report whether the configured daemon is reachable without reading or writing memory."""
+    try:
+        health = await _call_daemon("health")
+    except EngramDaemonClientError as exc:
+        return {
+            "mode": "daemon_client",
+            "daemon_url": _daemon_url(),
+            "reachable": False,
+            "health": None,
+            "error": _tool_error("runtime_error", str(exc)),
+        }
+    return {
+        "mode": "daemon_client",
+        "daemon_url": _daemon_url(),
+        "reachable": health.get("status") == "ok" and health.get("error") is None,
+        "health": health,
+        "error": health.get("error"),
+    }
+
+
+@mcp.tool()
+async def search_memories(
+    query: str,
+    limit: int = 5,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    include_stale: bool = True,
+    canonical_only: bool = False,
+    pinned_first: bool = False,
+    retrieval_mode: str = "semantic",
+) -> dict[str, Any]:
+    """Semantic search through the daemon. Start here before retrieving chunks."""
+    payload = {
+        "query": query,
+        "limit": limit,
+        "project": _optional_text(project),
+        "domain": _optional_text(domain),
+        "tags": _normalize_string_list(tags),
+        "include_stale": include_stale,
+        "canonical_only": canonical_only,
+        "pinned_keys": [],
+        "pinned_first": pinned_first,
+        "retrieval_mode": retrieval_mode,
+    }
+    try:
+        return await _call_daemon("search_memories", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "query": query,
+            "count": 0,
+            "results": [],
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def find_memories(
+    query: str,
+    limit: int = 5,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    include_stale: bool = True,
+    canonical_only: bool = False,
+    pinned_first: bool = False,
+    retrieval_mode: str = "semantic",
+) -> dict[str, Any]:
+    """Alias for search_memories()."""
+    return await search_memories(
+        query=query,
+        limit=limit,
+        project=project,
+        domain=domain,
+        tags=tags,
+        include_stale=include_stale,
+        canonical_only=canonical_only,
+        pinned_first=pinned_first,
+        retrieval_mode=retrieval_mode,
+    )
+
+
+@mcp.tool()
+async def retrieve_chunk(key: str, chunk_id: int) -> dict[str, Any]:
+    """Retrieve one memory chunk through the daemon after search identifies it."""
+    try:
+        return await _call_daemon("retrieve_chunk", {"key": key, "chunk_id": chunk_id})
+    except EngramDaemonClientError as exc:
+        return {
+            "key": key,
+            "chunk_id": chunk_id,
+            "found": False,
+            "chunk": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def read_chunk(key: str, chunk_id: int) -> dict[str, Any]:
+    """Alias for retrieve_chunk()."""
+    return await retrieve_chunk(key, chunk_id)
+
+
+@mcp.tool()
+async def retrieve_chunks(requests: list[dict[str, Any]]) -> dict[str, Any]:
+    """Retrieve multiple specific chunks through the daemon."""
+    try:
+        return await _call_daemon("retrieve_chunks", {"requests": requests})
+    except EngramDaemonClientError as exc:
+        return {
+            "requested_count": len(requests) if isinstance(requests, list) else 0,
+            "found_count": 0,
+            "results": [],
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def retrieve_memory(key: str) -> dict[str, Any]:
+    """Retrieve a full memory through the daemon only after chunks are insufficient."""
+    try:
+        return await _call_daemon("retrieve_memory", {"key": key})
+    except EngramDaemonClientError as exc:
+        return {
+            "key": key,
+            "found": False,
+            "memory": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def read_memory(key: str) -> dict[str, Any]:
+    """Alias for retrieve_memory()."""
+    return await retrieve_memory(key)
+
+
+@mcp.tool()
+async def store_memory(
+    key: str,
+    content: str,
+    tags: str | list[str] | None = None,
+    title: str | None = None,
+    related_to: str | list[str] | None = None,
+    force: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+) -> str:
+    """Store one reviewed memory through the daemon's JSON-first write path."""
+    payload = {
+        "key": key,
+        "content": content,
+        "tags": _normalize_string_list(tags),
+        "title": title or key,
+        "related_to": _normalize_string_list(related_to),
+        "force": force,
+        "project": _optional_text(project),
+        "domain": _optional_text(domain),
+        "status": _optional_text(status),
+        "canonical": canonical,
+    }
+    try:
+        response = await _call_daemon("store_memory", payload)
+    except EngramDaemonClientError as exc:
+        return f"Engram daemon error: {exc}"
+    return _format_daemon_store_response(key, response)
+
+
+@mcp.tool()
+async def write_memory(
+    key: str,
+    content: str,
+    tags: str | list[str] | None = None,
+    title: str | None = None,
+    related_to: str | list[str] | None = None,
+    force: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+) -> str:
+    """Alias for store_memory()."""
+    return await store_memory(
+        key=key,
+        content=content,
+        tags=tags,
+        title=title,
+        related_to=related_to,
+        force=force,
+        project=project,
+        domain=domain,
+        status=status,
+        canonical=canonical,
+    )
+
+
+@mcp.tool()
+async def check_duplicate(key: str, content: str) -> dict[str, Any]:
+    """Check duplicate risk through the daemon before a reviewed write."""
+    try:
+        return await _call_daemon("check_duplicate", {"key": key, "content": content})
+    except EngramDaemonClientError as exc:
+        return {
+            "key": key,
+            "duplicate": False,
+            "match": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_source_memory(
+    source_text: str,
+    source_type: str,
+    source_uri: str | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    budget_chars: int = 6000,
+    pipeline: str = "generic",
+) -> dict[str, Any]:
+    """Prepare source drafts through the daemon; no active memory is promoted."""
+    payload = {
+        "source_text": source_text,
+        "source_type": source_type,
+        "source_uri": source_uri,
+        "project": project,
+        "domain": domain,
+        "budget_chars": budget_chars,
+        "pipeline": pipeline,
+    }
+    try:
+        return await _call_daemon("prepare_source_memory", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "draft": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def list_source_drafts(
+    project: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """List reviewable source drafts through the daemon."""
+    try:
+        return await _call_daemon(
+            "list_source_drafts",
+            {"project": project, "status": status, "limit": limit, "offset": offset},
+        )
+    except EngramDaemonClientError as exc:
+        return {
+            "count": 0,
+            "drafts": [],
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def discard_source_draft(draft_id: str) -> dict[str, Any]:
+    """Discard a reviewable source draft through the daemon."""
+    try:
+        return await _call_daemon("discard_source_draft", {"draft_id": draft_id})
+    except EngramDaemonClientError as exc:
+        return {
+            "discarded": False,
+            "draft_id": draft_id,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def store_prepared_memory(
+    draft_id: str,
+    selected_items: list[int] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Promote selected source-draft memories through the daemon."""
+    try:
+        return await _call_daemon(
+            "store_prepared_memory",
+            {"draft_id": draft_id, "selected_items": selected_items, "force": force},
+        )
+    except EngramDaemonClientError as exc:
+        return {
+            "stored_count": 0,
+            "stored": [],
+            "skipped": [],
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_document_disassembly(
+    source_path: str,
+    source_type: str = "pdf",
+    max_pages: int | None = None,
+) -> dict[str, Any]:
+    """Prepare a no-write document disassembly through the daemon."""
+    try:
+        return await _call_daemon(
+            "prepare_document_disassembly",
+            {"source_path": source_path, "source_type": source_type, "max_pages": max_pages},
+        )
+    except EngramDaemonClientError as exc:
+        return {
+            "disassembly": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def update_memory_metadata(
+    key: str,
+    title: str | None = None,
+    tags: str | list[str] | None = None,
+    related_to: str | list[str] | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+) -> dict[str, Any]:
+    """Update selected memory metadata through the daemon."""
+    payload = {
+        "key": key,
+        "title": title,
+        "tags": _normalize_string_list(tags) if tags is not None else None,
+        "related_to": _normalize_string_list(related_to) if related_to is not None else None,
+        "project": project,
+        "domain": domain,
+        "status": status,
+        "canonical": canonical,
+    }
+    payload = {name: value for name, value in payload.items() if value is not None}
+    try:
+        return await _call_daemon("update_memory_metadata", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "key": key,
+            "updated": False,
+            "memory": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def repair_memory_metadata(keys: str | list[str], dry_run: bool = True) -> dict[str, Any]:
+    """Dry-run or execute selected metadata repair through the daemon."""
+    normalized_keys = _normalize_string_list(keys)
+    try:
+        return await _call_daemon(
+            "repair_memory_metadata",
+            {"keys": normalized_keys, "dry_run": dry_run},
+        )
+    except EngramDaemonClientError as exc:
+        return {
+            "requested_count": len(normalized_keys),
+            "repaired_count": 0,
+            "dry_run": dry_run,
+            "repairs": [],
+            "error": _tool_error("runtime_error", f"❌ Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def delete_memory(key: str) -> str:
+    """Delete one memory through the daemon."""
+    try:
+        payload = await _call_daemon("delete_memory", {"key": key})
+    except EngramDaemonClientError as exc:
+        return f"Engram daemon error: {exc}"
+    error = payload.get("error")
+    if error:
+        message = error.get("message") if isinstance(error, dict) else str(error)
+        return f"Engram daemon error: {message}"
+    if payload.get("deleted"):
+        return f"Deleted memory: '{key}'"
+    return f"Memory not found: '{key}'"
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Engram thin daemon-client MCP server",
+    )
+    parser.add_argument(
+        "--daemon-url",
+        default=None,
+        help=f"Daemon URL to use for this process (default: {DEFAULT_DAEMON_URL})",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.daemon_url:
+        os.environ["ENGRAM_DAEMON_URL"] = args.daemon_url.strip().rstrip("/")
+
+    data_dir = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+    if not data_dir:
+        os.environ["ENGRAM_DATA_DIR"] = str((Path(__file__).resolve().parent / "data").resolve())
+
+    mcp.run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
