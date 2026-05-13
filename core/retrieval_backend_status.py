@@ -7,6 +7,7 @@ Memory OS backend promotion requires explicit migration and adapter proof.
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -120,7 +121,19 @@ def _build_store_probe(store_root: str | Path | None) -> dict[str, Any]:
             "error": f"Memory OS ledger not found: {ledger_path}",
         }
 
-    sources = MemoryOSMigrationKernel(root).read_vector_source_records()
+    try:
+        sources = MemoryOSMigrationKernel(root).read_vector_source_records()
+    except sqlite3.DatabaseError as exc:
+        return {
+            "requested": True,
+            "store_root": str(root),
+            "ledger_exists": True,
+            "vector_source_count": None,
+            "error": (
+                "Memory OS ledger exists but is not compatible with migration "
+                f"vector-source probe: {exc}"
+            ),
+        }
     return {
         "requested": True,
         "store_root": str(root),
@@ -181,7 +194,7 @@ def _build_readiness_gates(
     golden_comparison_probe: dict[str, Any],
 ) -> dict[str, dict[str, str]]:
     store_requested = bool(store_probe.get("requested"))
-    ledger_exists = bool(store_probe.get("ledger_exists"))
+    ledger_exists = bool(store_probe.get("ledger_exists")) and store_probe.get("error") is None
     rebuild_status = str(rebuild_probe.get("status"))
     return {
         "adapter_contract": {

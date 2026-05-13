@@ -6,6 +6,7 @@ candidate backend until dependency, corpus, and daemon migration gates pass.
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -146,7 +147,19 @@ def _build_store_probe(store_root: str | Path | None) -> dict[str, Any]:
             "error": f"Memory OS ledger not found: {ledger_path}",
         }
 
-    edges = MemoryOSMigrationKernel(root).read_graph_edge_records()
+    try:
+        edges = MemoryOSMigrationKernel(root).read_graph_edge_records()
+    except sqlite3.DatabaseError as exc:
+        return {
+            "requested": True,
+            "store_root": str(root),
+            "ledger_exists": True,
+            "graph_edge_count": None,
+            "error": (
+                "Memory OS ledger exists but is not compatible with migration "
+                f"graph-edge probe: {exc}"
+            ),
+        }
     return {
         "requested": True,
         "store_root": str(root),
@@ -164,7 +177,7 @@ def _build_readiness_gates(
     graph_parity_probe: dict[str, Any],
 ) -> dict[str, dict[str, str]]:
     store_requested = bool(store_probe.get("requested"))
-    ledger_exists = bool(store_probe.get("ledger_exists"))
+    ledger_exists = bool(store_probe.get("ledger_exists")) and store_probe.get("error") is None
     live_requested = bool(live_probe.get("requested"))
     live_status = "pass" if live_probe.get("error") is None else "blocked"
     return {

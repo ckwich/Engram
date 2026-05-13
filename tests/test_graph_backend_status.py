@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from core.graph_backend_status import build_graph_backend_status
+from core.memory_os.ledger import MemoryOSLedger
 from core.memory_os_migration import MemoryOSMigrationKernel
 
 
@@ -90,3 +91,15 @@ def test_graph_backend_status_reports_configured_kuzu_without_switching(monkeypa
     assert status["current_live_backend"]["backend"] == "json_graph_store"
     assert status["candidate_backend"]["requested"] is True
     assert status["readiness_gates"]["live_backend_switch"]["status"] == "blocked"
+
+
+def test_graph_backend_status_structures_generic_memory_os_ledger_mismatch(tmp_path):
+    store_root = tmp_path / "memory_os"
+    MemoryOSLedger(store_root / "ledger.sqlite3").initialize()
+
+    status = build_graph_backend_status(store_root=store_root, graph_path=None)
+
+    assert status["store_probe"]["ledger_exists"] is True
+    assert status["store_probe"]["graph_edge_count"] is None
+    assert "not compatible with migration graph-edge probe" in status["store_probe"]["error"]
+    assert status["readiness_gates"]["migrated_graph_edges"]["status"] == "blocked"
