@@ -23,7 +23,9 @@ import time
 from urllib.parse import urlsplit
 
 from core.chunk_preview import preview_memory_chunks
+from core.engramd_client import EngramDaemonClient, EngramDaemonClientError
 from core.graph_manager import graph_manager
+from core.memory_os.runtime import MemoryOSRuntime
 from core.memory_quality import audit_memory_quality as build_memory_quality_audit
 from core.memory_manager import memory_manager, DuplicateMemoryError
 from core.operation_log import operation_log
@@ -57,6 +59,7 @@ AUTH_TOKEN_FINGERPRINT_SESSION_KEY = "engram_webui_access_token_fingerprint"  # 
 AUTH_EXEMPT_ENDPOINTS = {"login", "logout", "static"}
 LOOPBACK_HOST_ALIASES = {"localhost", "localhost.localdomain", "127.0.0.1", "::1"}
 _LOGIN_FAILURES: dict[str, list[float]] = {}
+_MEMORY_OS_RUNTIME: MemoryOSRuntime | None = None
 
 
 def _env_int(name: str, default: int, minimum: int | None = None) -> int:
@@ -477,6 +480,28 @@ def _filter_memory_metadata(
     return filtered
 
 
+def get_memory_os_inspector_payload(*, limit: int = 20) -> dict:
+    """Return read-only Memory OS inspector data without performing promotions."""
+    daemon_url = os.environ.get("ENGRAM_DAEMON_URL", "").strip().rstrip("/")
+    if daemon_url:
+        return EngramDaemonClient(daemon_url).memory_os_inspector()
+    return _webui_memory_os_runtime().inspector(limit=limit)
+
+
+def _webui_memory_os_runtime() -> MemoryOSRuntime:
+    global _MEMORY_OS_RUNTIME
+    if _MEMORY_OS_RUNTIME is None:
+        data_root = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+        root = (
+            os.path.join(data_root, "memory_os")
+            if data_root
+            else os.path.join(os.path.dirname(__file__), "data", "memory_os")
+        )
+        _MEMORY_OS_RUNTIME = MemoryOSRuntime(root)
+        _MEMORY_OS_RUNTIME.initialize()
+    return _MEMORY_OS_RUNTIME
+
+
 @app.before_request
 def require_write_token_for_mutations():
     """Protect browser/API writes before they reach memory storage."""
@@ -745,6 +770,17 @@ def api_inspector_operation_events():
     event_type = request.args.get("event_type") or None
     limit = _bounded_query_int("limit", 50, 1, 500)
     return jsonify(operation_log.list_events(event_type=event_type, limit=limit))
+
+
+@app.route("/api/inspector/memory-os")
+def api_inspector_memory_os():
+    limit = _bounded_query_int("limit", 20, 1, 100)
+    try:
+        return jsonify(get_memory_os_inspector_payload(limit=limit))
+    except EngramDaemonClientError as e:
+        return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
+    except RuntimeError as e:
+        return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
 
 
 @app.route("/api/related/<path:key>")

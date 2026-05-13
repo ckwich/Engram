@@ -380,15 +380,17 @@
     document.getElementById('inspector-draft-list').innerHTML = '';
     document.getElementById('inspector-job-list').innerHTML = '';
     document.getElementById('inspector-event-list').innerHTML = '';
+    document.getElementById('inspector-memory-os-list').innerHTML = '';
     try {
-      const [qualityResponse, graphResponse, draftsResponse, jobsResponse, eventsResponse] = await Promise.all([
+      const [qualityResponse, graphResponse, draftsResponse, jobsResponse, eventsResponse, memoryOSResponse] = await Promise.all([
         fetch('/api/inspector/memory-quality?limit=5'),
         fetch('/api/inspector/graph/audit'),
         fetch('/api/inspector/source-drafts?status=draft&limit=5'),
         fetch('/api/inspector/operations/jobs?limit=5'),
         fetch('/api/inspector/operations/events?limit=5'),
+        fetch('/api/inspector/memory-os?limit=5'),
       ]);
-      if (!qualityResponse.ok || !graphResponse.ok || !draftsResponse.ok || !jobsResponse.ok || !eventsResponse.ok) {
+      if (!qualityResponse.ok || !graphResponse.ok || !draftsResponse.ok || !jobsResponse.ok || !eventsResponse.ok || !memoryOSResponse.ok) {
         throw new Error('Inspector API unavailable');
       }
       renderInspector({
@@ -397,6 +399,7 @@
         drafts: await draftsResponse.json(),
         jobs: await jobsResponse.json(),
         events: await eventsResponse.json(),
+        memoryOS: await memoryOSResponse.json(),
       });
     } catch (error) {
       document.getElementById('inspector-summary-cards').innerHTML =
@@ -410,11 +413,15 @@
     const drafts = data.drafts || {};
     const jobs = data.jobs || {};
     const events = data.events || {};
+    const memoryOS = data.memoryOS || {};
+    const memoryOSSummary = memoryOS.summary || {};
     document.getElementById('inspector-summary-cards').innerHTML = `
       <div class="usage-card"><span>${safeInteger(quality.issue_count)}</span><label>quality issues</label></div>
       <div class="usage-card"><span>${safeInteger((quality.summary || {}).high_risk_count)}</span><label>high risk</label></div>
       <div class="usage-card"><span>${safeInteger(graph.issue_count)}</span><label>graph issues</label></div>
       <div class="usage-card"><span>${safeInteger(drafts.total)}</span><label>drafts</label></div>
+      <div class="usage-card"><span>${safeInteger(memoryOSSummary.document_count)}</span><label>documents</label></div>
+      <div class="usage-card"><span>${safeInteger(memoryOSSummary.coverage_map_count)}</span><label>coverage maps</label></div>
     `;
     document.getElementById('inspector-quality-list').innerHTML = (quality.memories || []).map(memory => `
       <div class="usage-call-row">
@@ -449,6 +456,39 @@
         <span>${esc(event.summary || '')}</span>
       </div>
     `).join('') || '<div class="loading-row">No recent operation events.</div>';
+    document.getElementById('inspector-memory-os-list').innerHTML = memoryOSRows(memoryOS).map(row => `
+      <div class="usage-call-row">
+        <strong>${esc(row.label)}</strong>
+        <span>${esc(row.value)}</span>
+        <span>${esc(row.detail)}</span>
+      </div>
+    `).join('') || '<div class="loading-row">No Memory OS inspector records yet.</div>';
+  }
+
+  function memoryOSRows(memoryOS) {
+    const summary = memoryOS.summary || {};
+    const runtime = memoryOS.runtime || {};
+    const components = runtime.components || {};
+    return [
+      {
+        label: 'Runtime',
+        value: runtime.status || 'unknown',
+        detail: `ledger ${((components.ledger || {}).exists) ? 'ready' : 'missing'}`,
+      },
+      {
+        label: 'Backends',
+        value: (components.retrieval || {}).backend || 'retrieval',
+        detail: (components.graph || {}).backend || 'graph',
+      },
+      { label: 'Jobs', value: safeInteger(summary.job_count), detail: 'daemon queue' },
+      { label: 'Transactions', value: safeInteger(summary.transaction_count), detail: 'promotion receipts' },
+      { label: 'Coverage', value: safeInteger(summary.coverage_map_count), detail: 'document imports' },
+      { label: 'Graph edges', value: safeInteger(summary.graph_edge_count), detail: 'relationship ledger' },
+      { label: 'Entities', value: safeInteger(summary.entity_count), detail: `${safeInteger(summary.concept_count)} concepts` },
+      { label: 'Firewall', value: safeInteger(summary.firewall_event_count), detail: 'quarantine events' },
+      { label: 'Snapshots', value: safeInteger(summary.snapshot_count), detail: 'rollback manifests' },
+      { label: 'Skill packs', value: safeInteger(summary.skill_pack_count), detail: 'export previews' },
+    ];
   }
 
   async function loadUsageTab() {

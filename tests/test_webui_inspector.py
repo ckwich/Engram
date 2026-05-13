@@ -17,6 +17,8 @@ def test_inspector_tab_is_wired_in_static_assets():
     assert "/api/inspector/source-drafts" in js
     assert "/api/inspector/operations/jobs" in js
     assert "/api/inspector/operations/events" in js
+    assert "/api/inspector/memory-os" in js
+    assert 'id="inspector-memory-os-list"' in html
     assert 'id="inspector-draft-list"' in html
 
 
@@ -152,3 +154,39 @@ def test_source_drafts_inspector_api_lists_review_queue(monkeypatch):
     assert response.get_json()["drafts"] == [
         {"draft_id": "sha256:abc", "status": "draft", "pipeline": "handoff"}
     ]
+
+
+def test_memory_os_inspector_api_returns_read_only_report(monkeypatch):
+    import webui
+
+    def fake_memory_os_inspector_payload(*, limit=20):
+        return {
+            "schema_version": "2026-05-13.memory-os-inspector.v1",
+            "limit": limit,
+            "write_performed": False,
+            "runtime": {"status": "ok"},
+            "jobs": {"count": 1, "items": [{"job_id": "job:document", "status": "queued"}]},
+            "transactions": {"count": 1, "items": [{"transaction_id": "txn:dry", "status": "dry_run"}]},
+            "graph": {"edge_count": 1, "edges": [{"edge_id": "edge:one", "edge_type": "supports"}]},
+            "entity_registry": {
+                "entity_count": 1,
+                "concept_count": 1,
+                "entities": [{"canonical_name": "Visual Hierarchy"}],
+                "concepts": [{"label": "attention priority"}],
+            },
+            "firewall_queue": {"count": 1, "items": [{"event_id": "firewall:one", "decision": "quarantine"}]},
+            "coverage_maps": {"count": 1, "items": [{"coverage_map_id": "coverage:book"}]},
+            "snapshots": {"count": 1, "items": [{"snapshot_id": "snapshot:one"}]},
+            "skill_packs": {"count": 1, "items": [{"compilation_id": "design_compilation:one"}]},
+        }
+
+    monkeypatch.setattr(webui, "get_memory_os_inspector_payload", fake_memory_os_inspector_payload)
+
+    response = webui.app.test_client().get("/api/inspector/memory-os?limit=9")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["write_performed"] is False
+    assert payload["limit"] == 9
+    assert payload["coverage_maps"]["items"][0]["coverage_map_id"] == "coverage:book"
+    assert payload["firewall_queue"]["items"][0]["decision"] == "quarantine"

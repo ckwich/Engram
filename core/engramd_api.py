@@ -58,6 +58,8 @@ class EngramDaemonAPI:
                 )
             if method == "GET" and route == "/v1/memory_os/status":
                 return self._ok(self._runtime().status())
+            if method == "GET" and route == "/v1/memory_os/inspector":
+                return self._ok(self._runtime().inspector())
             if method != "POST":
                 return self._error(405, "method_not_allowed", f"{method} is not allowed for {route}")
             if route == "/v1/memory_os/source_import_job":

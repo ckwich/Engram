@@ -195,6 +195,15 @@ class FakeMemoryOSRuntime:
             "payload": kwargs,
         }
 
+    def inspector(self, *, limit=20):
+        return {
+            "schema_version": "2026-05-13.memory-os-inspector.v1",
+            "limit": limit,
+            "write_performed": False,
+            "jobs": {"count": 1, "items": [{"job_id": "job:one"}]},
+            "coverage_maps": {"count": 0, "items": []},
+        }
+
 
 def test_health_reports_daemon_and_storage_stats():
     api = EngramDaemonAPI(memory_manager=FakeMemoryManager())
@@ -480,6 +489,20 @@ def test_memory_os_source_import_route_creates_runtime_job():
             "connector_id": "local_path",
         }
     ]
+
+
+def test_memory_os_inspector_route_returns_read_only_runtime_report():
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        memory_os_runtime=FakeMemoryOSRuntime(),
+    )
+
+    response = api.handle("GET", "/v1/memory_os/inspector", None)
+
+    assert response["status"] == 200
+    assert response["body"]["schema_version"] == "2026-05-13.memory-os-inspector.v1"
+    assert response["body"]["write_performed"] is False
+    assert response["body"]["jobs"]["items"] == [{"job_id": "job:one"}]
 
 
 def test_prepare_document_disassembly_returns_structured_invalid_request():

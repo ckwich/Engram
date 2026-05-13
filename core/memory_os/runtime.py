@@ -7,6 +7,7 @@ from typing import Any, Callable
 from core.memory_os.content_store import ContentAddressedStore
 from core.memory_os.firewall import MemoryFirewall
 from core.memory_os.graph import MemoryOSGraph
+from core.memory_os.inspector import build_memory_os_inspector
 from core.memory_os.jobs import JobQueue
 from core.memory_os.ledger import MemoryOSLedger
 from core.memory_os.retrieval import MemoryOSRetrievalIndex
@@ -79,6 +80,10 @@ class MemoryOSRuntime:
                 "firewall": {"status": "ready"},
             },
         }
+
+    def inspector(self, *, limit: int = 20) -> dict[str, Any]:
+        """Return a read-only Memory OS inspector payload."""
+        return build_memory_os_inspector(self, limit=limit)
 
     def prepare_source_import_job(
         self,

@@ -87,6 +87,9 @@ class EngramDaemonClient:
     def memory_os_status(self) -> dict[str, Any]:
         return self._request("GET", "/v1/memory_os/status")
 
+    def memory_os_inspector(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/memory_os/inspector")
+
     def memory_os_source_import_job(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/memory_os/source_import_job", payload)
 
