@@ -131,6 +131,14 @@ def build_process_hygiene_report(
         recommendations.append(
             "Start engramd.py or use daemon-client MCP autostart with ENGRAM_DAEMON_URL."
         )
+    elif counts["daemon"] > 1:
+        warnings.append(
+            "Multiple engramd.py daemon processes were identified for this checkout."
+        )
+        recommendations.append(
+            "Keep one daemon owner for this checkout; stop duplicate daemon processes "
+            "manually only after confirming which PID owns the active ENGRAM_DAEMON_URL."
+        )
     if counts["mcp_server"] > 1:
         warnings.append(
             "Multiple server.py MCP adapter processes were identified for this checkout."

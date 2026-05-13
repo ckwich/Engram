@@ -57,6 +57,19 @@ def test_process_hygiene_report_marks_explicit_stop_candidates():
     assert any("explicit" in item for item in report["recommendations"])
 
 
+def test_process_hygiene_report_warns_about_multiple_daemons():
+    processes = [
+        _proc(101, r'"C:\Python\python.exe" "C:\Dev\Engram\engramd.py"'),
+        _proc(102, r'"C:\Python\python.exe" "C:\Dev\Engram\engramd.py"'),
+    ]
+
+    report = build_process_hygiene_report(processes, REPO_ROOT, current_pid=999)
+
+    assert report["counts"]["daemon"] == 2
+    assert any("Multiple engramd.py daemon processes" in item for item in report["warnings"])
+    assert any("Keep one daemon owner" in item for item in report["recommendations"])
+
+
 def test_stop_server_pids_only_stops_exact_this_checkout_server_processes():
     processes = [
         _proc(101, r'"C:\Python\python.exe" "C:\Dev\Engram\server.py"'),
