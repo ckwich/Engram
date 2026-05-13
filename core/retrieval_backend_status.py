@@ -13,6 +13,7 @@ from typing import Any
 
 from core.backend_config import load_backend_config
 from core.memory_os_migration import LEDGER_FILENAME, MemoryOSMigrationKernel
+from core.retrieval_backend_eval import skipped_retrieval_comparison
 from core.vector_index_rebuild import run_vector_index_rebuild_dry_run
 
 
@@ -43,10 +44,14 @@ def build_retrieval_backend_status(
         include_rebuild_probe=include_rebuild_probe,
         rebuild_batch_size=rebuild_batch_size,
     )
+    golden_comparison_probe = skipped_retrieval_comparison(
+        "No Chroma-vs-candidate golden query comparison was requested."
+    )
     readiness_gates = _build_readiness_gates(
         lancedb_installed=lancedb_installed,
         store_probe=store_probe,
         rebuild_probe=rebuild_probe,
+        golden_comparison_probe=golden_comparison_probe,
     )
 
     return {
@@ -83,6 +88,7 @@ def build_retrieval_backend_status(
         },
         "store_probe": store_probe,
         "rebuild_probe": rebuild_probe,
+        "golden_comparison_probe": golden_comparison_probe,
         "readiness_gates": readiness_gates,
         "recommendation": _recommendation(lancedb_installed, readiness_gates),
         "error": None,
@@ -172,6 +178,7 @@ def _build_readiness_gates(
     lancedb_installed: bool,
     store_probe: dict[str, Any],
     rebuild_probe: dict[str, Any],
+    golden_comparison_probe: dict[str, Any],
 ) -> dict[str, dict[str, str]]:
     store_requested = bool(store_probe.get("requested"))
     ledger_exists = bool(store_probe.get("ledger_exists"))
@@ -196,6 +203,10 @@ def _build_readiness_gates(
         "real_lancedb_corpus_spike": {
             "status": "blocked",
             "evidence": "Real LanceDB persistence, metadata filtering, hybrid search, and Windows behavior are not yet proven against the migrated corpus.",
+        },
+        "golden_retrieval_comparison": {
+            "status": str(golden_comparison_probe.get("status") or "skipped"),
+            "evidence": _golden_comparison_evidence(golden_comparison_probe),
         },
         "multi_session_daemon": {
             "status": "blocked",
@@ -228,9 +239,28 @@ def _rebuild_probe_evidence(rebuild_probe: dict[str, Any]) -> str:
     return str(rebuild_probe.get("error") or "Rebuild probe did not pass.")
 
 
+def _golden_comparison_evidence(golden_comparison_probe: dict[str, Any]) -> str:
+    status = golden_comparison_probe.get("status")
+    if status == "pass":
+        return (
+            f"Candidate matched golden retrieval expectations for "
+            f"{golden_comparison_probe.get('query_count')} queries."
+        )
+    if status == "fail":
+        return (
+            f"Candidate failed {golden_comparison_probe.get('failed_count')} "
+            "golden retrieval queries."
+        )
+    return str(
+        golden_comparison_probe.get("reason")
+        or "Golden retrieval comparison was not requested."
+    )
+
+
 def _promotion_blockers(lancedb_installed: bool) -> list[str]:
     blockers = [
         "real LanceDB corpus spike has not proven persistence, filtering, hybrid search, and rebuild behavior",
+        "golden Chroma-vs-candidate retrieval comparison has not passed",
         "Memory OS daemon/single-owner retrieval backend has not replaced legacy embedded Chroma",
     ]
     if not lancedb_installed:

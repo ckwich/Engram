@@ -43,6 +43,7 @@ class LanceDBVectorIndex:
         if not documents:
             return
         rows = [self._row_from_document(document) for document in documents]
+        self._ensure_table_loaded()
         if self._table is None:
             self._table = self._db.create_table(self.table_name, data=rows, mode="overwrite")
             return
@@ -54,6 +55,7 @@ class LanceDBVectorIndex:
             raise ValueError("limit must be positive")
         if not query.query_embedding:
             raise ValueError("query_embedding is required")
+        self._ensure_table_loaded()
         if self._table is None:
             return []
 
@@ -91,6 +93,7 @@ class LanceDBVectorIndex:
         return results[: query.limit]
 
     def delete_by_parent_key(self, parent_key: str) -> int:
+        self._ensure_table_loaded()
         if self._table is None:
             return 0
         before = self._table.count_rows()
@@ -99,15 +102,41 @@ class LanceDBVectorIndex:
         return max(before - after, 0)
 
     def stats(self) -> dict[str, int]:
+        self._ensure_table_loaded()
         if self._table is None:
             return {"document_count": 0}
         return {"document_count": int(self._table.count_rows())}
 
     def _delete_document_ids(self, document_ids: list[str]) -> None:
+        self._ensure_table_loaded()
         if self._table is None or not document_ids:
             return
         values = ", ".join(f"'{_escape_sql_literal(document_id)}'" for document_id in document_ids)
         self._table.delete(f"document_id IN ({values})")
+
+    def _ensure_table_loaded(self) -> None:
+        if self._table is not None:
+            return
+
+        open_table = getattr(self._db, "open_table", None)
+        if callable(open_table):
+            table_names = getattr(self._db, "table_names", None)
+            if callable(table_names):
+                try:
+                    if self.table_name not in table_names():
+                        return
+                except Exception:
+                    pass
+            try:
+                self._table = open_table(self.table_name)
+                return
+            except Exception:
+                pass
+
+        try:
+            self._table = self._db[self.table_name]
+        except (KeyError, TypeError, AttributeError):
+            self._table = None
 
     @staticmethod
     def _row_from_document(document: VectorIndexDocument) -> dict[str, Any]:

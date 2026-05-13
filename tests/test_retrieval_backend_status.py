@@ -45,7 +45,9 @@ def test_retrieval_backend_status_reports_optional_lancedb_gate_without_writes(t
     assert status["store_probe"]["ledger_exists"] is True
     assert status["store_probe"]["vector_source_count"] == 1
     assert status["rebuild_probe"]["requested"] is False
+    assert status["golden_comparison_probe"]["status"] == "skipped"
     assert status["readiness_gates"]["lancedb_dependency"]["status"] == "blocked"
+    assert status["readiness_gates"]["golden_retrieval_comparison"]["status"] == "skipped"
     assert status["readiness_gates"]["live_backend_switch"]["status"] == "blocked"
 
 

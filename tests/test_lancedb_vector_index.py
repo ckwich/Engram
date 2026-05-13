@@ -68,6 +68,18 @@ class FakeLanceDB:
         return self.tables[table_name]
 
 
+def test_lancedb_vector_index_reopens_existing_table_before_search(tmp_path):
+    fake_db = FakeLanceDB()
+    first = LanceDBVectorIndex(tmp_path / "lance", connect=lambda uri: fake_db)
+    first.rebuild([VectorIndexDocument("alpha-0", "alpha", 0, "Alpha notes", [1.0])])
+
+    reopened = LanceDBVectorIndex(tmp_path / "lance", connect=lambda uri: fake_db)
+    results = reopened.search(VectorIndexQuery("alpha", [1.0], limit=5))
+
+    assert [result.document_id for result in results] == ["alpha-0"]
+    assert reopened.stats() == {"document_count": 1}
+
+
 def test_lancedb_vector_index_rebuild_searches_and_filters_with_citations(tmp_path):
     fake_db = FakeLanceDB()
     index = LanceDBVectorIndex(tmp_path / "lance", connect=lambda uri: fake_db)
