@@ -100,6 +100,21 @@ class EngramDaemonAPI:
         query = str(request.get("query") or "").strip()
         if not query:
             return self._error(400, "invalid_request", "query is required")
+        if self.memory_os_runtime is not None:
+            return self._ok(
+                self.memory_os_runtime.search_memories(
+                    query=query,
+                    limit=_int_value(request.get("limit"), default=5),
+                    project=_optional_text(request.get("project")),
+                    domain=_optional_text(request.get("domain")),
+                    tags=_string_list(request.get("tags")),
+                    include_stale=bool(request.get("include_stale", True)),
+                    canonical_only=bool(request.get("canonical_only", False)),
+                    pinned_keys=_string_list(request.get("pinned_keys")),
+                    pinned_first=bool(request.get("pinned_first", False)),
+                    retrieval_mode=str(request.get("retrieval_mode") or "semantic"),
+                )
+            )
         payload = await self.memory_manager.search_memories_structured_async(
             query,
             limit=_int_value(request.get("limit"), default=5),
@@ -120,6 +135,8 @@ class EngramDaemonAPI:
         if not key:
             return self._error(400, "invalid_request", "key is required")
         chunk_id = _int_value(request.get("chunk_id"), default=0)
+        if self.memory_os_runtime is not None:
+            return self._ok(self.memory_os_runtime.retrieve_chunk(key, chunk_id))
         raw_results = await self.memory_manager.retrieve_chunks_async(
             [{"key": key, "chunk_id": chunk_id}]
         )
@@ -130,6 +147,23 @@ class EngramDaemonAPI:
         requests = request.get("requests")
         if not isinstance(requests, list):
             return self._error(400, "invalid_request", "requests must be a list")
+        if self.memory_os_runtime is not None:
+            results = [
+                self.memory_os_runtime.retrieve_chunk(
+                    str(item.get("key") or ""),
+                    _int_value(item.get("chunk_id"), default=0),
+                )
+                for item in requests
+                if isinstance(item, dict)
+            ]
+            return self._ok(
+                {
+                    "requested_count": len(requests),
+                    "found_count": sum(1 for result in results if result["found"]),
+                    "results": results,
+                    "error": None,
+                }
+            )
         raw_results = await self.memory_manager.retrieve_chunks_async(requests)
         results = [
             _chunk_payload(result, result.get("key", ""), result.get("chunk_id", -1))
@@ -148,6 +182,8 @@ class EngramDaemonAPI:
         key = str(request.get("key") or "").strip()
         if not key:
             return self._error(400, "invalid_request", "key is required")
+        if self.memory_os_runtime is not None:
+            return self._ok(self.memory_os_runtime.retrieve_memory(key))
         result = await self.memory_manager.retrieve_memory_async(key)
         return self._ok(
             {
@@ -165,6 +201,23 @@ class EngramDaemonAPI:
             return self._error(400, "invalid_request", "key is required")
         if not isinstance(content, str) or not content.strip():
             return self._error(400, "invalid_request", "content is required")
+        if self.memory_os_runtime is not None:
+            try:
+                result = self.memory_os_runtime.store_memory(
+                    key=key,
+                    content=content,
+                    tags=_string_list(request.get("tags")),
+                    title=_optional_text(request.get("title")) or key,
+                    related_to=_string_list(request.get("related_to")),
+                    force=bool(request.get("force", False)),
+                    project=_optional_text(request.get("project")),
+                    domain=_optional_text(request.get("domain")),
+                    status=_optional_text(request.get("status")),
+                    canonical=request.get("canonical"),
+                )
+            except ValueError as exc:
+                return self._error(400, "invalid_request", str(exc))
+            return self._ok({"stored": True, "result": result, "error": None})
         try:
             result = await self.memory_manager.store_memory_async(
                 key=key,
@@ -436,6 +489,8 @@ class EngramDaemonAPI:
                     },
                 }
             )
+        if self.memory_os_runtime is not None:
+            return self._ok(self.memory_os_runtime.check_duplicate(key, content))
         result = await self.memory_manager.check_duplicate_async(key, content)
         return self._ok(
             {
@@ -463,6 +518,11 @@ class EngramDaemonAPI:
             }.items()
             if value is not None
         }
+        if self.memory_os_runtime is not None:
+            try:
+                return self._ok(self.memory_os_runtime.update_memory_metadata(key, **changes))
+            except ValueError as exc:
+                return self._error(400, "invalid_request", str(exc))
         try:
             memory = await self.memory_manager.update_memory_metadata_async(key, **changes)
         except KeyError:
@@ -507,6 +567,8 @@ class EngramDaemonAPI:
                     },
                 }
             )
+        if self.memory_os_runtime is not None:
+            return self._ok(self.memory_os_runtime.repair_memory_metadata(keys, dry_run=dry_run))
         payload = await self.memory_manager.repair_memory_metadata_async(keys, dry_run=dry_run)
         payload["error"] = None
         return self._ok(payload)
@@ -515,6 +577,8 @@ class EngramDaemonAPI:
         key = str(request.get("key") or "").strip()
         if not key:
             return self._error(400, "invalid_request", "key is required")
+        if self.memory_os_runtime is not None:
+            return self._ok(self.memory_os_runtime.delete_memory(key))
         deleted = await self.memory_manager.delete_memory_async(key)
         return self._ok({"key": key, "deleted": bool(deleted), "error": None})
 

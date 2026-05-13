@@ -85,7 +85,13 @@ def run_daemon_smoke(client: Any, *, key: str | None = None) -> dict[str, Any]:
                 store_response,
             )
         stored = True
-        record("store_memory", "ok", {"key": smoke_key})
+        store_details: dict[str, Any] = {"key": smoke_key}
+        store_result = store_response.get("result")
+        if isinstance(store_result, dict):
+            for field in ("storage_backend", "transaction_id", "chunk_count"):
+                if store_result.get(field) is not None:
+                    store_details[field] = store_result[field]
+        record("store_memory", "ok", store_details)
 
         update_response = client.update_memory_metadata(
             {
@@ -148,7 +154,11 @@ def run_daemon_smoke(client: Any, *, key: str | None = None) -> dict[str, Any]:
         record(
             "search_memories",
             "ok",
-            {"key": smoke_key, "chunk_id": match.get("chunk_id")},
+            {
+                "key": smoke_key,
+                "chunk_id": match.get("chunk_id"),
+                "backend": search_response.get("backend"),
+            },
         )
 
         chunk_response = client.retrieve_chunk(

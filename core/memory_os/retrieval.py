@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 from typing import Any, Callable
 
 from core.lancedb_vector_index import LanceDBVectorIndex
-from core.memory_os._records import hash_payload
+from core.memory_os._records import hash_payload, list_records
 from core.memory_os.ledger import MemoryOSLedger
 from core.memory_os_migration import MemoryOSMigrationKernel, build_vector_index_documents
 from core.vector_index import VectorIndex, VectorIndexQuery, VectorIndexSearchResult
@@ -97,7 +98,10 @@ class MemoryOSRetrievalIndex:
 
     def _read_vector_sources(self) -> list[dict[str, Any]]:
         kernel = MemoryOSMigrationKernel(self.ledger.path.parent)
-        return kernel.read_vector_source_records()
+        try:
+            return kernel.read_vector_source_records()
+        except sqlite3.DatabaseError:
+            return [_generic_chunk_source(record) for record in list_records(self.ledger, "chunks")]
 
     @staticmethod
     def _result_payload(result: VectorIndexSearchResult) -> dict[str, Any]:
@@ -116,3 +120,38 @@ class MemoryOSRetrievalIndex:
                 "document_id": result.document_id,
             },
         }
+
+
+def _generic_chunk_source(record: dict[str, Any]) -> dict[str, Any]:
+    key = str(record.get("memory_key") or record.get("key") or record.get("parent_key") or "")
+    chunk_id = int(record.get("chunk_id", 0))
+    document_id = str(record.get("document_id") or f"{key}:chunk:{chunk_id}")
+    text = str(record.get("text") or "")
+    metadata = dict(record.get("metadata") or {})
+    for field in (
+        "title",
+        "tags",
+        "project",
+        "domain",
+        "status",
+        "canonical",
+        "section_title",
+        "heading_path",
+        "chunk_kind",
+    ):
+        if field in record and field not in metadata:
+            metadata[field] = record[field]
+    metadata.setdefault("text_hash", hash_payload(text))
+    return {
+        "document_id": document_id,
+        "parent_key": key,
+        "chunk_id": chunk_id,
+        "text": text,
+        "metadata": metadata,
+        "citation": {
+            "source": "memory_os",
+            "key": key,
+            "chunk_id": chunk_id,
+            "document_id": document_id,
+        },
+    }

@@ -175,6 +175,7 @@ def fake_document_disassembler(**kwargs):
 class FakeMemoryOSRuntime:
     def __init__(self):
         self.source_jobs = []
+        self.calls = []
 
     def status(self):
         return {
@@ -194,6 +195,72 @@ class FakeMemoryOSRuntime:
             "status": "queued",
             "payload": kwargs,
         }
+
+    def search_memories(self, **kwargs):
+        self.calls.append(("search_memories", kwargs))
+        return {
+            "query": kwargs["query"],
+            "backend": "memory_os",
+            "count": 1,
+            "results": [{"key": "runtime_memory", "chunk_id": 0, "title": "Runtime"}],
+            "error": None,
+        }
+
+    def retrieve_chunk(self, key, chunk_id):
+        self.calls.append(("retrieve_chunk", {"key": key, "chunk_id": chunk_id}))
+        return {
+            "key": key,
+            "chunk_id": chunk_id,
+            "found": True,
+            "chunk": {"title": "Runtime", "text": "runtime chunk"},
+            "error": None,
+        }
+
+    def retrieve_memory(self, key):
+        self.calls.append(("retrieve_memory", {"key": key}))
+        return {
+            "key": key,
+            "found": True,
+            "memory": {"key": key, "content": "runtime memory"},
+            "error": None,
+        }
+
+    def store_memory(self, **kwargs):
+        self.calls.append(("store_memory", kwargs))
+        return {
+            "key": kwargs["key"],
+            "title": kwargs["title"],
+            "chunk_count": 1,
+            "chars": len(kwargs["content"]),
+            "storage_backend": "memory_os",
+        }
+
+    def check_duplicate(self, key, content):
+        self.calls.append(("check_duplicate", {"key": key, "content": content}))
+        return {"key": key, "duplicate": False, "match": None, "error": None}
+
+    def update_memory_metadata(self, key, **changes):
+        self.calls.append(("update_memory_metadata", {"key": key, "changes": changes}))
+        return {
+            "key": key,
+            "updated": True,
+            "memory": {"key": key, **changes},
+            "error": None,
+        }
+
+    def repair_memory_metadata(self, keys, dry_run=True):
+        self.calls.append(("repair_memory_metadata", {"keys": keys, "dry_run": dry_run}))
+        return {
+            "requested_count": len(keys),
+            "repaired_count": 0,
+            "dry_run": dry_run,
+            "repairs": [],
+            "error": None,
+        }
+
+    def delete_memory(self, key):
+        self.calls.append(("delete_memory", {"key": key}))
+        return {"key": key, "deleted": True, "error": None}
 
     def inspector(self, *, limit=20):
         return {
@@ -488,6 +555,37 @@ def test_memory_os_source_import_route_creates_runtime_job():
             "source_type": "pdf",
             "connector_id": "local_path",
         }
+    ]
+
+
+def test_daemon_memory_routes_use_memory_os_runtime_when_available():
+    manager = FakeMemoryManager()
+    runtime = FakeMemoryOSRuntime()
+    api = EngramDaemonAPI(memory_manager=manager, memory_os_runtime=runtime)
+
+    store = api.handle(
+        "POST",
+        "/v1/store_memory",
+        {"key": "runtime_memory", "content": "Runtime body", "title": "Runtime"},
+    )
+    search = api.handle("POST", "/v1/search_memories", {"query": "runtime"})
+    chunk = api.handle("POST", "/v1/retrieve_chunk", {"key": "runtime_memory", "chunk_id": 0})
+    memory = api.handle("POST", "/v1/retrieve_memory", {"key": "runtime_memory"})
+    deleted = api.handle("POST", "/v1/delete_memory", {"key": "runtime_memory"})
+
+    assert store["body"]["stored"] is True
+    assert store["body"]["result"]["storage_backend"] == "memory_os"
+    assert search["body"]["backend"] == "memory_os"
+    assert chunk["body"]["chunk"]["text"] == "runtime chunk"
+    assert memory["body"]["memory"]["content"] == "runtime memory"
+    assert deleted["body"]["deleted"] is True
+    assert manager.stored is None
+    assert [call[0] for call in runtime.calls] == [
+        "store_memory",
+        "search_memories",
+        "retrieve_chunk",
+        "retrieve_memory",
+        "delete_memory",
     ]
 
 

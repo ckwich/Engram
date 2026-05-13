@@ -12,8 +12,11 @@ from pathlib import Path
 import pytest
 
 import engramd
+from core.engramd_api import EngramDaemonAPI
 from core.engramd_client import EngramDaemonClient
 from core.engramd_smoke import SMOKE_MARKER, run_daemon_smoke
+from core.memory_os.runtime import MemoryOSRuntime
+from core.vector_index import InMemoryVectorIndex
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +117,57 @@ class FakeSmokeClient:
         return {"key": payload["key"], "deleted": True, "error": None}
 
 
+class FakeStatsManager:
+    def get_stats(self):
+        return {"total_memories": 0, "total_chunks": 0}
+
+
+class APIBackedSmokeClient:
+    def __init__(self, api: EngramDaemonAPI):
+        self.api = api
+        self.responses: list[tuple[str, dict]] = []
+
+    def _call(self, method: str, path: str, payload: dict | None = None) -> dict:
+        envelope = self.api.handle(method, path, payload)
+        body = envelope["body"]
+        self.responses.append((path, body))
+        return body
+
+    def health(self):
+        return self._call("GET", "/health")
+
+    def store_memory(self, payload):
+        return self._call("POST", "/v1/store_memory", payload)
+
+    def check_duplicate(self, payload):
+        return self._call("POST", "/v1/check_duplicate", payload)
+
+    def update_memory_metadata(self, payload):
+        return self._call("POST", "/v1/update_memory_metadata", payload)
+
+    def repair_memory_metadata(self, payload):
+        return self._call("POST", "/v1/repair_memory_metadata", payload)
+
+    def search_memories(self, payload):
+        return self._call("POST", "/v1/search_memories", payload)
+
+    def retrieve_chunk(self, payload):
+        return self._call("POST", "/v1/retrieve_chunk", payload)
+
+    def retrieve_memory(self, payload):
+        return self._call("POST", "/v1/retrieve_memory", payload)
+
+    def delete_memory(self, payload):
+        return self._call("POST", "/v1/delete_memory", payload)
+
+
+def _embed(text):
+    text = str(text).lower()
+    if SMOKE_MARKER in text or "engramd smoke" in text:
+        return [1.0, 0.0]
+    return [0.0, 1.0]
+
+
 def test_run_daemon_smoke_exercises_full_memory_cycle():
     client = FakeSmokeClient()
 
@@ -133,6 +187,34 @@ def test_run_daemon_smoke_exercises_full_memory_cycle():
         "delete_memory",
     ]
     assert payload["steps"][-1]["name"] == "delete_memory"
+
+
+def test_run_daemon_smoke_reports_memory_os_backend_when_daemon_uses_runtime(tmp_path):
+    memory_os_root = tmp_path / "memory_os"
+    memory_os_root.mkdir()
+    runtime = MemoryOSRuntime(
+        memory_os_root,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    api = EngramDaemonAPI(
+        memory_manager=FakeStatsManager(),
+        memory_os_runtime=runtime,
+    )
+    client = APIBackedSmokeClient(api)
+
+    payload = run_daemon_smoke(client, key="_engramd_memory_os_smoke")
+
+    store_step = next(step for step in payload["steps"] if step["name"] == "store_memory")
+    search_step = next(step for step in payload["steps"] if step["name"] == "search_memories")
+    inspector = runtime.inspector()
+
+    assert payload["status"] == "ok"
+    assert payload["error"] is None
+    assert store_step["details"]["storage_backend"] == "memory_os"
+    assert search_step["details"]["backend"] == "memory_os"
+    assert inspector["summary"]["transaction_count"] >= 3
 
 
 def test_engramd_smoke_test_cli_prints_json(monkeypatch, capsys):
