@@ -38,6 +38,7 @@ The result is a practical intersession memory layer for coding agents, research 
 
 - **Local semantic search** using `sentence-transformers` and ChromaDB.
 - **Plain JSON source of truth** for memories, with ChromaDB as a rebuildable vector index.
+- **Daemon-first multi-session option** through `engramd` plus a thin MCP client entrypoint that avoids local storage/index imports.
 - **Markdown-aware chunking** that preserves headings and paragraph boundaries where possible.
 - **Deduplication checks** before writes, with explicit `force=True` override.
 - **Metadata filters** for project, domain, tags, lifecycle status, and canonical memories.
@@ -192,13 +193,13 @@ and protocol `schema_version: "2026-04-27"`.
 | `list_ingestion_pipelines` | List available source-intake pipelines. |
 | `migration_dry_run` | Validate legacy JSON memories against the Memory OS ledger schema without writing. |
 | `memory_os_round_trip_check` | Run Memory OS import/export/restore parity checks in a migration work directory. |
-| `retrieval_backend_status` | Report legacy Chroma, optional LanceDB, migrated-store, and rebuild-probe readiness without switching live retrieval. |
+| `retrieval_backend_status` | Report legacy Chroma, optional LanceDB, backend config intent, migrated-store, rebuild-probe, and golden-comparison readiness without switching live retrieval. |
 | `add_graph_edge` | Store a typed relationship between refs, including document structure and visual evidence refs. |
 | `list_graph_edges` | List graph edges around refs. |
 | `impact_scan` | Traverse graph relationships for impact analysis. |
 | `conflict_scan` | List contradiction, invalidation, and supersession graph edges without loading memory bodies. |
 | `audit_graph` | Inspect graph hygiene. |
-| `graph_backend_status` | Report JSON graph, optional Kuzu, and migrated graph-edge readiness without switching live graph storage. |
+| `graph_backend_status` | Report JSON graph, optional Kuzu, backend config intent, migrated graph-edge, graph-parity, and daemon-readiness gates without switching live graph storage. |
 | `usage_summary` | Summarize Engram-attributed token estimates. |
 | `list_usage_calls` | Inspect recent estimated usage calls. |
 | `retrieval_eval` | Run deterministic retrieval and no-write workflow-quality checks. |
@@ -259,6 +260,16 @@ The installer creates a virtual environment, installs dependencies, downloads th
 
 The first model download is roughly 80 MB.
 
+Install profiles are split so ordinary agent sessions can stay thin:
+
+| Profile | File | Purpose |
+|---|---|---|
+| Thin daemon client | `requirements-daemon-client.txt` | FastMCP adapter that talks to `engramd` without importing ChromaDB or sentence-transformers. |
+| Full local core | `requirements-core.txt` | Full local daemon/direct runtime with sentence-transformers and ChromaDB. |
+| Dashboard | `requirements-dashboard.txt` | Flask dashboard dependency. |
+| Backend spike | `requirements-backend-spike.txt` | Optional LanceDB/Kuzu evaluation dependencies; not required for normal use. |
+| Dev | `requirements-dev.txt` | Test and audit tooling. |
+
 ---
 
 ## MCP Client Setup
@@ -273,6 +284,20 @@ Windows:
 codex mcp add engram -- `
   "C:\path\to\Engram\venv\Scripts\python.exe" `
   "C:\path\to\Engram\server.py"
+```
+
+For sessions that should never become local storage owners, register the thin
+daemon-client entrypoint and keep one `engramd` running:
+
+```powershell
+python install.py --daemon-url http://127.0.0.1:8765 --thin-daemon-client
+
+# Manual fallback:
+codex mcp add engram `
+  --env ENGRAM_DATA_DIR=C:\path\to\Engram\data `
+  --env ENGRAM_DAEMON_URL=http://127.0.0.1:8765 `
+  -- C:\path\to\Engram\venv\Scripts\python.exe `
+  C:\path\to\Engram\server_daemon_client.py
 ```
 
 macOS / Linux:
@@ -412,14 +437,17 @@ memory store even when Codex launches the MCP server while you are working in a
 different project. The daemon URL is normalized by trimming trailing slashes.
 
 For Codex sessions that span many repositories, prefer registering the MCP
-server in daemon-client mode and running one local daemon:
+server in daemon-client mode and running one local daemon. Use
+`server_daemon_client.py` for the thinnest stable memory surface, or
+`server.py` with `ENGRAM_DAEMON_URL` when you need the broader beta tool
+surface:
 
 ```powershell
 codex mcp remove engram
 codex mcp add engram `
   --env ENGRAM_DATA_DIR=C:\Dev\Engram\data `
   --env ENGRAM_DAEMON_URL=http://127.0.0.1:8765 `
-  -- C:\Dev\Engram\venv\Scripts\python.exe C:\Dev\Engram\server.py
+  -- C:\Dev\Engram\venv\Scripts\python.exe C:\Dev\Engram\server_daemon_client.py
 ```
 
 Existing Codex sessions may still need a fresh tool discovery step or restart
@@ -434,6 +462,9 @@ disassembly preparation, metadata updates, metadata repair, and deletes through
 Direct in-process MCP mode remains supported unless `ENGRAM_DAEMON_URL` is
 set. This is not a LanceDB/Kuzu backend switch and does not add hosted tenant
 authorization.
+`ENGRAM_RETRIEVAL_BACKEND=lancedb` and `ENGRAM_GRAPH_BACKEND=kuzu` are
+readiness/config-intent signals only; Chroma and JSON remain live until golden
+retrieval, graph parity, persistence, daemon ownership, and recovery gates pass.
 
 ---
 
@@ -620,6 +651,7 @@ python -m core.memory_os_migration round-trip --legacy-dir data/memories --work-
 ```text
 Engram
 |-- server.py              # FastMCP server and MCP tools
+|-- server_daemon_client.py # Thin MCP client that delegates to engramd only
 |-- engramd.py             # Optional loopback daemon for shared local ownership
 |-- webui.py               # Flask dashboard and REST API
 |-- engram_index.py        # Codebase mapping CLI
@@ -636,7 +668,9 @@ Engram
 |   |-- graph_manager.py   # Graph policy and traversal
 |   |-- graph_store.py     # Swappable graph persistence seam
 |   |-- graph_backend_status.py # No-write graph backend readiness report
+|   |-- graph_backend_eval.py # No-write graph parity/cross-document readiness
 |   |-- retrieval_backend_status.py # No-write backend readiness report
+|   |-- retrieval_backend_eval.py # No-write vector backend comparison gates
 |   |-- usage_meter.py     # Privacy-safe token estimates
 |   |-- operation_log.py   # Job and event receipts
 |   `-- reliability_harness.py
@@ -657,8 +691,10 @@ Engram
 | `sentence-transformers` | Local semantic embeddings. |
 | `chromadb` | Persistent vector index. |
 | `flask` | Web dashboard. |
+| `lancedb` | Optional backend-spike retrieval candidate. |
+| `kuzu` | Optional backend-spike graph candidate. |
 
-See `requirements.txt` for exact version ranges and security floors.
+See `requirements.txt` and the split profile files for exact version ranges and security floors. LanceDB and Kuzu are intentionally kept out of the normal install path.
 
 ---
 

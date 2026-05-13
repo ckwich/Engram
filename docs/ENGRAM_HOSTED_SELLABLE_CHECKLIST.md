@@ -23,9 +23,15 @@ service explicitly takes ownership of those concerns with a new threat model.
 - Import/export/restore round-trip checks prove the current memory corpus can
   migrate through a disposable store.
 - Retrieval backend status reports Chroma as the legacy live index and LanceDB
-  as an optional candidate, with no live backend switch.
+  as an optional candidate, with no live backend switch; LanceDB table reopen
+  is fixed and golden retrieval comparison remains the promotion gate.
 - Graph backend status reports JSON graph storage as the legacy live graph
-  backend and Kuzu as an optional candidate, with no live backend switch.
+  backend and Kuzu as an optional candidate, with no live backend switch; Kuzu
+  parity passes in daemon-style fresh-process reopen tests but remains
+  daemon-only because Windows concurrent opens lock.
+- Thin daemon-client registration exists for ordinary multi-session agents, so
+  Codex sessions can avoid importing local storage/index modules while using one
+  shared `engramd`.
 - Document intelligence supports review-first text, document, OCR, and vision
   evidence contracts without trusted memory promotion.
 

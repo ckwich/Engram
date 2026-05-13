@@ -5,6 +5,40 @@ after the daemon-first and process-hygiene slices.
 
 This is an evaluation, not a backend switch.
 
+## Follow-Up Checkpoint — 2026-05-13
+
+The implementation follow-up completed the safe stack-lightening pieces without
+promoting optional backends:
+
+- Added `server_daemon_client.py`, a thin MCP entrypoint that delegates to
+  `engramd` and does not import `memory_manager`, ChromaDB,
+  sentence-transformers, LanceDB, Kuzu, or document extractor modules.
+- Added install/runtime profiles:
+  - `requirements-daemon-client.txt`
+  - `requirements-core.txt`
+  - `requirements-dashboard.txt`
+  - `requirements-backend-spike.txt`
+- Added intent-only backend config through `ENGRAM_RETRIEVAL_BACKEND` and
+  `ENGRAM_GRAPH_BACKEND`; these variables are reported by readiness tools but
+  do not switch live storage.
+- Fixed `LanceDBVectorIndex` table reopening. The rerun real LanceDB spike
+  rebuilt 5,882 vector documents, searched, upserted a synthetic row, deleted
+  that row, and reopened the persisted table with search results intact.
+- Added `core/retrieval_backend_eval.py` for no-write golden retrieval
+  comparison between a baseline index and a candidate index.
+- Added `core/graph_backend_eval.py` for no-write graph parity, cross-document
+  relationship readiness, and daemon-only Kuzu promotion reporting.
+- Reran Kuzu parity in the ignored eval venv: 675 migrated graph edges saved,
+  loaded, and reopened from a fresh process with parity passing. Same-process
+  concurrent Kuzu opens on Windows still hit the expected database lock, so
+  Kuzu remains daemon-only.
+
+Decision after follow-up: keep Chroma and JSON live. LanceDB is no longer
+blocked by the previous reopen bug, but live promotion still requires golden
+Chroma-vs-Lance query quality, daemon-owned backend switching, recovery tests,
+and operator docs. Kuzu remains optional until graph volume/query shape justifies
+running it behind `engramd`.
+
 ## Verdict
 
 Do not remove ChromaDB from the live stack yet, and do not add LanceDB or Kuzu
@@ -190,27 +224,22 @@ Immediate:
 - Keep Chroma as the live retrieval backend.
 - Keep JSON graph storage as the live graph backend.
 - Keep LanceDB and Kuzu out of base requirements.
-- Do not make Chroma optional until the daemon-client import boundary is split.
+- Do not make Chroma optional until daemon-owned backend switching and recovery
+  tests exist.
 - Do not remove sentence-transformers from the full local runtime.
 - Make Flask optional when packaging profiles are introduced.
 
 Next implementation slice for stack lightening:
 
-1. Add dependency profiles:
-   - `requirements-core.txt` for full local daemon/direct runtime
-   - `requirements-dashboard.txt` for Flask dashboard
-   - `requirements-backend-spike.txt` for LanceDB/Kuzu experiments
-   - keep `requirements-dev.txt`
-2. Add a daemon-client-only MCP entrypoint or refactor imports so daemon-client
-   mode can start without importing ChromaDB or sentence-transformers.
-3. Add tests proving daemon-client import/startup works when `chromadb` and
-   `sentence_transformers` imports are blocked.
-4. After that, evaluate whether Codex should register the thin daemon-client
-   entrypoint by default.
+1. Use `server_daemon_client.py` plus `install.py --daemon-url
+   http://127.0.0.1:8765 --thin-daemon-client` for ordinary multi-session
+   Codex memory use.
+2. Keep `server.py` available for the broader beta MCP surface when needed.
+3. Run golden Chroma-vs-Lance query comparison before any retrieval promotion.
+4. Keep Kuzu behind daemon-only planning until graph scale needs it.
 
 Future backend work:
 
-- Fix `LanceDBVectorIndex` table reopening and rerun the real corpus spike.
 - Add real LanceDB query-quality comparison against current Chroma on golden
   semantic and hybrid queries.
 - Keep Kuzu as optional until graph volume or query shape justifies it.

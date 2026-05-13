@@ -231,7 +231,11 @@ Before declaring Engram 1.0 ready:
   migration receipts, evals, and daemon/job health while preserving local-only
   review boundaries.
 - Run real-corpus backend decision gates before replacing live Chroma or JSON
-  graph storage with LanceDB, Kuzu, or another backend.
+  graph storage with LanceDB, Kuzu, or another backend. The 2026-05-13
+  backend follow-up added dependency profiles, thin daemon-client registration,
+  LanceDB reopen support, retrieval comparison gates, Kuzu graph parity gates,
+  and cross-document graph edge vocabulary; live promotion still requires
+  golden retrieval quality and daemon-owned backend switching.
 - Move more long-running work behind durable daemon jobs only after a job store,
   resumability, and operator receipts exist.
 - Add hosted tenant auth, object authorization, billing, support-bundle

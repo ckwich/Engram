@@ -19,6 +19,9 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 | `core/graph_manager.py` | Typed relationship validation and traversal | Delegates persistence to graph_store; graph traversal returns IDs/evidence, not memory bodies |
 | `core/graph_store.py` | Swappable graph persistence backend | JSON is current default; preserve GraphStore contract for future graph DB migration |
 | `core/kuzu_graph_store.py` | Optional Kuzu-backed graph persistence adapter | Must preserve the GraphStore document contract; Kuzu remains optional until explicitly wired |
+| `core/backend_config.py` | Backend selection policy | Records operator intent only; defaults keep Chroma/JSON live and never promote candidates by itself |
+| `core/retrieval_backend_eval.py` | No-write retrieval backend comparison gates | Compares baseline and candidate VectorIndex adapters without touching live Chroma or memories |
+| `core/graph_backend_eval.py` | No-write graph parity and cross-document readiness gates | Reports edge contract health, cross-document concept links, and daemon-only Kuzu promotion requirements |
 | `core/chunk_preview.py` | No-write chunk boundary previews | Uses the same markdown-aware chunker agents rely on before storage |
 | `core/ingestion_pipelines.py` | Named no-write source intake presets | Pipeline ids are agent-facing contracts |
 | `core/source_connectors.py` | Preview-only source connector helpers | Must not import or promote memory without a separate explicit store flow |
@@ -38,6 +41,7 @@ Always read `plan.md` before modifying core architecture. The three-tier retriev
 | `core/codebase_mapper.py` | Agent-native codebase mapping jobs | Scans repos, tracks source drift, and stores agent-authored mapping results; no provider-specific model subprocess |
 | `core/context_compiler.py` | No-write agent context packets | Static retrieval profiles plus packet assembly on top of context_pack; must not write or promote memory |
 | `server.py` | FastMCP tool definitions | Docstrings are agent-facing — keep them precise |
+| `server_daemon_client.py` | Thin daemon-client FastMCP entrypoint | Must not import `memory_manager`, ChromaDB, sentence-transformers, LanceDB, Kuzu, or document extractor modules |
 | `webui.py` | Flask dashboard | No business logic here, calls memory_manager only |
 | `install.py` | Setup wizard | Must work on Windows and Linux/macOS |
 
@@ -54,7 +58,7 @@ stdout corruption breaks MCP stdio transport. Use `sys.stderr` for debug output 
 Chunk IDs use `{md5(key)}_{chunk_index}` format. Agents store these references. Never change the ID format without a migration.
 
 ### Graph edge records are migration contracts
-Graph edges are durable migration data. Keep `from_ref`, `to_ref`, `edge_type`, `confidence`, `evidence`, `source`, `status`, `created_by`, `created_at`, `updated_at`, and `edge_id` stable unless a migration is provided. New graph storage backends must implement the `GraphStore` load/save contract before replacing JSON.
+Graph edges are durable migration data. Keep `from_ref`, `to_ref`, `edge_type`, `confidence`, `evidence`, `source`, `status`, `created_by`, `created_at`, `updated_at`, and `edge_id` stable unless a migration is provided. New graph storage backends must implement the `GraphStore` load/save contract before replacing JSON. Cross-document/book concept links are first-class graph data; use typed edges such as `related_to`, `same_as`, `similar_to`, `extends`, `refines`, `applies_to`, `synthesizes`, `supports`, `contradicts`, `example_of`, `illustrates`, and `cites` with source/document refs and evidence.
 
 ### Tool docstrings are agent contracts
 The docstrings on MCP tools in `server.py` are read by AI agents to understand tool behavior. Keep them accurate, complete, and explicit about the three-tier retrieval pattern.
@@ -100,7 +104,8 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 ## Engram 1.0 Memory OS Rules
 - Product identity is `Engram 1.0.0` / stability `stable`. MCP protocol identity remains `version: 2` and `schema_version: "2026-04-27"` until an explicit protocol migration is planned.
 - Local JSON memory files remain the authoritative store. ChromaDB remains a rebuildable live vector index. Migration dry runs and round-trip checks must not mutate active memories or ChromaDB.
-- `engramd` mode is opt-in through `ENGRAM_DAEMON_URL`. It routes stable memory operations, source draft lifecycle operations, metadata updates/repair/delete, and no-write document disassembly preparation through the daemon. Direct in-process MCP mode remains supported, but daemon-client registration with `ENGRAM_DATA_DIR` pinned to this checkout is the recommended Codex setup when multiple project sessions may use Engram concurrently. Daemon-client MCP startup may autostart a missing loopback daemon; set `ENGRAM_DAEMON_AUTOSTART=0` when operators must start the daemon manually.
+- `engramd` mode is opt-in through `ENGRAM_DAEMON_URL`. It routes stable memory operations, source draft lifecycle operations, metadata updates/repair/delete, and no-write document disassembly preparation through the daemon. Direct in-process MCP mode remains supported, but daemon-client registration with `ENGRAM_DATA_DIR` pinned to this checkout is the recommended Codex setup when multiple project sessions may use Engram concurrently. For ordinary multi-session Codex memory use, prefer `server_daemon_client.py` or `install.py --daemon-url http://127.0.0.1:8765 --thin-daemon-client`; that entrypoint never imports local storage/index modules and keeps sessions from becoming competing Chroma owners. Full `server.py` daemon-client mode remains available when agents need the broader beta tool surface.
+- Backend config is intent-only. `ENGRAM_RETRIEVAL_BACKEND=lancedb` and `ENGRAM_GRAPH_BACKEND=kuzu` may appear in readiness reports, but live retrieval remains Chroma and live graph storage remains JSON until migration, golden comparison, parity, persistence, and daemon ownership gates pass.
 - Use `python engramd.py --doctor` for process hygiene before assuming ChromaDB is broken. Stop stale MCP adapter processes only by explicit PID with `python engramd.py --stop-server-pid <pid...>`; do not delete lock files or kill fuzzy process matches.
 - Codebase mapping is agent-facing and provider-neutral. Engram prepares source-hashed context and drift receipts; the connected agent writes the synthesis. Do not add hardcoded model subprocesses to mapping.
 - Document intelligence is evidence-first. Local PDF disassembly, artifact manifests, quality reports, mandatory visual/OCR coverage requests, understanding packets, draft proposals, graph proposals, and promotion transactions are no-write review surfaces until explicit memory or graph promotion.

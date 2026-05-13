@@ -82,7 +82,7 @@ where typed, and focused tests.
 | `impact_scan` | beta | `dict{root_ref, count, edges, error}` | Graph traversal returns refs/evidence, not neighbor bodies. |
 | `conflict_scan` | beta | `dict{schema_version, ref, status, edge_types, count, conflicts, error}` | Read-only contradiction, invalidation, and supersession scan; returns refs/evidence only. |
 | `audit_graph` | beta | `dict{issue_count, issues, error}` | Read-only graph hygiene check. |
-| `graph_backend_status` | beta | `dict{schema_version, operation, current_live_backend, candidate_backend, live_graph_probe, store_probe, readiness_gates, write_performed, active_memory_write_performed, live_graph_backend_changed, error}` | No-write readiness report for JSON graph storage, optional Kuzu, and migrated ledger graph edges. |
+| `graph_backend_status` | beta | `dict{schema_version, operation, current_live_backend, backend_config, candidate_backend, live_graph_probe, store_probe, graph_parity_probe, readiness_gates, write_performed, active_memory_write_performed, live_graph_backend_changed, error}` | No-write readiness report for JSON graph storage, optional Kuzu, configured backend intent, migrated ledger graph edges, and graph parity. |
 | `list_ingestion_pipelines` | beta | `dict{pipelines, error}` | No-write source-intake preset catalog. |
 | `preview_memory_chunks` | beta | `dict{title, chunk_count, chunks, omitted, error}` | No-write chunk boundary preview. |
 | `preview_source_connector` | beta | `dict{connector_type, target, count, items, omitted, write_performed, error}` | No-write local source preview. |
@@ -110,7 +110,7 @@ where typed, and focused tests.
 | `daemon_status` | beta | `dict{schema_version, mode, daemon_enabled, configured_url, reachable, health, autostart, stable_tools_routed, error}` | No-write runtime status for direct mode versus opt-in `ENGRAM_DAEMON_URL` daemon-client mode, including startup-time loopback autostart eligibility. |
 | `migration_dry_run` | beta | `dict{schema_version, operation, source_count, valid_count, invalid_count, would_import_count, chunk_count_mismatch_count, unsupported_fields, write_performed, active_memory_write_performed, error}` | No-write validation of legacy JSON memories against the Memory OS migration ledger. |
 | `memory_os_round_trip_check` | beta | `dict{schema_version, operation, status, source_count, imported_count, bundle_memory_count, restored_count, parity, write_performed, active_memory_write_performed, error}` | Writes only migration work artifacts while proving import/export/restore parity; does not touch active memories or ChromaDB. |
-| `retrieval_backend_status` | beta | `dict{schema_version, operation, current_live_backend, candidate_backend, store_probe, rebuild_probe, readiness_gates, write_performed, active_memory_write_performed, live_retrieval_changed, error}` | No-write readiness report for legacy Chroma, optional LanceDB, migrated-store vector sources, and deterministic rebuild probes. |
+| `retrieval_backend_status` | beta | `dict{schema_version, operation, current_live_backend, backend_config, candidate_backend, store_probe, rebuild_probe, golden_comparison_probe, readiness_gates, write_performed, active_memory_write_performed, live_retrieval_changed, error}` | No-write readiness report for legacy Chroma, optional LanceDB, configured backend intent, migrated-store vector sources, deterministic rebuild probes, and golden comparison status. |
 | `read_codebase_mapping_config` | beta | `dict{exists, config, status, error}` | Reads mapping config/status; no source scan. |
 | `draft_codebase_mapping_config` | beta | `dict{config, receipt, error}` | Draft only; no write. |
 | `store_codebase_mapping_config` | beta | `dict{stored, error}` | Writes `.engram/config.json` with overwrite protection. |
@@ -143,7 +143,8 @@ where typed, and focused tests.
 - Graph edges preserve the required edge record fields named in `AGENTS.md`;
   the accepted edge vocabulary includes document structure and visual evidence
   relationships such as `contains`, `defines`, `explains`, `cites`,
-  `example_of`, and `illustrates`.
+  `example_of`, `illustrates`, `same_as`, `similar_to`, `extends`,
+  `refines`, `applies_to`, and `synthesizes`.
 - Source connector and chunk preview tools remain no-write.
 - Source intake remains draft-first and explicit-promotion only.
 - Operation records are receipts, not schedulers or autonomous triggers.
@@ -158,10 +159,16 @@ local data store. `--daemon-url` also enables daemon-client mode for that
 normalized by trimming trailing slashes.
 
 Daemon mode remains opt-in but is the recommended Codex registration mode when
-many sessions may use Engram concurrently. It routes stable memory operations,
-source draft prepare/list/discard/promotion, and no-write document disassembly
-preparation through the local `engramd` daemon, but it is not a hosted auth
-model, tenant boundary, or retrieval/graph backend switch.
+many sessions may use Engram concurrently. `server_daemon_client.py` is the
+thin stable-memory entrypoint for ordinary multi-session Codex use; it delegates
+to the local `engramd` daemon and does not import local storage/index modules.
+`server.py` with `ENGRAM_DAEMON_URL` remains available for the broader beta
+tool surface. Daemon mode is not a hosted auth model, tenant boundary, or
+retrieval/graph backend switch.
+
+`ENGRAM_RETRIEVAL_BACKEND` and `ENGRAM_GRAPH_BACKEND` are intent-only backend
+config signals for readiness reports. They do not change live Chroma or JSON
+graph storage unless future explicit promotion work adds and proves that path.
 
 When `ENGRAM_DAEMON_URL` points at a loopback URL, `server.py` probes daemon
 health before starting MCP traffic and attempts to start `engramd.py` if the

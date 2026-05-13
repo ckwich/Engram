@@ -319,12 +319,15 @@ Chroma should remain as a legacy adapter during migration. Qdrant can be a
 future adapter for users who want a separate vector service. SQLite vector
 extensions should remain experimental until their stability story is stronger.
 
-Implementation status, 2026-05-12: Engram now has a no-write
+Implementation status, 2026-05-13: Engram now has a no-write
 `retrieval_backend_status` MCP gate that reports legacy Chroma as the live
-index, LanceDB as an optional candidate, migrated-store vector source counts,
-and deterministic rebuild-probe results. This is not a backend switch. LanceDB
-must still pass a real optional-dependency spike against the migrated corpus
-before it can replace Chroma in live retrieval.
+index, LanceDB as an optional candidate, backend config intent,
+migrated-store vector source counts, deterministic rebuild-probe results, and
+a golden-comparison gate. This is not a backend switch. `LanceDBVectorIndex`
+now reloads existing tables, and the real optional-dependency rerun reopened
+and searched the migrated 5,882-record corpus successfully. LanceDB must still
+pass Chroma-vs-Lance golden query quality, daemon-owned backend switching, and
+recovery tests before it can replace Chroma in live retrieval.
 
 ### Kuzu Graph Store
 
@@ -350,12 +353,15 @@ data science, visualization-heavy workflows, or shared deployments. Memgraph is
 interesting for real-time streaming graph workloads, but it should not be the
 default for a personal local-first memory OS.
 
-Implementation status, 2026-05-12: Engram now has a no-write
+Implementation status, 2026-05-13: Engram now has a no-write
 `graph_backend_status` MCP gate that reports the JSON graph store as the live
-graph backend, Kuzu as an optional candidate, live JSON edge counts, and
-migrated ledger graph-edge counts. This is not a backend switch. Kuzu must
-still pass a real optional-dependency corpus spike before it can replace JSON
-graph storage in live traversal.
+graph backend, Kuzu as an optional candidate, backend config intent, live JSON
+edge counts, migrated ledger graph-edge counts, and graph parity readiness.
+This is not a backend switch. Kuzu persists and reopens the migrated graph in a
+fresh process, but Windows concurrent-open locking confirms it should only run
+behind the single `engramd` owner. Cross-document/book concept links are now a
+first-class graph readiness concern through typed relationships such as
+`same_as`, `similar_to`, `extends`, `refines`, `applies_to`, and `synthesizes`.
 
 ### Engram Daemon
 
@@ -409,6 +415,20 @@ Process hygiene slice, 2026-05-13:
   other-checkout, unknown, and current-process PIDs.
 - The cleanup surface deliberately avoids fuzzy kill-all behavior and never
   deletes Chroma lock files; stale ownership is fixed by stopping the owner.
+
+Thin client and backend-gate slice, 2026-05-13:
+
+- `server_daemon_client.py` provides a stable thin MCP entrypoint for ordinary
+  multi-session agents. It delegates to `engramd` and does not import local
+  storage/index/extractor modules.
+- `install.py --daemon-url http://127.0.0.1:8765 --thin-daemon-client` can
+  register Codex against the thin entrypoint.
+- `requirements-daemon-client.txt`, `requirements-core.txt`,
+  `requirements-dashboard.txt`, and `requirements-backend-spike.txt` separate
+  the thin adapter, full local runtime, dashboard, and optional Lance/Kuzu
+  experiments.
+- `ENGRAM_RETRIEVAL_BACKEND` and `ENGRAM_GRAPH_BACKEND` are intent-only config
+  signals for readiness reports; they do not switch live backends.
 
 ## Agent-Facing MCP Surface
 
