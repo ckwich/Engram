@@ -69,6 +69,8 @@ def test_codex_engram_registration_smoke():
     assert command
     assert args
     server_path = Path(args).resolve()
-    assert server_path.name == "server.py"
-    assert server_path == (REPO_ROOT / "server.py").resolve() or _is_same_repo_checkout(server_path)
+    assert server_path.name in {"server.py", "server_daemon_client.py"}
+    if server_path.name == "server_daemon_client.py":
+        assert "ENGRAM_DAEMON_URL=" in fields.get("env", "")
+    assert server_path == (REPO_ROOT / server_path.name).resolve() or _is_same_repo_checkout(server_path)
     assert Path(command).exists() or shutil.which(command) is not None
