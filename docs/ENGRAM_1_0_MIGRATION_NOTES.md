@@ -96,6 +96,21 @@ $env:ENGRAM_DAEMON_URL = "http://127.0.0.1:8765"
 & $py server.py
 ```
 
+For cross-project Codex work, register the MCP server as a daemon client and
+pin `ENGRAM_DATA_DIR` to the Engram checkout:
+
+```powershell
+codex mcp remove engram
+codex mcp add engram `
+  --env ENGRAM_DATA_DIR=C:\Dev\Engram\data `
+  --env ENGRAM_DAEMON_URL=http://127.0.0.1:8765 `
+  -- C:\Dev\Engram\venv\Scripts\python.exe C:\Dev\Engram\server.py
+```
+
+Lazy discovery of the tool namespace is still controlled by the client session,
+but every discovered adapter should route stable memory operations through the
+same daemon instead of trying to own embedded Chroma directly.
+
 The daemon currently routes stable memory operations, source draft lifecycle
 operations, metadata updates/repair/delete, and no-write document disassembly
 preparation. Mapping jobs, import/export, rebuild jobs, backend switching, and

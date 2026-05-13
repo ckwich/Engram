@@ -52,7 +52,12 @@ from core.graph_backend_status import build_graph_backend_status
 from core.graph_manager import graph_manager
 from core.hybrid_retrieval import normalize_retrieval_mode
 from core.ingestion_pipelines import list_ingestion_pipelines as build_ingestion_pipeline_catalog
-from core.memory_manager import memory_manager, DuplicateMemoryError, _config
+from core.memory_manager import (
+    memory_manager,
+    DuplicateMemoryError,
+    _config,
+    is_chroma_availability_error,
+)
 from core.memory_os_migration import MemoryOSMigrationKernel, run_round_trip_check
 from core.memory_quality import audit_memory_quality as build_memory_quality_audit
 from core.operation_log import operation_log
@@ -87,6 +92,7 @@ PRODUCT_STABILITY = "stable"
 PROTOCOL_VERSION = 2
 PROTOCOL_SCHEMA_VERSION = "2026-04-27"
 DEFAULT_SSE_HOST = "127.0.0.1"
+DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
 DAEMON_STATUS_SCHEMA_VERSION = "2026-05-12.daemon-status.v1"
 _USAGE_METERING_ENABLED: ContextVar[bool] = ContextVar(
     "engram_usage_metering_enabled",
@@ -104,6 +110,14 @@ def _normalize_daemon_url(value: str | None) -> str | None:
         return None
     normalized = value.strip().rstrip("/")
     return normalized or None
+
+
+def _mcp_env(daemon_url: str | None = None) -> dict[str, str]:
+    env = {"ENGRAM_DATA_DIR": str((Path(__file__).resolve().parent / "data").resolve())}
+    normalized_daemon_url = _normalize_daemon_url(daemon_url)
+    if normalized_daemon_url is not None:
+        env["ENGRAM_DAEMON_URL"] = normalized_daemon_url
+    return env
 
 
 def _daemon_enabled() -> bool:
@@ -125,6 +139,87 @@ async def _call_daemon(method_name: str, payload: dict[str, Any]) -> dict[str, A
 
 async def _daemon_health() -> dict[str, Any]:
     return await asyncio.to_thread(_daemon_client().health)
+
+
+def _build_health_payload() -> dict[str, Any]:
+    if _daemon_enabled():
+        configured_url = _daemon_url()
+        try:
+            daemon_health = _daemon_client().health()
+        except Exception as exc:
+            return {
+                "product": {
+                    "name": PRODUCT_NAME,
+                    "version": PRODUCT_VERSION,
+                    "release_track": PRODUCT_RELEASE_TRACK,
+                    "stability": PRODUCT_STABILITY,
+                },
+                "status": "degraded",
+                "model": "daemon_owned",
+                "mode": "daemon_client",
+                "daemon_url": configured_url,
+                "daemon_reachable": False,
+                "stats": memory_manager.get_json_fallback_stats(chroma_error=str(exc)),
+                "error": _tool_error("runtime_error", str(exc)),
+            }
+        daemon_ok = daemon_health.get("status") == "ok" and daemon_health.get("error") is None
+        return {
+            "product": {
+                "name": PRODUCT_NAME,
+                "version": PRODUCT_VERSION,
+                "release_track": PRODUCT_RELEASE_TRACK,
+                "stability": PRODUCT_STABILITY,
+            },
+            "status": "ok" if daemon_ok else "degraded",
+            "model": "daemon_owned",
+            "mode": "daemon_client",
+            "daemon_url": configured_url,
+            "daemon_reachable": daemon_ok,
+            "stats": daemon_health.get("stats") or memory_manager.get_json_fallback_stats(
+                chroma_error="daemon did not return stats"
+            ),
+            "error": daemon_health.get("error"),
+        }
+
+    embedder._load()
+    try:
+        memory_manager._ensure_initialized()
+        stats = memory_manager.get_stats()
+    except RuntimeError as exc:
+        if not is_chroma_availability_error(exc):
+            raise
+        return {
+            "product": {
+                "name": PRODUCT_NAME,
+                "version": PRODUCT_VERSION,
+                "release_track": PRODUCT_RELEASE_TRACK,
+                "stability": PRODUCT_STABILITY,
+            },
+            "status": "degraded",
+            "model": "loaded" if embedder._model is not None else "not_loaded",
+            "mode": "daemon_client" if _daemon_enabled() else "direct",
+            "stats": memory_manager.get_json_fallback_stats(chroma_error=str(exc)),
+            "error": _tool_error("runtime_error", str(exc)),
+        }
+    return {
+        "product": {
+            "name": PRODUCT_NAME,
+            "version": PRODUCT_VERSION,
+            "release_track": PRODUCT_RELEASE_TRACK,
+            "stability": PRODUCT_STABILITY,
+        },
+        "status": "ok",
+        "model": "loaded" if embedder._model is not None else "not_loaded",
+        "mode": "daemon_client" if _daemon_enabled() else "direct",
+        "stats": {
+            **stats,
+            "vector_index": {
+                "available": True,
+                "error": None,
+            },
+        },
+        "error": None,
+    }
 
 
 def _clamp_search_limit(limit: int) -> int:
@@ -4781,11 +4876,11 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.health:
-        embedder._load()
-        memory_manager._ensure_initialized()
-        stats = memory_manager.get_stats()
+        payload = _build_health_payload()
+        stats = payload["stats"]
         print(f"Engram Health Check", file=sys.stderr)
-        print(f"  Model:      {embedder._model is not None and 'loaded' or 'NOT LOADED'}", file=sys.stderr)
+        print(f"  Model:      {payload['model']}", file=sys.stderr)
+        print(f"  Mode:       {payload['mode']}", file=sys.stderr)
         print(f"  Memories:   {stats['total_memories']}", file=sys.stderr)
         print(f"  Chunks:     {stats['total_chunks']}", file=sys.stderr)
         print(
@@ -4795,8 +4890,11 @@ if __name__ == "__main__":
         )
         print(f"  JSON path:  {stats['json_path']}", file=sys.stderr)
         print(f"  Chroma path:{stats['chroma_path']}", file=sys.stderr)
-        print(f"Status: OK", file=sys.stderr)
-        sys.exit(0)
+        if payload["error"]:
+            print(f"  Error:      {payload['error']['message']}", file=sys.stderr)
+        print(f"Status: {payload['status'].upper()}", file=sys.stderr)
+        sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        sys.exit(0 if payload["status"] == "ok" else 2)
 
     if args.agent_eval:
         embedder._load()
@@ -5049,9 +5147,8 @@ if __name__ == "__main__":
         server_config: dict[str, Any] = {
             "command": sys.executable,
             "args": [os.path.abspath(__file__)],
+            "env": _mcp_env(normalized_daemon_url),
         }
-        if normalized_daemon_url is not None:
-            server_config["env"] = {"ENGRAM_DAEMON_URL": normalized_daemon_url}
         config = {
             "mcpServers": {
                 "engram": server_config,

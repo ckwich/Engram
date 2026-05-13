@@ -12,11 +12,13 @@ import shutil
 # The installer invokes trusted local setup CLIs with shell=False.
 import subprocess  # nosec B404
 import sys
+import argparse
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 VENV_DIR = PROJECT_ROOT / "venv"
 IS_WINDOWS = platform.system() == "Windows"
+DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
 
 
 def run(cmd: list, **kwargs):
@@ -50,7 +52,29 @@ def install_skill(skill_name: str, source_dir: Path, dest_dir: Path):
     return True
 
 
-def register_codex_mcp(python_path: Path):
+def _normalize_daemon_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().rstrip("/")
+    return normalized or None
+
+
+def _mcp_env(daemon_url: str | None = None) -> dict[str, str]:
+    env = {"ENGRAM_DATA_DIR": str((PROJECT_ROOT / "data").resolve())}
+    normalized_daemon_url = _normalize_daemon_url(daemon_url)
+    if normalized_daemon_url is not None:
+        env["ENGRAM_DAEMON_URL"] = normalized_daemon_url
+    return env
+
+
+def _codex_env_args(env: dict[str, str]) -> list[str]:
+    args: list[str] = []
+    for key, value in env.items():
+        args.extend(["--env", f"{key}={value}"])
+    return args
+
+
+def register_codex_mcp(python_path: Path, *, daemon_url: str | None = None):
     """Register Engram with Codex when the CLI is available."""
     codex_path = shutil.which("codex")
     if not codex_path:
@@ -59,6 +83,7 @@ def register_codex_mcp(python_path: Path):
 
     server_name = "engram"
     server_path = PROJECT_ROOT / "server.py"
+    env = _mcp_env(daemon_url)
 
     # codex path is resolved locally and invoked with shell=False.
     existing = subprocess.run(  # nosec B603
@@ -68,7 +93,10 @@ def register_codex_mcp(python_path: Path):
     )
     if existing.returncode == 0:
         output = existing.stdout
-        if str(python_path) in output and str(server_path) in output:
+        # `codex mcp get` redacts environment values, so key presence is the
+        # stable verification signal here.
+        env_matches = all(f"{key}=" in output or f"{key}:" in output for key in env)
+        if str(python_path) in output and str(server_path) in output and env_matches:
             print("  [ok] Codex MCP server already registered")
             return True
 
@@ -85,7 +113,16 @@ def register_codex_mcp(python_path: Path):
 
     # codex path is resolved locally and invoked with shell=False.
     add_result = subprocess.run(  # nosec B603
-        [codex_path, "mcp", "add", server_name, "--", str(python_path), str(server_path)],
+        [
+            codex_path,
+            "mcp",
+            "add",
+            server_name,
+            *_codex_env_args(env),
+            "--",
+            str(python_path),
+            str(server_path),
+        ],
         capture_output=True,
         text=True,
     )
@@ -96,7 +133,8 @@ def register_codex_mcp(python_path: Path):
             print(f"         {stderr}")
         return False
 
-    print("  [ok] Codex MCP server registered")
+    mode = "daemon-client" if daemon_url else "direct"
+    print(f"  [ok] Codex MCP server registered ({mode})")
     return True
 
 
@@ -173,7 +211,22 @@ def create_default_config():
     print("  [ok] config.json created with defaults")
 
 
-def main():
+def parse_args(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser(description="Install Engram locally")
+    parser.add_argument(
+        "--daemon-url",
+        default=None,
+        help=(
+            "Register Codex MCP in daemon-client mode using this engramd URL "
+            f"(common local value: {DEFAULT_DAEMON_URL})"
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None):
+    args = parse_args(argv)
+    daemon_url = _normalize_daemon_url(args.daemon_url)
     print("Engram Setup Wizard\n")
 
     # ── Python version check ───────────────────────────────────────────────
@@ -244,13 +297,14 @@ def main():
 
     # ── Register MCP clients / emit config ─────────────────────────────────
     print("\n[7/7] Registering MCP clients...")
-    register_codex_mcp(python)
+    register_codex_mcp(python, daemon_url=daemon_url)
 
     mcp_config = {
         "mcpServers": {
             "engram": {
                 "command": str(python),
-                "args": [str(PROJECT_ROOT / "server.py")]
+                "args": [str(PROJECT_ROOT / "server.py")],
+                "env": _mcp_env(daemon_url),
             }
         }
     }
@@ -266,8 +320,11 @@ def main():
     print("Engram is ready!\n")
     print("1. Codex registration:")
     print("   If the Codex CLI was installed, Engram was registered automatically.")
+    if daemon_url:
+        print(f"   Registered in daemon-client mode: ENGRAM_DAEMON_URL={daemon_url}")
     print("   Manual fallback:")
-    print(f"   codex mcp add engram -- \\\n     {python} \\\n     {PROJECT_ROOT / 'server.py'}\n")
+    env_flags = " ".join(f"--env {key}={value}" for key, value in _mcp_env(daemon_url).items())
+    print(f"   codex mcp add engram {env_flags} -- \\\n     {python} \\\n     {PROJECT_ROOT / 'server.py'}\n")
     print("2. Claude Code manual registration:")
     print(f"   claude mcp add engram --scope user \\\n     {python} \\\n     {PROJECT_ROOT / 'server.py'}\n")
     print("3. Start the web dashboard:")

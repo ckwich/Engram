@@ -23,6 +23,8 @@ def test_generate_config_uses_active_python_interpreter():
 
     assert engram["command"] == sys.executable
     assert Path(engram["args"][0]).resolve() == (REPO_ROOT / "server.py").resolve()
+    assert Path(engram["env"]["ENGRAM_DATA_DIR"]).resolve() == (REPO_ROOT / "data").resolve()
+    assert "ENGRAM_DAEMON_URL" not in engram["env"]
 
 
 def test_generate_config_can_emit_daemon_client_environment():
@@ -45,7 +47,8 @@ def test_generate_config_can_emit_daemon_client_environment():
 
     assert engram["command"] == sys.executable
     assert Path(engram["args"][0]).resolve() == (REPO_ROOT / "server.py").resolve()
-    assert engram["env"] == {"ENGRAM_DAEMON_URL": "http://127.0.0.1:8765"}
+    assert engram["env"]["ENGRAM_DAEMON_URL"] == "http://127.0.0.1:8765"
+    assert Path(engram["env"]["ENGRAM_DATA_DIR"]).resolve() == (REPO_ROOT / "data").resolve()
 
 
 def test_sse_help_documents_loopback_default():

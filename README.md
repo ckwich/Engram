@@ -383,14 +383,32 @@ Generate MCP client config for daemon-client mode:
 python server.py --generate-config --daemon-url http://127.0.0.1:8765
 ```
 
-This emits `ENGRAM_DAEMON_URL` in the generated MCP server environment. The
-daemon URL is normalized by trimming trailing slashes.
+This emits `ENGRAM_DATA_DIR` and `ENGRAM_DAEMON_URL` in the generated MCP
+server environment. `ENGRAM_DATA_DIR` keeps Engram pointed at this repo's
+memory store even when Codex launches the MCP server while you are working in a
+different project. The daemon URL is normalized by trimming trailing slashes.
+
+For Codex sessions that span many repositories, prefer registering the MCP
+server in daemon-client mode and running one local daemon:
+
+```powershell
+codex mcp remove engram
+codex mcp add engram `
+  --env ENGRAM_DATA_DIR=C:\Dev\Engram\data `
+  --env ENGRAM_DAEMON_URL=http://127.0.0.1:8765 `
+  -- C:\Dev\Engram\venv\Scripts\python.exe C:\Dev\Engram\server.py
+```
+
+Existing Codex sessions may still need a fresh tool discovery step or restart
+before they see the Engram tool namespace. The important stability guarantee is
+that every discovered Engram MCP adapter routes stable memory operations to the
+same daemon instead of competing for embedded Chroma ownership.
 
 Daemon mode currently routes stable memory search, duplicate checks, chunk/full
 reads, writes, source draft prepare/list/discard/promotion, no-write document
 disassembly preparation, metadata updates, metadata repair, and deletes through
 `engramd`.
-Direct in-process MCP mode remains the default unless `ENGRAM_DAEMON_URL` is
+Direct in-process MCP mode remains supported unless `ENGRAM_DAEMON_URL` is
 set. This is not a LanceDB/Kuzu backend switch and does not add hosted tenant
 authorization.
 

@@ -107,6 +107,11 @@ def _raise_if_chroma_availability_error(error: Exception) -> None:
         raise RuntimeError(str(error)) from error
 
 
+def is_chroma_availability_error(error: Exception) -> bool:
+    """Public guard for CLI/API health checks that should degrade, not crash."""
+    return _is_chroma_availability_error(error)
+
+
 def _prepare_lock_file(lock_path: Path):
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("a+b")
@@ -2557,6 +2562,30 @@ class MemoryManager:
             "chroma_size": _format_storage_size(chroma_bytes),
             "json_path": str(JSON_DIR),
             "chroma_path": str(CHROMA_DIR),
+        }
+
+    def get_json_fallback_stats(self, *, chroma_error: str | None = None) -> dict:
+        """Return storage stats that do not require Chroma ownership."""
+        memories = self.list_memories()
+        json_bytes = _directory_size_bytes(JSON_DIR)
+        chroma_bytes = _directory_size_bytes(CHROMA_DIR)
+        storage_bytes = json_bytes + chroma_bytes
+        return {
+            "total_memories": len(memories),
+            "total_chars": sum(m["chars"] for m in memories),
+            "total_chunks": None,
+            "storage_bytes": storage_bytes,
+            "storage_size": _format_storage_size(storage_bytes),
+            "json_bytes": json_bytes,
+            "json_size": _format_storage_size(json_bytes),
+            "chroma_bytes": chroma_bytes,
+            "chroma_size": _format_storage_size(chroma_bytes),
+            "json_path": str(JSON_DIR),
+            "chroma_path": str(CHROMA_DIR),
+            "vector_index": {
+                "available": False,
+                "error": chroma_error,
+            },
         }
 
 

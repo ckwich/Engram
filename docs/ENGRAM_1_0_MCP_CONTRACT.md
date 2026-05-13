@@ -151,14 +151,17 @@ where typed, and focused tests.
 ## Daemon Client Configuration
 
 `server.py --generate-config --daemon-url <url>` emits MCP client config with
-`ENGRAM_DAEMON_URL` in the server environment. `--daemon-url` also enables
-daemon-client mode for that `server.py` process when used outside
-`--generate-config`. The URL is normalized by trimming trailing slashes.
+`ENGRAM_DATA_DIR` and `ENGRAM_DAEMON_URL` in the server environment.
+`ENGRAM_DATA_DIR` anchors cross-project MCP launches to this Engram checkout's
+local data store. `--daemon-url` also enables daemon-client mode for that
+`server.py` process when used outside `--generate-config`. The URL is
+normalized by trimming trailing slashes.
 
-Daemon mode remains opt-in. It routes stable memory operations, source draft
-prepare/list/discard/promotion, and no-write document disassembly preparation
-through the local `engramd` daemon, but it is not a hosted auth model, tenant
-boundary, or retrieval/graph backend switch.
+Daemon mode remains opt-in but is the recommended Codex registration mode when
+many sessions may use Engram concurrently. It routes stable memory operations,
+source draft prepare/list/discard/promotion, and no-write document disassembly
+preparation through the local `engramd` daemon, but it is not a hosted auth
+model, tenant boundary, or retrieval/graph backend switch.
 
 ## Non-Public Internals
 
