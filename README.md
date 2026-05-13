@@ -777,6 +777,7 @@ Planning docs:
 
 - `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md`
+- `docs/RELEASE_GATES.md`
 - `docs/ENGRAM_MEMORY_OS_1_0_RELEASE_CHECKLIST.md`
 - `docs/ENGRAM_MEMORY_OS_1_0_MIGRATION_GUIDE.md`
 - `docs/archive/legacy-local-core-1-0/README.md`
@@ -802,10 +803,19 @@ Run the main health gates:
 
 ```bash
 python server.py --help
+python -c "from core.memory_manager import memory_manager; print('ok')"
+python engramd.py --doctor
+python engramd.py --smoke-test
 python server.py --health
 python server.py --self-test
 python server.py --agent-eval
+python -m pytest tests/architecture tests/test_server_daemon_client_entrypoint.py tests/policy tests/mcp/test_no_write_tool_contracts.py tests/backend_gates -q
 ```
+
+See `docs/RELEASE_GATES.md` for the pre-EKC readiness gate and the full 1.0
+release gate. The pre-EKC gate verifies the thin daemon-client boundary,
+no-write review surfaces, explicit write-policy metadata, and backend readiness
+wrappers before new agent contracts are layered on top.
 
 ---
 

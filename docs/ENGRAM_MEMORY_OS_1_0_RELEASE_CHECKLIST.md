@@ -4,6 +4,9 @@ Use this checklist before calling a branch or build "Engram 1.0 ready." It is
 for the local-first Memory OS rebuild, not the archived legacy local-core 1.0
 target.
 
+For the shorter pre-EKC architecture and policy readiness lane, start with
+`docs/RELEASE_GATES.md`. This checklist is the full 1.0 release gate.
+
 ## Scope Boundary
 
 - Engram core is local-first and agent-facing.
@@ -38,6 +41,7 @@ Run these from the repo root:
 .\venv\Scripts\python.exe -c "from core.memory_manager import memory_manager; print('ok')"
 .\venv\Scripts\python.exe engramd.py --doctor
 .\venv\Scripts\python.exe engramd.py --smoke-test
+.\venv\Scripts\python.exe -m pytest tests\architecture tests\test_server_daemon_client_entrypoint.py tests\policy tests\mcp\test_no_write_tool_contracts.py tests\backend_gates -q
 .\venv\Scripts\python.exe -m pytest -q
 ```
 
@@ -70,6 +74,9 @@ Expected:
   the storage/search backend when the rebuilt runtime owns the route.
 - `server.py --agent-eval` passes the retrieval and Book Dismantling Gate
   checks.
+- Thin daemon-client import boundaries, no-write policy metadata, and backend
+  readiness wrappers pass before EKC or other agent-contract features are built
+  on top.
 - Full pytest passes.
 
 ## MCP Registration Gate
@@ -90,6 +97,21 @@ Expected:
   tool check such as `memory_protocol()` or `daemon_status()`.
 
 ## Memory OS-Specific Gates
+
+Architecture, no-write, and backend readiness wrappers:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest tests\architecture tests\test_server_daemon_client_entrypoint.py tests\policy tests\mcp\test_no_write_tool_contracts.py tests\backend_gates -q
+```
+
+Expected:
+
+- `server_daemon_client.py` remains the recommended multi-session entrypoint and
+  stays thin.
+- Document/source preview tools remain no-write review surfaces with explicit
+  write-policy metadata.
+- Retrieval and graph backend gates report readiness without switching the live
+  backend.
 
 Legacy JSON import parity:
 

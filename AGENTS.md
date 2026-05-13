@@ -122,8 +122,9 @@ Before marking any task done:
 3. Daemon process health and store/search/read/delete smoke gates pass through `python engramd.py --doctor` and `python engramd.py --smoke-test`
 4. Direct store, search, retrieve, delete cycle works end-to-end through `python server.py --self-test` in an isolated `ENGRAM_DATA_DIR` when a live daemon owns the default store
 5. Agent-facing retrieval/source/document workflow gates pass through `python server.py --agent-eval` in an isolated `ENGRAM_DATA_DIR` when a live daemon owns the default store
-6. No new bare `print()` statements are introduced in `server.py` or `core/memory_manager.py` production paths
-7. If MCP registration or installer behavior changed, `codex mcp get engram` succeeds when the Codex CLI is available
+6. The pre-EKC readiness lane in `docs/RELEASE_GATES.md` passes for architecture boundaries, thin daemon-client imports, no-write policy metadata, and backend readiness wrappers when those areas were touched
+7. No new bare `print()` statements are introduced in `server.py` or `core/memory_manager.py` production paths
+8. If MCP registration or installer behavior changed, `codex mcp get engram` succeeds when the Codex CLI is available
 
 ## Development Environment
 - Python 3.10+
