@@ -74,6 +74,7 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 ## Agent-Friendly Tool Surface
 - Product version and MCP protocol version are separate contracts. Keep the product identity in `server.py`, `memory_protocol()`, README, and release docs aligned, while preserving protocol `version` / `schema_version` compatibility unless an explicit migration is planned.
 - `memory_protocol()` is the discoverability entry point for agents that need the current retrieval ladder, aliases, and token-safety rules.
+- For ordinary multi-session agent work, use `server_daemon_client.py` with a running loopback `engramd` daemon. Use `server.py` direct mode only for local debug, compatibility checks, or deliberate single-process development.
 - `context_pack(query, ...)` is the preferred compact working-set helper when snippets are too small but full memories would be wasteful.
 - `list_context_profiles()`, `prepare_context(task, ...)`, `make_handoff(task, ...)`, and `prepare_project_capsule(project, ...)` are no-write agent workflow helpers for task-focused context packets, resume handoffs, and reviewable project capsules. They wrap context-pack retrieval with profile defaults, receipts, warnings, next actions, and citation refs; they must not promote memory or hide citations.
 - `retrieval_mode="semantic"` is the stable default. Use `retrieval_mode="hybrid"` only for identifier-heavy queries where exact symbols, filenames, class names, or domain terms should influence ranking.

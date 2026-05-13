@@ -281,16 +281,12 @@ Install profiles are split so ordinary agent sessions can stay thin:
 
 The Codex CLI stores MCP registrations in `~/.codex/config.toml`.
 
+Recommended multi-session setup: run one local `engramd` daemon and register
+the thin daemon-client MCP entrypoint. This keeps Codex sessions from importing
+or owning ChromaDB, LanceDB, Kuzu, sentence-transformers, or document extraction
+state.
+
 Windows:
-
-```powershell
-codex mcp add engram -- `
-  "C:\path\to\Engram\venv\Scripts\python.exe" `
-  "C:\path\to\Engram\server.py"
-```
-
-For sessions that should never become local storage owners, register the thin
-daemon-client entrypoint and keep one `engramd` running:
 
 ```powershell
 python install.py --daemon-url http://127.0.0.1:8765 --thin-daemon-client
@@ -304,6 +300,21 @@ codex mcp add engram `
 ```
 
 macOS / Linux:
+
+```bash
+python install.py --daemon-url http://127.0.0.1:8765 --thin-daemon-client
+
+# Manual fallback:
+codex mcp add engram \
+  --env ENGRAM_DATA_DIR=/path/to/Engram/data \
+  --env ENGRAM_DAEMON_URL=http://127.0.0.1:8765 \
+  -- /path/to/Engram/venv/bin/python \
+  /path/to/Engram/server_daemon_client.py
+```
+
+Direct `server.py` registration remains supported for local debug,
+compatibility, and single-process development. Prefer it only when you
+intentionally need the broader direct-mode surface:
 
 ```bash
 codex mcp add engram -- \

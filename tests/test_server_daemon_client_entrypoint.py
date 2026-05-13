@@ -9,6 +9,8 @@ import sys
 def test_thin_daemon_client_imports_without_storage_dependencies(monkeypatch):
     blocked = {"chromadb", "sentence_transformers", "torch", "lancedb", "kuzu"}
     real_import = builtins.__import__
+    loaded_before = {name.split(".", 1)[0] for name in sys.modules}
+    exact_before = set(sys.modules)
 
     def guarded_import(name, *args, **kwargs):
         if name.split(".", 1)[0] in blocked:
@@ -28,6 +30,11 @@ def test_thin_daemon_client_imports_without_storage_dependencies(monkeypatch):
 
     assert module.PRODUCT_NAME == "Engram"
     assert module._daemon_url() == "http://127.0.0.1:8765"
+    loaded_after = {name.split(".", 1)[0] for name in sys.modules}
+    exact_after = set(sys.modules)
+    assert (loaded_after - loaded_before).isdisjoint(blocked)
+    assert "core.memory_manager" not in (exact_after - exact_before)
+    assert "server" not in (exact_after - exact_before)
 
 
 def test_thin_daemon_client_search_delegates_to_daemon(monkeypatch):
