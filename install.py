@@ -74,7 +74,16 @@ def _codex_env_args(env: dict[str, str]) -> list[str]:
     return args
 
 
-def register_codex_mcp(python_path: Path, *, daemon_url: str | None = None):
+def _entrypoint_path(*, thin_daemon_client: bool = False) -> Path:
+    return PROJECT_ROOT / ("server_daemon_client.py" if thin_daemon_client else "server.py")
+
+
+def register_codex_mcp(
+    python_path: Path,
+    *,
+    daemon_url: str | None = None,
+    thin_daemon_client: bool = False,
+):
     """Register Engram with Codex when the CLI is available."""
     codex_path = shutil.which("codex")
     if not codex_path:
@@ -82,7 +91,7 @@ def register_codex_mcp(python_path: Path, *, daemon_url: str | None = None):
         return False
 
     server_name = "engram"
-    server_path = PROJECT_ROOT / "server.py"
+    server_path = _entrypoint_path(thin_daemon_client=thin_daemon_client)
     env = _mcp_env(daemon_url)
 
     # codex path is resolved locally and invoked with shell=False.
@@ -133,7 +142,7 @@ def register_codex_mcp(python_path: Path, *, daemon_url: str | None = None):
             print(f"         {stderr}")
         return False
 
-    mode = "daemon-client" if daemon_url else "direct"
+    mode = "thin daemon-client" if thin_daemon_client else ("daemon-client" if daemon_url else "direct")
     print(f"  [ok] Codex MCP server registered ({mode})")
     return True
 
@@ -221,12 +230,22 @@ def parse_args(argv: list[str] | None = None):
             f"(common local value: {DEFAULT_DAEMON_URL})"
         ),
     )
+    parser.add_argument(
+        "--thin-daemon-client",
+        action="store_true",
+        help=(
+            "Register Codex against server_daemon_client.py so Codex sessions "
+            "talk only to engramd and never import local storage/index modules."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None):
     args = parse_args(argv)
     daemon_url = _normalize_daemon_url(args.daemon_url)
+    if args.thin_daemon_client and daemon_url is None:
+        daemon_url = DEFAULT_DAEMON_URL
     print("Engram Setup Wizard\n")
 
     # ── Python version check ───────────────────────────────────────────────
@@ -297,13 +316,18 @@ def main(argv: list[str] | None = None):
 
     # ── Register MCP clients / emit config ─────────────────────────────────
     print("\n[7/7] Registering MCP clients...")
-    register_codex_mcp(python, daemon_url=daemon_url)
+    register_codex_mcp(
+        python,
+        daemon_url=daemon_url,
+        thin_daemon_client=args.thin_daemon_client,
+    )
+    entrypoint_path = _entrypoint_path(thin_daemon_client=args.thin_daemon_client)
 
     mcp_config = {
         "mcpServers": {
             "engram": {
                 "command": str(python),
-                "args": [str(PROJECT_ROOT / "server.py")],
+                "args": [str(entrypoint_path)],
                 "env": _mcp_env(daemon_url),
             }
         }
@@ -322,9 +346,11 @@ def main(argv: list[str] | None = None):
     print("   If the Codex CLI was installed, Engram was registered automatically.")
     if daemon_url:
         print(f"   Registered in daemon-client mode: ENGRAM_DAEMON_URL={daemon_url}")
+    if args.thin_daemon_client:
+        print(f"   Thin daemon-client entrypoint: {entrypoint_path}")
     print("   Manual fallback:")
     env_flags = " ".join(f"--env {key}={value}" for key, value in _mcp_env(daemon_url).items())
-    print(f"   codex mcp add engram {env_flags} -- \\\n     {python} \\\n     {PROJECT_ROOT / 'server.py'}\n")
+    print(f"   codex mcp add engram {env_flags} -- \\\n     {python} \\\n     {entrypoint_path}\n")
     print("2. Claude Code manual registration:")
     print(f"   claude mcp add engram --scope user \\\n     {python} \\\n     {PROJECT_ROOT / 'server.py'}\n")
     print("3. Start the web dashboard:")
