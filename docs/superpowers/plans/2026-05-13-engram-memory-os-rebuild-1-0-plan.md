@@ -14,17 +14,54 @@
 
 - The active spec is `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`.
 - Legacy local-core 1.0 docs are archived under `docs/archive/legacy-local-core-1-0/`.
+- Task 0 canonical scope cleanup was completed in commit `f73a040f` (`docs: make Memory OS rebuild canonical`).
 - The current live runtime still uses JSON memories and Chroma; this is a migration input, not the final rebuild runtime.
 - `server_daemon_client.py` is the safe multi-session MCP entrypoint, but rebuilt 1.0 still needs `engramd` to own SQLite, LanceDB, Kuzu, jobs, transactions, and source artifacts.
+- This session's lazy-loaded Engram MCP surface exposed tools but `memory_protocol()` returned `Transport closed`; closeout memory must use the daemon API if healthy, or a markdown fallback if not.
 - All durable writes must remain explicit and review-first.
+
+## Overnight Hardening Addendum
+
+This plan is being executed after a live repo scan on 2026-05-13. The repo
+already contains rebuild-adjacent foundations that must be promoted or wrapped
+rather than duplicated:
+
+- `core/memory_os_migration.py` already implements the proven migration kernel,
+  legacy JSON import/export/restore, graph-edge import, document-evidence
+  round trips, and CLI parity reports.
+- `core/vector_index.py` and `core/lancedb_vector_index.py` already define the
+  vector adapter contract and LanceDB candidate adapter.
+- `core/graph_store.py` and `core/kuzu_graph_store.py` already define the JSON
+  graph contract and optional Kuzu adapter.
+- `core/engramd_api.py`, `core/engramd_client.py`, `engramd.py`, and
+  `server_daemon_client.py` already provide the daemon/thin-client path for the
+  legacy runtime.
+- `core/document_intelligence.py`, `core/document_extractors.py`,
+  `core/document_artifacts.py`, and `core/document_quality.py` already provide
+  no-write document intelligence and visual-evidence review surfaces.
+
+Execution rules for the overnight pass:
+
+- Treat each task below as a target capability, not a command to create a
+  duplicate module if an existing module already owns part of the behavior.
+- Add `core/memory_os/` package modules as the stable rebuilt-runtime boundary,
+  but delegate to existing proven modules where that preserves behavior and
+  reduces migration risk.
+- Every production-code slice starts with a failing test, then minimal
+  implementation, then focused verification, then a commit.
+- For docs-only hardening, run `git diff --check` and a focused grep/doc sanity
+  check before committing.
+- If MCP Engram remains unavailable at closeout, append import-ready memories to
+  `docs/ENGRAM_MEMORY_FALLBACK_2026_05_13.md`; do not claim Engram persistence
+  unless the daemon API or MCP write succeeds.
 
 ## File Map
 
 - Create `core/memory_os/schema.py`: canonical schema constants, table names, lifecycle enums, truth types, and reference helpers.
-- Create `core/memory_os/ledger.py`: SQLite connection, migrations, repository functions, and transaction boundaries.
-- Create `core/memory_os/content_store.py`: content-addressed artifact storage and safe path handling.
-- Create `core/memory_os/legacy_import.py`: import current JSON memories and graph records into the ledger and content store.
-- Create `core/memory_os/bundles.py`: export/restore bundles and portable memory passport manifests.
+- Create `core/memory_os/ledger.py`: SQLite connection, migrations, repository functions, and transaction boundaries. Align with the existing migration ledger tables before widening.
+- Create `core/memory_os/content_store.py`: content-addressed artifact storage and safe path handling. Reuse the artifact/hash semantics already proven in `core/memory_os_migration.py`.
+- Create `core/memory_os/legacy_import.py`: stable rebuilt-runtime wrapper around current JSON memory and graph imports. Prefer delegating to `MemoryOSMigrationKernel` until the new ledger fully subsumes it.
+- Create `core/memory_os/bundles.py`: export/restore bundles and portable memory passport manifests. Preserve compatibility with `MemoryOSMigrationKernel.export_bundle()` / `restore_bundle()`.
 - Create `core/memory_os/entities.py`: entity, concept, alias, merge, and split workflows.
 - Create `core/memory_os/transactions.py`: dry-run, promote, rollback, receipts, idempotency, and partial failure records.
 - Create `core/memory_os/jobs.py`: daemon-owned durable job queue and progress events.
@@ -44,13 +81,15 @@
 
 ## Task 0: Canonical Scope Cleanup
 
+Status: completed in commit `f73a040f`.
+
 **Files:**
 - Modify: `plan.md`
 - Modify: `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - Create: `docs/archive/legacy-local-core-1-0/README.md`
 - Move: legacy `docs/ENGRAM_1_0_*.md` files into `docs/archive/legacy-local-core-1-0/`
 
-- [ ] **Step 1: Verify legacy docs are archived.**
+- [x] **Step 1: Verify legacy docs are archived.**
 
 Run:
 
@@ -60,7 +99,7 @@ Get-ChildItem docs\archive\legacy-local-core-1-0 -File | Select-Object -ExpandPr
 
 Expected: the archive contains the legacy local-core release spec, implementation plan, MCP contract, release checklist, migration notes, and track audit.
 
-- [ ] **Step 2: Verify active docs point at the rebuild spec.**
+- [x] **Step 2: Verify active docs point at the rebuild spec.**
 
 Run:
 
@@ -70,7 +109,7 @@ rg -n "ENGRAM_MEMORY_OS_REBUILD_SPEC|legacy-local-core-1-0|SQLite ledger|LanceDB
 
 Expected: `plan.md` names the rebuild spec as active and the archive README names it as the replacement.
 
-- [ ] **Step 3: Commit the cleanup.**
+- [x] **Step 3: Commit the cleanup.**
 
 Run:
 
