@@ -171,9 +171,12 @@ Status update, 2026-05-12: Engram 1.0 is the local agent-facing Memory OS core r
 
 Status update, 2026-05-13: Daemon-client startup is now daemon-first. When `ENGRAM_DAEMON_URL` points at loopback, MCP startup probes the daemon, autostarts `engramd.py` if needed, and skips local embedding/Chroma initialization in the adapter process. `engramd.py --doctor` and `engramd.py --stop-server-pid <pid...>` provide process hygiene without fuzzy kill-all behavior or Chroma lock-file deletion.
 
+Status update, 2026-05-13 backend eval: Track 7's first real-corpus checkpoint says to keep Chroma and JSON graph storage live. The migrated store has 5,882 vector source records and 675 migrated graph edges; deterministic rebuild passed. A real ignored-venv LanceDB spike rebuilt/search/upsert/delete-tested the corpus but failed fresh-adapter persistence because the adapter does not reload existing tables. A real Kuzu spike persisted and reopened 675 graph edges, but concurrent opens on Windows hit the expected database lock, so Kuzu only makes sense behind the daemon if graph volume later justifies it. Stack lightening should proceed through install profiles and a daemon-client thin entrypoint, not by removing Chroma/sentence-transformers from the full local runtime.
+
 Tracked planning docs:
 
 - `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence including mandatory OCR/vision coverage for visual artifacts, and optional hosted-edition direction.
+- `docs/ENGRAM_BACKEND_EVAL_2026_05_13.md` — backend decision checkpoint: live Chroma/JSON remain, LanceDB/Kuzu stay optional, and safe stack lightening moves through dependency profiles plus a daemon-client thin entrypoint.
 - `docs/superpowers/specs/2026-05-12-engram-1-0-memory-os-document-disassembly-design.md` — binding 1.0 Memory OS and book-scale document disassembly design, including the Book Dismantling Gate, steelman review, and post-steelman addendums.
 - `docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md` — current executable implementation plan for getting Engram to 1.0 under the Memory OS/document-disassembly direction.
 - `docs/ENGRAM_1_0_RELEASE_SPEC.md` — binding Engram 1.0 scope, invariants, release tracks, and validation gate.
@@ -197,7 +200,7 @@ Tracked planning docs:
 
 Post-1.0 tracks:
 
-- [ ] Track 7: run real-corpus backend decision gates for retrieval and graph storage. Keep Chroma/JSON live until LanceDB/Kuzu or alternatives pass Windows corpus spikes, migration, rebuild, and rollback gates.
+- [ ] Track 7: run real-corpus backend decision gates for retrieval and graph storage. First checkpoint complete: keep Chroma/JSON live, keep LanceDB/Kuzu optional, and pursue stack lightening through dependency profiles plus a daemon-client thin entrypoint before any backend promotion.
 - [ ] Track 9: expand WebUI operator surfaces for health, drafts, document imports, graph proposals, migration receipts, and evals without turning the dashboard into the collaboration app.
 - [ ] Hosted readiness: add tenant auth, object-level authorization, queue/job health, backup/restore, support-bundle redaction, and hosted deletion/export semantics before selling hosted Engram.
 
