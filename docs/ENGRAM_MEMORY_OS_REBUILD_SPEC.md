@@ -7,8 +7,8 @@ Scope: Public, generic, local-first, agent-facing persistent memory system
 
 ## Executive Summary
 
-Engram's 1.0 track should pause. The stronger product direction is a rebuild
-around a true agent-facing memory OS: a local daemon that preserves evidence,
+Engram's old local-core 1.0 track is archived. The active product direction is
+the rebuilt agent-facing Memory OS: a local daemon that preserves evidence,
 models trust, compiles task-specific context, tracks graph relationships, and
 migrates the current JSON memory store without loss.
 
@@ -443,10 +443,9 @@ Content store responsibilities:
 
 ### LanceDB Retrieval Index
 
-LanceDB is the recommended default retrieval index candidate. It should replace
-Chroma only after a spike proves Windows support, persistence, metadata
-filtering, full-text search, hybrid search, rebuild behavior, and multi-session
-daemon behavior against Engram's real corpus.
+LanceDB is the rebuilt Memory OS retrieval index under the daemon-owned
+runtime. Legacy Chroma remains a compatibility and rollback adapter for the old
+direct path, not the future runtime center of gravity.
 
 LanceDB responsibilities:
 
@@ -461,21 +460,21 @@ Chroma should remain as a legacy adapter during migration. Qdrant can be a
 future adapter for users who want a separate vector service. SQLite vector
 extensions should remain experimental until their stability story is stronger.
 
-Implementation status, 2026-05-13: Engram now has a no-write
-`retrieval_backend_status` MCP gate that reports legacy Chroma as the live
-index, LanceDB as an optional candidate, backend config intent,
-migrated-store vector source counts, deterministic rebuild-probe results, and
-a golden-comparison gate. This is not a backend switch. `LanceDBVectorIndex`
-now reloads existing tables, and the real optional-dependency rerun reopened
-and searched the migrated 5,882-record corpus successfully. LanceDB must still
-pass Chroma-vs-Lance golden query quality, daemon-owned backend switching, and
-recovery tests before it can replace Chroma in live retrieval.
+Implementation status, 2026-05-13: Engram has a no-write
+`retrieval_backend_status` MCP gate that reports legacy Chroma, daemon Memory
+OS LanceDB readiness, backend config intent, migrated-store vector source
+counts, deterministic rebuild-probe results, and golden-comparison status.
+`LanceDBVectorIndex` reloads existing tables, the optional-dependency rerun
+reopened and searched the migrated 5,882-record corpus successfully, and
+`engramd` stable memory routes now search rebuilt Memory OS chunks through the
+daemon runtime. Direct in-process legacy mode still uses JSON/Chroma
+compatibility.
 
 ### Kuzu Graph Store
 
-Kuzu is the recommended default graph database candidate. It is embedded,
-local-first, Python-friendly, supports a property graph model, supports Cypher,
-persists on disk, and has ACID transaction support.
+Kuzu is the rebuilt Memory OS graph database under the daemon-owned runtime. It
+is embedded, local-first, Python-friendly, supports a property graph model,
+supports Cypher, persists on disk, and has ACID transaction support.
 
 Kuzu responsibilities:
 
@@ -499,14 +498,14 @@ data science, visualization-heavy workflows, or shared deployments. Memgraph is
 interesting for real-time streaming graph workloads, but it should not be the
 default for a personal local-first memory OS.
 
-Implementation status, 2026-05-13: Engram now has a no-write
-`graph_backend_status` MCP gate that reports the JSON graph store as the live
-graph backend, Kuzu as an optional candidate, backend config intent, live JSON
-edge counts, migrated ledger graph-edge counts, and graph parity readiness.
-This is not a backend switch. Kuzu persists and reopens the migrated graph in a
-fresh process, but Windows concurrent-open locking confirms it should only run
-behind the single `engramd` owner. Cross-document/book concept links are now a
-first-class graph readiness concern through typed relationships such as
+Implementation status, 2026-05-13: Engram has a no-write
+`graph_backend_status` MCP gate that reports legacy JSON graph compatibility,
+daemon Memory OS Kuzu readiness, backend config intent, live JSON edge counts,
+migrated ledger graph-edge counts, and graph parity readiness. Kuzu persists
+and reopens the migrated graph in a fresh process, and Windows concurrent-open
+locking confirms it should only run behind the single `engramd` owner.
+Cross-document/book concept links are now a first-class graph readiness concern
+through typed relationships such as
 `same_as`, `similar_to`, `extends`, `refines`, `applies_to`, and `synthesizes`.
 
 ### Engram Daemon
@@ -534,9 +533,9 @@ First implementation slice, 2026-05-12:
   risk, writing, updating metadata, dry-running metadata repair, searching,
   reading, and deleting a temporary `_engramd_smoke_*` memory. Pair it with
   `ENGRAM_DATA_DIR` for disposable daemon smoke runs.
-- This slice does not switch live retrieval to LanceDB, switch graph storage to
-  Kuzu, add tenant authorization, or complete the full SQLite/content-addressed
-  Memory OS runtime.
+- At that point, the slice did not switch live retrieval to LanceDB, switch
+  graph storage to Kuzu, add tenant authorization, or complete the full
+  SQLite/content-addressed Memory OS runtime.
 
 Daemon-first hardening slice, 2026-05-13:
 
@@ -575,6 +574,21 @@ Thin client and backend-gate slice, 2026-05-13:
   experiments.
 - `ENGRAM_RETRIEVAL_BACKEND` and `ENGRAM_GRAPH_BACKEND` are intent-only config
   signals for readiness reports; they do not switch live backends.
+
+Memory OS stable-route slice, 2026-05-13:
+
+- Stable daemon memory operations now route through `MemoryOSRuntime` when the
+  daemon owns it: duplicate checks, store, search, chunk/full read, metadata
+  update, metadata repair, and delete.
+- Memory OS stores reviewed memories in the SQLite ledger plus
+  content-addressed artifacts, rebuilds LanceDB chunks from ledger records,
+  and records transaction receipts for content and metadata writes.
+- `engramd.py --smoke-test` now reports the storage backend used by the daemon
+  smoke cycle, so a green smoke can prove it exercised `memory_os` instead of
+  legacy manager storage.
+- Direct in-process MCP mode remains supported as the legacy compatibility
+  path. Backend config environment variables remain reporting intent, not an
+  implicit switch for legacy direct mode.
 
 ## Agent-Facing MCP Surface
 
@@ -1720,6 +1734,20 @@ Implementation checkpoint, 2026-05-11:
 - Remaining inspector work includes draft promotion/rejection ergonomics,
   migration receipts, graph relationship browsing, health/self-test display,
   and any visual polish needed after browser screenshot review.
+
+Implementation checkpoint, 2026-05-13:
+
+- The rebuilt daemon runtime initializes SQLite, the content-addressed source
+  store, LanceDB retrieval, Kuzu graph storage, jobs, transactions, snapshots,
+  firewall state, and read-only inspector records under `engramd`.
+- The WebUI Inspector now includes a Memory OS panel backed by
+  `/api/inspector/memory-os`, with daemon/client support through
+  `/v1/memory_os/inspector`.
+- The inspector surfaces migration/import counts, jobs, transactions, graph
+  edges, entities, concepts, firewall events, coverage maps, snapshots, and
+  skill packs without approving promotions or writing memory.
+- Release checklist and migration guide documents define the 1.0 validation
+  gate and operator path from legacy JSON/Chroma into the rebuilt Memory OS.
 
 ### Post-1.0: Hosted Readiness
 

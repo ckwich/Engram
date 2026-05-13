@@ -1,29 +1,39 @@
 # Engram — Persistent Semantic Memory for AI Agents
 
 ## Vision
-A local-first MCP memory server that gives AI agents (Claude Code, Claude chat) genuinely useful long-term memory through semantic search, chunked retrieval, and token-efficient access patterns. Built to complement structured project documents (plan.md, AGENTS.md) — not replace them.
+A local-first, agent-facing Memory OS that gives AI agents durable, searchable, source-grounded memory across sessions. Engram keeps context token-proportional, preserves evidence and graph relationships, and remains complementary to structured project documents such as `plan.md`, `AGENTS.md`, and specs.
 
 ## Core Philosophy
 - **Retrieve what's relevant, not everything.** Three-tier retrieval keeps token costs proportional to need.
 - **Semantic search that actually works.** Local embeddings via sentence-transformers, not substring matching.
-- **Human-readable backing store.** JSON files remain the source of truth; ChromaDB is the search index.
+- **Durable operational ledger.** Rebuilt 1.0 uses SQLite for metadata, receipts, transactions, jobs, entities, concepts, aliases, and migration state.
+- **Portable evidence store.** Raw, normalized, and extracted sources live in a content-addressed store so indexes and graphs can be rebuilt.
 - **Complementary to structured docs.** Engram is fast operational memory; AGENTS.md/plan.md are canonical governance.
 
 ## Architecture
 
 ### Stack
-- `sentence-transformers` — local embeddings (`all-MiniLM-L6-v2`, ~80MB, CPU-capable)
-- `ChromaDB` — persistent vector store, no server required
-- `FastMCP` — MCP server layer (stdio + SSE transport)
-- `Flask` — web dashboard
-- JSON flat files — human-readable memory backing store
+- `engramd` — daemon-owned local runtime for shared process ownership.
+- `SQLite` — Memory OS ledger.
+- Content-addressed object store — source artifacts and normalized evidence.
+- `sentence-transformers` — local embeddings (`all-MiniLM-L6-v2`, ~80MB, CPU-capable).
+- `LanceDB` — rebuilt local retrieval index.
+- `Kuzu` — rebuilt local graph store.
+- `FastMCP` — MCP server layer (stdio + SSE transport).
+- `Flask` — local Memory Inspector dashboard.
+- Legacy JSON + ChromaDB — migration/compatibility store that remains protected until all callers move to the rebuilt runtime.
 
 ### Storage Layout
 ```
 engram/
 ├── data/
-│   ├── memories/       # JSON flat files (one per memory, full content)
-│   └── chroma/         # ChromaDB persistent vector index
+│   ├── memory_os/
+│   │   ├── ledger.sqlite3
+│   │   ├── objects/
+│   │   ├── lance/
+│   │   └── kuzu/
+│   ├── memories/       # legacy JSON memories for compatibility/migration
+│   └── chroma/         # legacy ChromaDB vector index
 ├── core/
 │   ├── embedder.py     # sentence-transformers wrapper
 │   ├── chunker.py      # smart markdown-aware chunking
@@ -84,7 +94,7 @@ Agents should always start at tier 1 and escalate only when needed.
 - Split on markdown headers (`#`, `##`, `###`) first
 - Fall back to double-newline paragraph splits
 - Max chunk size: 800 chars (tunable)
-- Each chunk stored in ChromaDB with: `parent_key`, `chunk_id`, `chunk_index`, `title`, `tags`
+- Memory OS chunks are stored in the SQLite ledger and indexed in LanceDB with: `parent_key`, `chunk_id`, `chunk_index`, `title`, `tags`, project/domain/status metadata, and citation fields. Legacy direct mode still mirrors chunks into ChromaDB for compatibility.
 - Chunk IDs: `{md5(key)}_{chunk_index}` for stable referencing
 
 ## Milestones
@@ -201,20 +211,25 @@ Active tracked docs:
 
 Rebuild 1.0 phases:
 
-- [ ] Phase 0: baseline, archive legacy docs, freeze rebuild scope.
-- [ ] Phase 1: SQLite ledger, content-addressed source store, legacy JSON
+- [x] Phase 0: baseline, archive legacy docs, freeze rebuild scope.
+- [x] Phase 1: SQLite ledger, content-addressed source store, legacy JSON
       migration, snapshots, transactions, entities, concepts, local firewall
       tables, export/restore.
-- [ ] Phase 2: LanceDB retrieval, Chroma legacy adapter, full-text/hybrid
+- [x] Phase 2: LanceDB retrieval, Chroma legacy adapter, full-text/hybrid
       search, retrieval planner, golden eval packs.
-- [ ] Phase 3: Kuzu graph store, entity/concept graph, cross-book relationships,
+- [x] Phase 3: Kuzu graph store, entity/concept graph, cross-book relationships,
       contradiction/supersession, graph path and impact tools.
-- [ ] Phase 4: document intelligence, OCR/vision adapters, coverage maps,
+- [x] Phase 4: document intelligence, OCR/vision adapters, coverage maps,
       licensing metadata, draft analysis, promotion transactions.
-- [ ] Phase 5: agent workflows, context compiler, project capsules, design
+- [x] Phase 5: agent workflows, context compiler, project capsules, design
       knowledge compiler, skill-pack export, answer replay.
-- [ ] Phase 6: local Memory Inspector for migration, imports, drafts, graph,
+- [x] Phase 6: local Memory Inspector for migration, imports, drafts, graph,
       receipts, quality, jobs, firewall, snapshots, coverage, and skill packs.
+
+Release gate docs:
+
+- `docs/ENGRAM_MEMORY_OS_1_0_RELEASE_CHECKLIST.md`
+- `docs/ENGRAM_MEMORY_OS_1_0_MIGRATION_GUIDE.md`
 
 Post-1.0 is hosted work only: hosted sync, hosted tenant auth, billing, hosted
 MCP/API gateway, hosted collaboration bridge, hosted eval platform, marketplace,

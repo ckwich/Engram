@@ -4,7 +4,7 @@
 This file governs how AI agents (Codex, Claude Code, etc.) interact with the Engram codebase. Read this before making any changes.
 
 ## Project Overview
-Engram 1.0 is now the full local-first, agent-facing Memory OS rebuild exposed through MCP. The target stack is `engramd` owning a SQLite ledger, content-addressed source store, LanceDB retrieval, Kuzu graph storage, embeddings, jobs, transactions, snapshots, and repairs, with thin MCP clients as the normal multi-session agent entrypoint. The current JSON/Chroma runtime is legacy migration input and remains protected until the rebuilt store passes import/export/retrieval/graph parity gates.
+Engram 1.0 is now the full local-first, agent-facing Memory OS rebuild exposed through MCP. The target stack is `engramd` owning a SQLite ledger, content-addressed source store, LanceDB retrieval, Kuzu graph storage, embeddings, jobs, transactions, snapshots, and repairs, with thin MCP clients as the normal multi-session agent entrypoint. The current JSON/Chroma runtime is legacy compatibility and migration input; keep it recoverable while daemon-owned Memory OS services become the normal stable path.
 
 ## Required Reading Before Changes
 Always read `plan.md` and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifying core architecture. The active implementation plan is `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md`. Archived local-core 1.0 docs under `docs/archive/legacy-local-core-1-0/` are historical only and must not be treated as the current roadmap.
@@ -17,8 +17,9 @@ Always read `plan.md` and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifyi
 | `core/chunker.py` | Markdown-aware chunking | Returns `[{chunk_id, text}]` |
 | `core/memory_manager.py` | All storage logic | JSON + ChromaDB must stay in sync |
 | `core/graph_manager.py` | Typed relationship validation and traversal | Delegates persistence to graph_store; graph traversal returns IDs/evidence, not memory bodies |
-| `core/graph_store.py` | Swappable graph persistence backend | JSON is current default; preserve GraphStore contract for future graph DB migration |
-| `core/kuzu_graph_store.py` | Optional Kuzu-backed graph persistence adapter | Must preserve the GraphStore document contract; Kuzu remains optional until explicitly wired |
+| `core/graph_store.py` | Swappable graph persistence backend | Preserve GraphStore contract for legacy JSON and Memory OS Kuzu paths |
+| `core/kuzu_graph_store.py` | Kuzu-backed graph persistence adapter | Must preserve the GraphStore document contract; used by `core/memory_os/graph.py` under daemon-owned Memory OS runtime |
+| `core/memory_os/` | Rebuilt Memory OS runtime services | SQLite ledger, content store, LanceDB retrieval, Kuzu graph, jobs, transactions, snapshots, firewall, inspector, imports, bundles, and skill packs |
 | `core/backend_config.py` | Backend selection policy | Records operator intent only; defaults keep Chroma/JSON live and never promote candidates by itself |
 | `core/retrieval_backend_eval.py` | No-write retrieval backend comparison gates | Compares baseline and candidate VectorIndex adapters without touching live Chroma or memories |
 | `core/graph_backend_eval.py` | No-write graph parity and cross-document readiness gates | Reports edge contract health, cross-document concept links, and daemon-only Kuzu promotion requirements |
@@ -42,7 +43,7 @@ Always read `plan.md` and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifyi
 | `core/context_compiler.py` | No-write agent context packets | Static retrieval profiles plus packet assembly on top of context_pack; must not write or promote memory |
 | `server.py` | FastMCP tool definitions | Docstrings are agent-facing — keep them precise |
 | `server_daemon_client.py` | Thin daemon-client FastMCP entrypoint | Must not import `memory_manager`, ChromaDB, sentence-transformers, LanceDB, Kuzu, or document extractor modules |
-| `webui.py` | Flask dashboard | No business logic here, calls memory_manager only |
+| `webui.py` | Flask dashboard / local Memory Inspector | Keep mutation paths explicit and token-protected; Memory OS inspector routes are read-only and must not approve promotions |
 | `install.py` | Setup wizard | Must work on Windows and Linux/macOS |
 
 ## Critical Rules
@@ -103,12 +104,13 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 
 ## Engram 1.0 Memory OS Rules
 - Product identity is `Engram 1.0.0` / stability `stable`. MCP protocol identity remains `version: 2` and `schema_version: "2026-04-27"` until an explicit protocol migration is planned.
-- Local JSON memory files remain the authoritative store. ChromaDB remains a rebuildable live vector index. Migration dry runs and round-trip checks must not mutate active memories or ChromaDB.
-- `engramd` mode is opt-in through `ENGRAM_DAEMON_URL`. It routes stable memory operations, source draft lifecycle operations, metadata updates/repair/delete, and no-write document disassembly preparation through the daemon. Direct in-process MCP mode remains supported, but daemon-client registration with `ENGRAM_DATA_DIR` pinned to this checkout is the recommended Codex setup when multiple project sessions may use Engram concurrently. For ordinary multi-session Codex memory use, prefer `server_daemon_client.py` or `install.py --daemon-url http://127.0.0.1:8765 --thin-daemon-client`; that entrypoint never imports local storage/index modules and keeps sessions from becoming competing Chroma owners. Full `server.py` daemon-client mode remains available when agents need the broader beta tool surface.
-- Backend config is intent-only. `ENGRAM_RETRIEVAL_BACKEND=lancedb` and `ENGRAM_GRAPH_BACKEND=kuzu` may appear in readiness reports, but live retrieval remains Chroma and live graph storage remains JSON until migration, golden comparison, parity, persistence, and daemon ownership gates pass.
+- The rebuilt runtime is daemon-owned Memory OS: SQLite ledger, content-addressed source store, LanceDB retrieval, Kuzu graph, jobs, transactions, snapshots, firewall state, and inspector records. Legacy JSON memories and ChromaDB remain compatibility/migration inputs and must stay recoverable.
+- `engramd` mode is the recommended multi-session ownership model. It routes stable memory operations, source draft lifecycle operations, metadata updates/repair/delete, no-write document disassembly preparation, and Memory OS runtime inspection through the daemon. Direct in-process MCP mode remains supported, but daemon-client registration with `ENGRAM_DATA_DIR` pinned to this checkout is the recommended Codex setup when multiple project sessions may use Engram concurrently. For ordinary multi-session Codex memory use, prefer `server_daemon_client.py` or `install.py --daemon-url http://127.0.0.1:8765 --thin-daemon-client`; that entrypoint never imports local storage/index modules and keeps sessions from becoming competing Chroma owners. Full `server.py` daemon-client mode remains available when agents need the broader beta tool surface.
+- Legacy backend config remains intent/reporting for old direct paths. Do not silently switch legacy `memory_manager` search or legacy JSON graph traversal based only on `ENGRAM_RETRIEVAL_BACKEND` or `ENGRAM_GRAPH_BACKEND`; Memory OS LanceDB/Kuzu ownership belongs behind `engramd` and its explicit runtime services.
 - Use `python engramd.py --doctor` for process hygiene before assuming ChromaDB is broken. Stop stale MCP adapter processes only by explicit PID with `python engramd.py --stop-server-pid <pid...>`; do not delete lock files or kill fuzzy process matches.
 - Codebase mapping is agent-facing and provider-neutral. Engram prepares source-hashed context and drift receipts; the connected agent writes the synthesis. Do not add hardcoded model subprocesses to mapping.
 - Document intelligence is evidence-first. Local PDF disassembly, artifact manifests, quality reports, mandatory visual/OCR coverage requests, understanding packets, draft proposals, graph proposals, and promotion transactions are no-write review surfaces until explicit memory or graph promotion.
+- The local Memory Inspector is read-only for Memory OS state. It may surface jobs, transactions, graph edges, entities, concepts, firewall events, coverage maps, snapshots, and skill packs; it must not silently approve drafts, firewall events, graph proposals, or promotion transactions.
 - The Book Dismantling Gate in `server.py --agent-eval` is the minimum release proof for rich document-intelligence claims. Optional local PDF smoke tests may use `C:\Users\colek\Downloads\Design Books`, but never commit copyrighted PDFs, extracted book text, rendered page images, OCR output, or table exports.
 - Hosted auth, tenant isolation, billing, team collaboration, rich pages, comments, assignments, mentions, role-aware visibility, and team workflow UI remain outside Engram core unless a future spec changes the product boundary.
 
@@ -116,10 +118,11 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 Before marking any task done:
 1. `python server.py --help` runs without error
 2. `python -c "from core.memory_manager import memory_manager; print('ok')"` succeeds
-3. Store, search, retrieve, delete cycle works end-to-end through `python server.py --self-test`
-4. Agent-facing retrieval/source/document workflow gates pass through `python server.py --agent-eval`
-5. No new bare `print()` statements are introduced in `server.py` or `core/memory_manager.py` production paths
-6. If MCP registration or installer behavior changed, `codex mcp get engram` succeeds when the Codex CLI is available
+3. Daemon process health and store/search/read/delete smoke gates pass through `python engramd.py --doctor` and `python engramd.py --smoke-test`
+4. Direct store, search, retrieve, delete cycle works end-to-end through `python server.py --self-test` in an isolated `ENGRAM_DATA_DIR` when a live daemon owns the default store
+5. Agent-facing retrieval/source/document workflow gates pass through `python server.py --agent-eval` in an isolated `ENGRAM_DATA_DIR` when a live daemon owns the default store
+6. No new bare `print()` statements are introduced in `server.py` or `core/memory_manager.py` production paths
+7. If MCP registration or installer behavior changed, `codex mcp get engram` succeeds when the Codex CLI is available
 
 ## Development Environment
 - Python 3.10+

@@ -9,7 +9,7 @@
 
 Engram 1.0 is a local Model Context Protocol (MCP) server that gives AI agents a durable, searchable memory across sessions.
 
-It stores memories as plain JSON, indexes them with local embeddings, and exposes agent-friendly tools for search, bounded context retrieval, source intake, document disassembly, codebase mapping, relationship tracking, and retrieval-quality checks.
+The rebuilt 1.0 runtime uses a daemon-owned SQLite ledger, content-addressed source artifacts, LanceDB retrieval, and Kuzu graph storage. Legacy JSON memories and ChromaDB remain as compatibility and migration inputs until every caller is moved through the rebuilt runtime.
 
 Engram is built around one simple idea: agents should retrieve the smallest useful context first, then expand only when needed.
 
@@ -36,9 +36,11 @@ The result is a practical intersession memory layer for coding agents, research 
 
 ### Memory Server
 
-- **Local semantic search** using `sentence-transformers` and ChromaDB.
-- **Plain JSON source of truth** for memories, with ChromaDB as a rebuildable vector index.
-- **Daemon-first multi-session option** through `engramd` plus a thin MCP client entrypoint that avoids local storage/index imports.
+- **Daemon-owned Memory OS runtime** through `engramd`, with a thin MCP client entrypoint that avoids local storage/index imports.
+- **SQLite ledger** for metadata, jobs, transactions, snapshots, aliases, entities, concepts, receipts, and migration state.
+- **Content-addressed source store** for raw, normalized, and extracted evidence artifacts.
+- **LanceDB retrieval and Kuzu graph storage** inside the rebuilt local runtime.
+- **Legacy JSON/Chroma compatibility** kept readable and recoverable during migration.
 - **Markdown-aware chunking** that preserves headings and paragraph boundaries where possible.
 - **Deduplication checks** before writes, with explicit `force=True` override.
 - **Metadata filters** for project, domain, tags, lifecycle status, and canonical memories.
@@ -77,6 +79,7 @@ The result is a practical intersession memory layer for coding agents, research 
 - Browse, search, create, update, and delete memories.
 - Review stale memories and related memories.
 - Inspect usage estimates and retrieval eval status.
+- Inspect Memory OS runtime state, jobs, transactions, coverage maps, firewall events, graph edges, entities, concepts, snapshots, and skill packs.
 - Monitor disk usage and memory-store growth.
 - Run locally by default, with fail-closed token protection when exposed beyond loopback.
 
@@ -193,7 +196,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `list_ingestion_pipelines` | List available source-intake pipelines. |
 | `migration_dry_run` | Validate legacy JSON memories against the Memory OS ledger schema without writing. |
 | `memory_os_round_trip_check` | Run Memory OS import/export/restore parity checks in a migration work directory. |
-| `retrieval_backend_status` | Report legacy Chroma, optional LanceDB, backend config intent, migrated-store, rebuild-probe, and golden-comparison readiness without switching live retrieval. |
+| `retrieval_backend_status` | Report legacy Chroma, daemon Memory OS LanceDB readiness, backend config intent, migrated-store, rebuild-probe, and golden-comparison status without mutating data. |
 | `add_graph_edge` | Store a typed relationship between refs, including document structure and visual evidence refs. |
 | `list_graph_edges` | List graph edges around refs. |
 | `impact_scan` | Traverse graph relationships for impact analysis. |
@@ -265,9 +268,9 @@ Install profiles are split so ordinary agent sessions can stay thin:
 | Profile | File | Purpose |
 |---|---|---|
 | Thin daemon client | `requirements-daemon-client.txt` | FastMCP adapter that talks to `engramd` without importing ChromaDB or sentence-transformers. |
-| Full local core | `requirements-core.txt` | Full local daemon/direct runtime with sentence-transformers and ChromaDB. |
+| Full local core | `requirements-core.txt` | Full local daemon/direct runtime with sentence-transformers, ChromaDB compatibility, LanceDB, and Kuzu. |
 | Dashboard | `requirements-dashboard.txt` | Flask dashboard dependency. |
-| Backend spike | `requirements-backend-spike.txt` | Optional LanceDB/Kuzu evaluation dependencies; not required for normal use. |
+| Backend spike | `requirements-backend-spike.txt` | Compatibility profile that currently references the full core dependency set. |
 | Dev | `requirements-dev.txt` | Test and audit tooling. |
 
 ---
@@ -458,13 +461,11 @@ same daemon instead of competing for embedded Chroma ownership.
 Daemon mode currently routes stable memory search, duplicate checks, chunk/full
 reads, writes, source draft prepare/list/discard/promotion, no-write document
 disassembly preparation, metadata updates, metadata repair, and deletes through
-`engramd`.
-Direct in-process MCP mode remains supported unless `ENGRAM_DAEMON_URL` is
-set. This is not a LanceDB/Kuzu backend switch and does not add hosted tenant
-authorization.
-`ENGRAM_RETRIEVAL_BACKEND=lancedb` and `ENGRAM_GRAPH_BACKEND=kuzu` are
-readiness/config-intent signals only; Chroma and JSON remain live until golden
-retrieval, graph parity, persistence, daemon ownership, and recovery gates pass.
+`engramd`. The rebuilt Memory OS runtime also initializes SQLite, the
+content-addressed source store, LanceDB, Kuzu, jobs, transactions, snapshots,
+firewall state, and the local Memory OS inspector under the daemon owner.
+Direct in-process MCP mode remains supported unless `ENGRAM_DAEMON_URL` is set.
+Hosted tenant authorization is not part of local 1.0.
 
 ---
 
@@ -642,6 +643,7 @@ python -m core.memory_os_migration round-trip --legacy-dir data/memories --work-
 
 # Agent-facing migration checks are also available over MCP:
 # migration_dry_run, memory_os_round_trip_check, and retrieval_backend_status
+# verify the legacy import and rebuilt Memory OS stores.
 ```
 
 ---
@@ -657,7 +659,8 @@ Engram
 |-- engram_index.py        # Codebase mapping CLI
 |-- install.py             # Setup wizard
 |-- core/
-|   |-- memory_manager.py  # JSON + Chroma storage, search, metadata
+|   |-- memory_os/         # SQLite ledger, content store, LanceDB/Kuzu services
+|   |-- memory_manager.py  # legacy JSON + Chroma storage, search, metadata
 |   |-- embedder.py        # Local embedding model wrapper
 |   |-- chunker.py         # Markdown-aware chunking
 |   |-- source_intake.py   # Reviewable source drafts
@@ -675,8 +678,9 @@ Engram
 |   |-- operation_log.py   # Job and event receipts
 |   `-- reliability_harness.py
 |-- data/
-|   |-- memories/          # Plain JSON memories
-|   `-- chroma/            # Rebuildable vector index
+|   |-- memory_os/         # rebuilt ledger, objects, LanceDB, and Kuzu stores
+|   |-- memories/          # legacy plain JSON memories
+|   `-- chroma/            # legacy rebuildable vector index
 |-- templates/             # Dashboard templates
 |-- static/                # Dashboard assets
 |-- tests/                 # Pytest suite
@@ -691,16 +695,23 @@ Engram
 | `sentence-transformers` | Local semantic embeddings. |
 | `chromadb` | Persistent vector index. |
 | `flask` | Web dashboard. |
-| `lancedb` | Optional backend-spike retrieval candidate. |
-| `kuzu` | Optional backend-spike graph candidate. |
+| `lancedb` | Local Memory OS retrieval index. |
+| `kuzu` | Local Memory OS graph store. |
 
-See `requirements.txt` and the split profile files for exact version ranges and security floors. LanceDB and Kuzu are intentionally kept out of the normal install path.
+See `requirements.txt` and the split profile files for exact version ranges and security floors. The thin daemon-client profile remains small for ordinary MCP adapter processes.
 
 ---
 
 ## Storage Layout
 
-Memories are stored as plain JSON files under `data/memories/`.
+The rebuilt Memory OS stores operational state under `data/memory_os/`:
+
+- `ledger.sqlite3` for durable metadata, receipts, jobs, transactions, entities, concepts, aliases, graph-edge mirrors, snapshots, and eval/skill-pack records.
+- `objects/` for content-addressed source artifacts.
+- `lance/` for rebuildable retrieval indexes.
+- `kuzu/` for rebuildable graph storage.
+
+Legacy compatible memories are still stored as plain JSON files under `data/memories/`.
 
 Example:
 
@@ -755,6 +766,8 @@ Planning docs:
 
 - `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md`
+- `docs/ENGRAM_MEMORY_OS_1_0_RELEASE_CHECKLIST.md`
+- `docs/ENGRAM_MEMORY_OS_1_0_MIGRATION_GUIDE.md`
 - `docs/archive/legacy-local-core-1-0/README.md`
 - `docs/ENGRAM_HOSTED_SELLABLE_CHECKLIST.md`
 

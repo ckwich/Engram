@@ -15,8 +15,9 @@
 - The active spec is `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`.
 - Legacy local-core 1.0 docs are archived under `docs/archive/legacy-local-core-1-0/`.
 - Task 0 canonical scope cleanup was completed in commit `f73a040f` (`docs: make Memory OS rebuild canonical`).
-- The current live runtime still uses JSON memories and Chroma; this is a migration input, not the final rebuild runtime.
-- `server_daemon_client.py` is the safe multi-session MCP entrypoint, but rebuilt 1.0 still needs `engramd` to own SQLite, LanceDB, Kuzu, jobs, transactions, and source artifacts.
+- The direct legacy compatibility path still uses JSON memories and Chroma for memory CRUD/search, and must remain recoverable during migration.
+- The rebuilt runtime now exists under `core/memory_os/` and `engramd` owns SQLite, the content-addressed source store, LanceDB, Kuzu, jobs, transactions, snapshots, firewall state, stable memory operations, and read-only inspector records.
+- `server_daemon_client.py` is the safe multi-session MCP entrypoint for stable memory operations; Memory OS runtime status/inspector surfaces are daemon-backed.
 - This session's lazy-loaded Engram MCP surface exposed tools but `memory_protocol()` returned `Transport closed`; closeout memory must use the daemon API if healthy, or a markdown fallback if not.
 - All durable writes must remain explicit and review-first.
 
@@ -30,12 +31,12 @@ rather than duplicated:
   legacy JSON import/export/restore, graph-edge import, document-evidence
   round trips, and CLI parity reports.
 - `core/vector_index.py` and `core/lancedb_vector_index.py` already define the
-  vector adapter contract and LanceDB candidate adapter.
+  vector adapter contract and LanceDB adapter.
 - `core/graph_store.py` and `core/kuzu_graph_store.py` already define the JSON
-  graph contract and optional Kuzu adapter.
+  graph contract and Kuzu adapter.
 - `core/engramd_api.py`, `core/engramd_client.py`, `engramd.py`, and
-  `server_daemon_client.py` already provide the daemon/thin-client path for the
-  legacy runtime.
+  `server_daemon_client.py` provide the daemon/thin-client path for the rebuilt
+  runtime and the legacy compatibility runtime.
 - `core/document_intelligence.py`, `core/document_extractors.py`,
   `core/document_artifacts.py`, and `core/document_quality.py` already provide
   no-write document intelligence and visual-evidence review surfaces.
@@ -54,6 +55,19 @@ Execution rules for the overnight pass:
 - If MCP Engram remains unavailable at closeout, append import-ready memories to
   `docs/ENGRAM_MEMORY_FALLBACK_2026_05_13.md`; do not claim Engram persistence
   unless the daemon API or MCP write succeeds.
+
+## Execution Ledger
+
+- `4bf2af17` hardened this plan before implementation.
+- `70cb7173` through `1f66b858` implemented the Memory OS schema, ledger,
+  content store, import/passport wrappers, transactions, jobs, snapshots,
+  firewall, LanceDB retrieval, Kuzu graph, daemon runtime, document pipeline,
+  retrieval planner/eval packs, and design skill compiler.
+- `39fd6266` added read-only Memory OS inspector surfaces in core, daemon,
+  client, and WebUI layers.
+- `2a77efa8` routed daemon stable memory operations through Memory OS runtime,
+  added backend-proving daemon smoke output, and made metadata updates create
+  distinct transaction receipts.
 
 ## File Map
 
@@ -1029,6 +1043,10 @@ Run:
 .\venv\Scripts\python.exe server.py --help
 .\venv\Scripts\python.exe -c "from core.memory_manager import memory_manager; print('ok')"
 .\venv\Scripts\python.exe engramd.py --doctor
+.\venv\Scripts\python.exe engramd.py --smoke-test
+$env:ENGRAM_LIVE_DAEMON_SMOKE = "1"
+.\venv\Scripts\python.exe -m pytest tests\test_engramd_smoke.py::test_live_engramd_subprocess_smoke -q
+Remove-Item Env:\ENGRAM_LIVE_DAEMON_SMOKE
 .\venv\Scripts\python.exe server.py --agent-eval
 .\venv\Scripts\python.exe -m pytest -q
 git diff --check
