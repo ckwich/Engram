@@ -1,7 +1,8 @@
 # Engram Memory OS Rebuild Spec
 
-Status: Draft rebuild spec
+Status: Canonical Engram 1.0 rebuild spec
 Date: 2026-05-11
+Updated: 2026-05-13
 Scope: Public, generic, local-first, agent-facing persistent memory system
 
 ## Executive Summary
@@ -29,6 +30,29 @@ The rebuild is successful when an agent can ask:
 Engram should never merely remember text. It should preserve evidence, model
 trust, compile context, and help agents avoid confidently using the wrong
 memory.
+
+## Rebuild 1.0 Definition
+
+Engram 1.0 is the rebuilt local Memory OS. It includes the storage/runtime
+changes that make the new architecture real:
+
+- SQLite ledger as the durable operational metadata store.
+- Content-addressed source store for raw, normalized, and extracted evidence.
+- LanceDB as the live local retrieval index.
+- Kuzu as the live local graph store.
+- `engramd` as the single owner of SQLite, the source store, LanceDB, Kuzu,
+  embeddings, imports, repairs, transactions, and background jobs.
+- Thin MCP clients as the normal agent-facing entrypoint.
+- Document intelligence with mandatory visual/OCR evidence coverage where
+  visual material may carry meaning.
+- Cross-document and cross-book concept graphs.
+- Context compiler, project capsules, memory quality, contradiction handling,
+  transaction receipts, local inspector, and portable export/restore.
+
+Post-1.0 means hosted work only: sync, hosted tenant auth, billing, hosted
+MCP/API gateway, hosted collaboration bridge, and commercial packaging. Hosted
+design may be documented in this spec, but it does not reduce or replace the
+local rebuild 1.0 scope.
 
 ## Product Principles
 
@@ -89,6 +113,23 @@ The rebuild should model the memory lifecycle explicitly:
 
 ```text
 Source -> Document -> Section -> Chunk -> Draft -> Memory -> Graph Edge -> Retrieval Receipt
+```
+
+The full rebuild model also includes stable entities, aliases, concepts,
+transactions, snapshots, jobs, policy decisions, and skill-pack outputs:
+
+```text
+Source
+-> Document
+-> Section
+-> Chunk
+-> Draft
+-> Memory
+-> Entity/Concept
+-> Graph Edge
+-> Transaction
+-> Retrieval Receipt
+-> Snapshot / Export Bundle / Skill Pack
 ```
 
 ### Source
@@ -234,6 +275,100 @@ Required receipt properties:
 - stale/conflict warnings
 - timestamp
 
+### Entity
+
+A canonical object agents can refer to across memories, documents, projects,
+and graph paths. Entities normalize identity without erasing source language.
+
+Required entity properties:
+
+- entity id
+- canonical name
+- entity type
+- aliases
+- source labels
+- confidence
+- review state
+- created from refs
+- merge/split history
+- created and updated timestamps
+
+Initial entity types:
+
+- project
+- repo
+- product
+- person
+- organization
+- document
+- book
+- concept
+- design principle
+- UI pattern
+- tool
+- model/provider
+- source system
+
+### Concept
+
+A reusable idea, principle, pattern, heuristic, or anti-pattern extracted from
+sources. Concepts are the bridge between book/document intelligence and future
+agent skills.
+
+Required concept properties:
+
+- concept id
+- canonical label
+- aliases
+- definition
+- source-backed examples
+- counterexamples or anti-patterns
+- applicable domains
+- related entities
+- supporting refs
+- contradicting refs
+- review state
+- confidence
+- created and updated timestamps
+
+### Transaction
+
+A reviewable multi-step change set. Transactions are the safe way to promote
+document evidence, draft memories, graph suggestions, concept aliases, project
+capsule refreshes, and index updates as one operation.
+
+Required transaction properties:
+
+- transaction id
+- operation kind
+- idempotency key
+- proposed writes
+- affected refs
+- dry-run summary
+- promotion receipt
+- rollback plan
+- partial failure records
+- status
+- created by
+- created and updated timestamps
+
+### Snapshot
+
+A point-in-time view of memory, graph, retrieval, policy, and source-manifest
+state used for rollback, diffing, answer replay, and export verification.
+
+Required snapshot properties:
+
+- snapshot id
+- ledger revision
+- source manifest hash
+- LanceDB rebuild manifest
+- Kuzu rebuild manifest
+- policy manifest hash
+- export bundle hash if applicable
+- created by
+- created at
+
 ## Truth Model
 
 Every stored memory-like item should have a truth type. Agents must not treat
@@ -277,12 +412,19 @@ SQLite responsibilities:
 - chunks metadata
 - memories
 - drafts
+- entities
+- concepts
+- aliases and canonical mappings
+- transactions
+- snapshots
 - graph edge metadata mirror
 - retrieval receipts
 - jobs and operation logs
 - usage estimates
 - project capsules
-- aliases and canonical entity mappings
+- memory quality signals
+- policy decisions
+- skill-pack manifests
 - import/export manifests
 
 ### Content-Addressed Source Store
@@ -338,13 +480,17 @@ persists on disk, and has ACID transaction support.
 Kuzu responsibilities:
 
 - entities
+- concepts
 - decisions
 - claims
 - constraints
 - source relationships
+- document relationships
+- visual artifact relationships
 - memory relationships
 - contradiction paths
 - supersession chains
+- cross-document and cross-book synthesis paths
 - impact analysis
 - multi-hop graph queries
 
@@ -450,6 +596,8 @@ Context:
 - `show_conflicts_about`
 - `why_do_we_believe`
 - `what_changed_since`
+- `plan_retrieval`
+- `replay_context`
 
 Memory write workflow:
 
@@ -459,6 +607,9 @@ Memory write workflow:
 - `store_memory_transaction`
 - `update_memory_with_diff`
 - `supersede_memory`
+- `prepare_memory_transaction`
+- `promote_transaction`
+- `rollback_transaction`
 
 Document workflow:
 
@@ -468,6 +619,8 @@ Document workflow:
 - `prepare_document_analysis`
 - `store_document_draft`
 - `promote_document_draft`
+- `document_coverage_map`
+- `prepare_visual_extraction`
 
 Graph workflow:
 
@@ -477,6 +630,12 @@ Graph workflow:
 - `add_graph_edge`
 - `prepare_graph_suggestions`
 - `promote_graph_suggestions`
+- `resolve_entity`
+- `list_entity_aliases`
+- `merge_entities`
+- `split_entity`
+- `explain_concept`
+- `compare_concepts`
 
 Project workflow:
 
@@ -485,6 +644,7 @@ Project workflow:
 - `refresh_project_capsule`
 - `make_handoff`
 - `resume_project`
+- `export_skill_pack`
 
 Operations:
 
@@ -492,9 +652,16 @@ Operations:
 - `import_legacy_memories`
 - `export_bundle`
 - `restore_bundle`
+- `create_snapshot`
+- `diff_snapshots`
+- `list_jobs`
+- `read_job`
+- `cancel_job`
 - `audit_memory_quality`
 - `repair_memory_store`
 - `run_retrieval_eval`
+- `run_eval_pack`
+- `read_firewall_queue`
 
 ## Context Compiler
 
@@ -604,6 +771,157 @@ draft -> active -> superseded -> historical
 
 Agents should default to the current active memory while keeping access to the
 historical chain.
+
+Contradiction handling should also produce a review queue, not just warning
+metadata. The queue should let an agent or user choose one of these explicit
+outcomes:
+
+- accept both and mark the topic as contested
+- supersede the older memory
+- reject the new draft
+- split an overloaded entity or concept
+- merge duplicate entities or concepts
+- mark the claim as uncertain until more evidence is imported
+- ask the user for adjudication
+
+Every resolution should write a transaction receipt and graph edge updates
+rather than silently changing memory state.
+
+## Canonical Entity and Concept Registry
+
+The rebuild should include a first-class registry for canonical entities,
+concepts, aliases, and merges. This is required for design-book ingestion,
+codebase mapping, project capsules, and cross-project continuity.
+
+The registry should support:
+
+- alias lookup before retrieval and graph expansion
+- merge and split workflows with rollback
+- source-label preservation so original terminology remains visible
+- confidence and review state per alias
+- concept definitions grounded in source refs
+- related concept clusters
+- duplicate concept detection
+- entity-specific freshness and contradiction warnings
+
+Agents should be able to ask:
+
+- "What does this phrase refer to in this project?"
+- "Which documents use different names for the same idea?"
+- "Which design concepts are related across these books?"
+- "Which aliases are unreviewed or low confidence?"
+
+## Cross-Document Concept Graph
+
+The graph should be useful for synthesis, not merely navigation. Book and
+document imports should produce reviewed concept edges that connect related
+ideas across sources.
+
+Required cross-document edge types:
+
+- `same_as`
+- `similar_to`
+- `extends`
+- `refines`
+- `supports`
+- `contradicts`
+- `applies_to`
+- `example_of`
+- `anti_pattern_of`
+- `synthesizes`
+- `cites`
+- `illustrates`
+
+Cross-document edges must carry evidence refs to the relevant source document,
+page, section, chunk, visual artifact, table, or figure. Graph traversal should
+return paths, reasons, confidence, and evidence refs. It must not return full
+memory bodies unless the caller explicitly escalates through retrieval.
+
+## Design Knowledge Compiler
+
+The design-book corpus should become agent-usable craft knowledge. Engram
+should compile reviewed concepts and evidence into local design intelligence
+without pretending to be a full design app.
+
+The compiler should produce:
+
+- design principles
+- critique rubrics
+- frontend heuristics
+- UX checklists
+- visual hierarchy rules
+- interaction-pattern notes
+- accessibility and cognition notes
+- examples and counterexamples
+- anti-patterns
+- promptable review packs
+- MCP-served skill-pack candidates
+
+The compiler should preserve provenance from book/document/page/visual refs and
+should keep copyrighted source text out of generated skills unless the excerpt
+is intentionally short and compliant. The output should teach the agent how to
+design and critique interfaces from reviewed knowledge, not dump book text into
+context.
+
+## Retrieval Planner
+
+Agents should not have to decide manually whether to search vectors, full text,
+graph paths, project capsules, document evidence, or contradiction state.
+Engram should provide a retrieval planner that chooses a bounded strategy for a
+task.
+
+Planner inputs:
+
+- task or question
+- project/domain/tags
+- source/document scopes
+- budget
+- freshness policy
+- trust policy
+- graph expansion policy
+- citation requirement
+
+Planner outputs:
+
+- selected retrieval profile
+- vector/full-text/graph/capsule steps
+- omitted evidence counts
+- expected token budget
+- stale/conflict warnings
+- cited context packet
+- receipt explaining why this plan was chosen
+
+Planner behavior must remain inspectable. If the planner chooses graph
+expansion or full-memory escalation, the receipt must say why.
+
+## Prompt-Injection and Memory Firewall
+
+Prompt-injection protection belongs in local 1.0 because imported documents,
+web pages, PDFs, and transcripts can contain hostile or instruction-like text.
+The firewall should classify and quarantine risky source content before it
+becomes active memory or agent guidance.
+
+The local firewall should detect:
+
+- source text that instructs the agent to ignore system or user instructions
+- tool-use instructions embedded in imported documents
+- credential exfiltration requests
+- hidden or low-visibility text when extractors can detect it
+- suspicious URLs or commands
+- source claims that look like policy but lack authority
+
+Firewall outcomes:
+
+- allow as ordinary evidence
+- mark as untrusted evidence
+- quarantine from retrieval by default
+- redact before preview
+- require user review before promotion
+- allow citation as hostile-source evidence without treating it as guidance
+
+The firewall must never replace the host application's security model, but it
+should keep local Engram from accidentally teaching agents to obey imported
+instructions.
 
 ## Document Intelligence Intake
 
@@ -716,6 +1034,53 @@ visual candidates and a prepared OCR/vision request for low-text, no-text, or
 image-bearing pages, keeping visual/table analysis review-first instead of
 automatic. It is not yet the final materialized artifact writer.
 
+### Coverage Maps
+
+Every substantial source import should produce a coverage map. Coverage maps
+are the operator and agent answer to "what did we actually understand?"
+
+Coverage maps should report:
+
+- source files observed
+- pages/sections discovered
+- pages with extracted text
+- pages requiring OCR or visual interpretation
+- visuals interpreted
+- tables interpreted
+- figures interpreted
+- chunks produced
+- claims extracted
+- concepts extracted
+- graph proposals produced
+- memories proposed
+- low-confidence or failed regions
+- skipped regions and reasons
+- next recommended extraction actions
+
+Book-scale coverage maps should make it obvious whether an agent can safely use
+the imported book for synthesis. A book is not fully ingested until every
+content-bearing page, image, figure, table, and diagram is either interpreted or
+explicitly recorded as missing/low-confidence evidence.
+
+### Source Licensing and Quotation Metadata
+
+Document intelligence should preserve rights and quotation metadata so agents
+can use ideas responsibly.
+
+Recommended fields:
+
+- source owner or acquisition note when known
+- license or usage category when known
+- quote policy
+- maximum safe excerpt length
+- citation format
+- whether generated skill packs may include direct excerpts
+- whether only paraphrased concepts should be exported
+
+Engram should favor concept extraction, summaries, and short citations over
+large source reproduction. This is especially important for books imported from
+local personal libraries.
+
 ## Watchers
 
 Watchers should be review-first.
@@ -733,6 +1098,11 @@ Useful watcher targets:
 
 Watcher changes should produce review drafts and source-drift warnings, not
 automatic active memories.
+
+Watchers should write source observations and draft proposals into the job and
+transaction system. They must not directly mutate active memories, graph edges,
+or project capsules. Every watcher run should leave a receipt that explains
+what changed, what was skipped, and what needs review.
 
 ## Agent Session Recorder
 
@@ -754,6 +1124,11 @@ The session recorder should capture:
 It must not blindly store the entire transcript as active memory. The output is
 a draft handoff with evidence links.
 
+Session recordings should also support answer replay and behavior drift
+analysis. When a later memory change affects a golden question or agent answer,
+Engram should be able to show which memories, graph paths, and retrieval
+receipts changed.
+
 ## Memory Transactions
 
 Multi-step writes should be transactional at the Engram domain level.
@@ -772,6 +1147,72 @@ Transactions should support:
 - rollback
 - receipt
 - partial failure report
+- idempotency key
+- precondition checks
+- affected-ref list
+- snapshot-before and snapshot-after refs
+- retry-safe failure states
+
+Transactions should be the only path for operations that touch multiple durable
+subsystems. Examples include document promotion, graph suggestion promotion,
+entity merge/split, project capsule refresh, import/restore, and backend index
+rebuild.
+
+## Local Job Queue
+
+`engramd` should own a durable local job queue. Long operations must not depend
+on one MCP stdio request staying alive.
+
+Job types:
+
+- source import
+- document extraction
+- OCR/vision extraction
+- chunking
+- embedding
+- LanceDB rebuild
+- Kuzu rebuild
+- graph suggestion generation
+- transaction dry run
+- transaction promotion
+- export bundle creation
+- restore
+- eval run
+- repair/audit run
+
+Jobs should support:
+
+- queued/running/succeeded/failed/canceled states
+- pause and resume where practical
+- progress events
+- artifact refs
+- retry policy
+- cancellation requests
+- structured failure reports
+- operation receipts
+
+MCP tools should be able to start a job, inspect a job, stream or poll progress,
+and retrieve final receipts without re-running the job.
+
+## Temporal Memory, Snapshots, and Replay
+
+The rebuild should support point-in-time inspection. Agents should be able to
+ask what Engram believed at a previous snapshot, why an answer changed, and how
+to roll back a bad import.
+
+Capabilities:
+
+- memory, graph, policy, and index snapshot manifests
+- diff between snapshots
+- point-in-time context replay
+- answer provenance replay from retrieval receipts
+- rollback of promoted transactions
+- incident mode that freezes writes while preserving reads and receipts
+- branch-and-merge review for risky memory changes
+
+Snapshots should be lightweight manifests over the ledger, source store, LanceDB
+rebuild metadata, and Kuzu rebuild metadata. They do not need to copy every raw
+source byte each time.
 
 ## Identity Resolution
 
@@ -793,6 +1234,78 @@ Identity resolution should normalize:
 Original labels must be preserved. Canonical entities should not erase source
 language.
 
+Identity resolution should be tied to the canonical entity and concept
+registry. Agents should be warned when a retrieval result mixes aliases,
+uncertain merges, or low-confidence entity matches.
+
+## Golden Question Eval Packs
+
+Engram should support reusable eval packs. A project, document corpus, or book
+collection should be able to define golden questions and expected evidence
+coverage.
+
+For the design-book corpus, eval packs should prove that Engram can answer
+cross-book questions such as:
+
+- Which sources discuss visual hierarchy, and where?
+- Which principles about attention, memory, motivation, and layout reinforce
+  each other?
+- Which sources disagree or emphasize different constraints?
+- What checklist should an agent use before critiquing a UI?
+- Which figures/tables support a given design principle?
+
+Eval outputs should include:
+
+- retrieved chunk refs
+- graph paths used
+- missing expected sources
+- stale or low-confidence warnings
+- coverage score
+- regression history
+
+## Skill-Pack Export
+
+Reviewed craft memory should be exportable as skills or MCP-served skill packs.
+This is the path from "Engram knows design books" to "the agent can perform
+better frontend work."
+
+Skill-pack export should include:
+
+- source-backed instructions
+- critique rubrics
+- workflow recipes
+- checklists
+- examples and anti-patterns
+- citation refs back to Engram
+- version and snapshot metadata
+- quote-safety metadata
+- eval pack refs that prove the skill still retrieves its source evidence
+
+Skill packs must be generated from reviewed memories, concepts, and graph paths,
+not directly from raw source dumps.
+
+## Portable Memory Passport
+
+Engram should export a complete local bundle that can be restored elsewhere.
+The bundle should include:
+
+- SQLite ledger export
+- content-addressed source manifest
+- raw source artifact refs or included blobs according to export policy
+- normalized text/markdown artifacts
+- LanceDB rebuild manifest
+- Kuzu rebuild manifest
+- transaction log
+- snapshots
+- policy/firewall decisions
+- eval pack results
+- checksums
+- schema version manifest
+- restore instructions
+
+The passport should support local-only backup, machine migration, future hosted
+sync bootstrap, and account recovery without making hosted sync mandatory.
+
 ## Local Inspector
 
 The WebUI should become a local Memory Inspector, not a collaboration app.
@@ -811,6 +1324,13 @@ Inspector surfaces:
 - stale memory review
 - backend health
 - export/restore status
+- canonical entity and concept registry
+- prompt-injection quarantine
+- coverage maps
+- transaction receipts
+- job queue
+- snapshot diff/replay
+- skill-pack previews
 
 No team workspaces, comments, assignments, mentions, or role-aware visibility
 belong in local Engram core.
@@ -1055,6 +1575,9 @@ migration, local-first operation, and agent-facing control.
 - Preserve original JSON records as immutable imported artifacts.
 - Export a portable bundle from the new store.
 - Restore that bundle into a clean store.
+- Add snapshot and transaction tables needed before any multi-store promotion.
+- Add canonical entity, alias, and concept tables.
+- Add local firewall policy and quarantine tables.
 
 Acceptance gates:
 
@@ -1063,6 +1586,8 @@ Acceptance gates:
 - `related_to` survives.
 - chunk counts are preserved or differences are explained.
 - old JSON can be restored from imported artifacts.
+- entity and alias imports are deterministic.
+- snapshot manifests can be created for the imported store.
 
 ### Phase 2: Retrieval Index
 
@@ -1072,6 +1597,9 @@ Acceptance gates:
 - Rebuild LanceDB from the SQLite/content store.
 - Compare search quality against current Chroma on golden queries.
 - Add full-text and hybrid search tests.
+- Add retrieval planner receipts for vector, full-text, graph, and capsule
+  strategy choices.
+- Add golden question eval packs for migrated memories and design-book imports.
 
 Acceptance gates:
 
@@ -1080,6 +1608,8 @@ Acceptance gates:
 - hybrid search works.
 - rebuild from durable store works.
 - daemon-owned backend avoids multi-stdio ownership failure.
+- retrieval planner explains why each backend path was used.
+- golden question regressions identify missing expected evidence.
 
 ### Phase 3: Graph Store
 
@@ -1088,6 +1618,10 @@ Acceptance gates:
 - Import existing graph edges and `related_to` links.
 - Add entity, claim, decision, source, memory, and document nodes.
 - Add graph path and impact-scan tools.
+- Add concept nodes, alias nodes, visual artifact nodes, and table/figure nodes.
+- Add cross-document and cross-book synthesis edge types.
+- Add entity merge/split transactions.
+- Add contradiction resolution queue.
 
 Acceptance gates:
 
@@ -1095,6 +1629,8 @@ Acceptance gates:
 - graph traversal does not load surprise memory bodies.
 - impact scans return refs and evidence.
 - contradiction and supersession edge types are test-covered.
+- cross-book concept paths return evidence refs and confidence.
+- entity merge/split actions are rollbackable through transactions.
 
 ### Phase 4: Document Intelligence
 
@@ -1107,6 +1643,10 @@ Acceptance gates:
 - Add section and chunk provenance.
 - Add draft analysis packets.
 - Add explicit promotion transactions.
+- Add coverage maps for pages, sections, visuals, tables, concepts, graph
+  proposals, memories, failures, and skipped regions.
+- Add source licensing and quotation metadata.
+- Add prompt-injection firewall classification for imported source material.
 
 Acceptance gates:
 
@@ -1117,6 +1657,9 @@ Acceptance gates:
 - promoted claims from visual extraction retain links to the originating image
   artifact and extractor receipt.
 - drafts do not become active memories automatically.
+- coverage maps prove every content-bearing page/visual is interpreted or
+  explicitly marked missing/low-confidence.
+- hostile imported instructions are quarantined from guidance retrieval.
 
 ### Phase 5: Agent Workflows
 
@@ -1126,6 +1669,10 @@ Acceptance gates:
 - Add contradiction checks.
 - Add memory quality audit.
 - Add retrieval profiles.
+- Add design knowledge compiler for reviewed book/design concepts.
+- Add skill-pack export from reviewed concepts, craft memories, graph paths,
+  and eval-backed checklists.
+- Add answer replay and snapshot diff workflows.
 
 Acceptance gates:
 
@@ -1133,6 +1680,8 @@ Acceptance gates:
 - `make_handoff` produces actionable resume packets.
 - stale/conflicting memories are warned about.
 - evals prove current/reviewed/source-backed memories are preferred.
+- exported skill packs retain Engram citation refs and quote-safety metadata.
+- replay explains why answers changed across snapshots.
 
 Implementation checkpoint, 2026-05-11:
 
@@ -1150,12 +1699,17 @@ Implementation checkpoint, 2026-05-11:
 - Rebuild WebUI as Memory Inspector.
 - Add migration, source, draft, graph, receipt, and quality review surfaces.
 - Preserve loopback-first security.
+- Add job queue, transaction, coverage map, firewall quarantine, entity/concept,
+  snapshot diff, replay, and skill-pack preview surfaces.
 
 Acceptance gates:
 
 - inspector never bypasses review-first promotion.
 - exposed-host security remains fail-closed.
 - no hosted collaboration features leak into local core.
+- inspector can prove import coverage and review state before promotion.
+- inspector can inspect but not silently approve firewall or contradiction
+  queue items.
 
 Implementation checkpoint, 2026-05-11:
 
@@ -1167,7 +1721,7 @@ Implementation checkpoint, 2026-05-11:
   migration receipts, graph relationship browsing, health/self-test display,
   and any visual polish needed after browser screenshot review.
 
-### Phase 7: Hosted Readiness
+### Post-1.0: Hosted Readiness
 
 - Define hosted architecture separately.
 - Add tenant isolation design.

@@ -162,12 +162,19 @@ def test_readme_mcp_tool_table_covers_protocol_tools():
 
 def test_mcp_contract_doc_covers_server_tools():
     server_source = (REPO_ROOT / "server.py").read_text(encoding="utf-8")
-    contract_doc = (REPO_ROOT / "docs" / "ENGRAM_1_0_MCP_CONTRACT.md").read_text(
-        encoding="utf-8"
+    active_contract_docs = "\n".join(
+        (REPO_ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            "README.md",
+            "AGENTS.md",
+            "plan.md",
+            "docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md",
+            "docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md",
+        )
     )
     decorated_tools = set(re.findall(r"@mcp\.tool\(\)\s+async def ([a-zA-Z_][a-zA-Z0-9_]*)\(", server_source))
 
-    missing = sorted(tool for tool in decorated_tools if f"`{tool}`" not in contract_doc)
+    missing = sorted(tool for tool in decorated_tools if f"`{tool}`" not in active_contract_docs)
 
     assert missing == []
 

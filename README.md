@@ -736,27 +736,27 @@ python server.py --rebuild-index
 ## Design Principles
 
 - **Local first.** Memory content stays on your machine unless you expose or export it.
-- **JSON first, vector second.** JSON is the durable source of truth; ChromaDB is rebuildable.
+- **Memory OS first.** Rebuild 1.0 uses a SQLite ledger, content-addressed source store, LanceDB retrieval, Kuzu graph storage, and daemon-owned runtime.
+- **Evidence before memory.** Raw and extracted sources become evidence and drafts before reviewed durable memory.
 - **Token proportional.** Agents should load the smallest useful context first.
 - **Human review for noisy intake.** Large source inputs become drafts before promotion.
 - **Provider neutral.** The MCP server and codebase mapper do not require a specific model provider.
-- **Migration ready.** Graph persistence is behind a narrow store interface for future backends.
+- **Portable by default.** Indexes and graphs must rebuild from the durable ledger and content-addressed artifacts.
 
 ---
 
 ## Roadmap
 
-Engram 1.0 is the public, generic, local-first Memory OS core: MCP contracts, JSON-first storage, source intake, document evidence, graph relationships, retrieval receipts, codebase mapping, opt-in daemon routing, migration checks, and reliability gates.
+Engram 1.0 is the public, generic, local-first Memory OS rebuild: SQLite ledger, content-addressed source storage, LanceDB retrieval, Kuzu graph reasoning, daemon-owned operations, source/document evidence, visual/OCR coverage, retrieval receipts, graph relationships, transactions, snapshots, project capsules, skill-pack export, portable memory passport, and local Memory Inspector.
 
-The team collaboration product is planned separately. Engram will provide the memory substrate and adapter contracts; workspaces, rich pages, comments, assignments, mentions, role-aware visibility, and team workflow UI belong outside this repository.
+Post-1.0 work is hosted/commercial packaging: hosted sync, tenant auth, billing, hosted MCP/API gateway, hosted collaboration bridge, marketplace, and support operations. Local 1.0 should not be watered down into readiness gates around the legacy JSON/Chroma runtime.
 
 Planning docs:
 
-- `docs/ENGRAM_1_0_RELEASE_SPEC.md`
-- `docs/ENGRAM_1_0_MIGRATION_NOTES.md`
-- `docs/ENGRAM_1_0_RELEASE_CHECKLIST.md`
 - `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
-- `docs/COLLABORATION_PRODUCT_PRD.md`
+- `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md`
+- `docs/archive/legacy-local-core-1-0/README.md`
+- `docs/ENGRAM_HOSTED_SELLABLE_CHECKLIST.md`
 
 ---
 

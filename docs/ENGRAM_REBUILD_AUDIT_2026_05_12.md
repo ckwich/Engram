@@ -5,6 +5,11 @@ Scope: `C:\Dev\Engram`, public Engram core, local Memory OS migration store,
 agent-facing MCP/tool contracts, storage/retrieval/graph/document-intelligence
 readiness, and hosted/sellable readiness.
 
+Note: this audit predates the 2026-05-13 decision that the Memory OS rebuild
+is the active Engram 1.0 target. Treat its "local-core" language as historical
+audit wording, not as the current product boundary. The active target is
+`docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`.
+
 ## Bottom Line
 
 The repo is in a strong local-core state: tests pass, Chroma has been rebuilt

@@ -15,9 +15,12 @@ This document fills that gap. It is not an implementation plan. It is the bounda
 
 Follow-on planning docs:
 
-- `docs/ENGRAM_1_0_RELEASE_SPEC.md`
-- `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md`
+- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - `docs/COLLABORATION_PRODUCT_PRD.md`
+
+The older local-core Engram 1.0 docs have been archived under
+`docs/archive/legacy-local-core-1-0/` and should not be used as the active
+Engram roadmap.
 
 ## Product Boundary Decision
 

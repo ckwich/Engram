@@ -163,58 +163,76 @@ Agents should always start at tier 1 and escalate only when needed.
 - [x] Add MCP/WebUI retrieval eval surfaces backed by the deterministic reliability harness.
 - [x] Add static workflow templates for common agent flows such as repo resume, source decision extraction, brownfield mapping, and retrieval quality review.
 
-## Engram 1.0 — Finish Line
+## Engram 1.0 — Memory OS Rebuild
 
-Engram 1.0 is the public, generic, local-first memory substrate release. The separate collaboration product should build on Engram through stable adapters, not inside this repository.
+Engram 1.0 is now the full local Memory OS rebuild described in
+`docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`. Older local-core 1.0 release docs have
+been archived under `docs/archive/legacy-local-core-1-0/` so future work does
+not confuse "readiness gates around Chroma/JSON" with the new product target.
 
-Status update, 2026-05-12: Engram 1.0 is the local agent-facing Memory OS core release. The release preserves the current JSON-first / Chroma-second runtime while adding migration dry runs, backend readiness reports, codebase mapping modernization, opt-in daemon routing, document disassembly, mandatory visual/OCR coverage contracts, document understanding packets with auto graph coverage proposals, and reliability gates. Hosted operation, tenant auth, live backend switching, and the collaboration product remain post-1.0 work.
+The active 1.0 rebuild includes:
 
-Status update, 2026-05-13: Daemon-client startup is now daemon-first. When `ENGRAM_DAEMON_URL` points at loopback, MCP startup probes the daemon, autostarts `engramd.py` if needed, and skips local embedding/Chroma initialization in the adapter process. `engramd.py --doctor` and `engramd.py --stop-server-pid <pid...>` provide process hygiene without fuzzy kill-all behavior or Chroma lock-file deletion.
+- SQLite ledger for durable metadata, migrations, jobs, receipts, aliases,
+  transactions, snapshots, entities, and concepts.
+- Content-addressed source store for raw, normalized, and extracted evidence.
+- LanceDB as the live local retrieval index.
+- Kuzu as the live local graph store.
+- `engramd` as the single owner of SQLite, source store writes, LanceDB, Kuzu,
+  embedding jobs, migrations, repairs, transactions, and background jobs.
+- Thin MCP clients as the normal agent-facing entrypoint.
+- Evidence-first document intelligence with mandatory visual/OCR coverage when
+  visual material may carry meaning.
+- Cross-document and cross-book concept graphing for design books and other
+  source corpora.
+- Retrieval planner, context compiler, project capsules, contradiction queue,
+  local prompt-injection firewall, memory transactions, snapshots, golden eval
+  packs, skill-pack export, portable memory passport, and local Memory
+  Inspector.
 
-Status update, 2026-05-13 backend eval: Track 7's first real-corpus checkpoint says to keep Chroma and JSON graph storage live. The migrated store has 5,882 vector source records and 675 migrated graph edges; deterministic rebuild passed. The first real ignored-venv LanceDB spike rebuilt/search/upsert/delete-tested the corpus but failed fresh-adapter persistence because the adapter did not reload existing tables. Follow-up work added `server_daemon_client.py`, install/runtime profiles, intent-only backend config, LanceDB table reopening, a no-write retrieval comparison gate, Kuzu/JSON graph parity reporting, and cross-document graph relationship readiness. The rerun LanceDB spike now reopens and searches the persisted table successfully, and Kuzu graph parity still passes in fresh-process reopen mode; live backend promotion remains blocked until golden Chroma-vs-Lance query quality and daemon-owned backend switching are proven.
+Active tracked docs:
 
-Tracked planning docs:
+- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — canonical rebuild spec.
+- `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md` —
+  active implementation plan.
+- `docs/ENGRAM_BACKEND_EVAL_2026_05_13.md` — prior backend evidence used by the
+  rebuild, not the final target.
+- `docs/ENGRAM_HOSTED_SELLABLE_CHECKLIST.md` — post-1.0 hosted/commercial
+  checklist.
 
-- `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence including mandatory OCR/vision coverage for visual artifacts, and optional hosted-edition direction.
-- `docs/ENGRAM_BACKEND_EVAL_2026_05_13.md` — backend decision checkpoint: live Chroma/JSON remain, LanceDB/Kuzu stay optional, safe stack lightening moves through dependency profiles plus a daemon-client thin entrypoint, and candidate promotion requires golden retrieval/graph parity gates.
-- `docs/superpowers/specs/2026-05-12-engram-1-0-memory-os-document-disassembly-design.md` — binding 1.0 Memory OS and book-scale document disassembly design, including the Book Dismantling Gate, steelman review, and post-steelman addendums.
-- `docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md` — current executable implementation plan for getting Engram to 1.0 under the Memory OS/document-disassembly direction.
-- `docs/ENGRAM_1_0_RELEASE_SPEC.md` — binding Engram 1.0 scope, invariants, release tracks, and validation gate.
-- `docs/ENGRAM_1_0_IMPLEMENTATION_PLAN.md` — legacy finish-line history superseded by the Memory OS/document-disassembly implementation plan above.
-- `docs/ENGRAM_1_0_TRACK_0_AUDIT.md` — repo/branch hygiene audit and evidence.
-- `docs/ENGRAM_HOSTED_SELLABLE_CHECKLIST.md` — optional hosted/self-hosted readiness and commercial packaging checklist for Engram without weakening local-first core boundaries.
-- `docs/POST_1_COLLABORATION_PRODUCT_HANDOFF.md` — boundary handoff for the separate collaboration product.
-- `docs/COLLABORATION_PRODUCT_PRD.md` — draft PRD for that separate product.
+Rebuild 1.0 phases:
 
-1.0 release tracks:
+- [ ] Phase 0: baseline, archive legacy docs, freeze rebuild scope.
+- [ ] Phase 1: SQLite ledger, content-addressed source store, legacy JSON
+      migration, snapshots, transactions, entities, concepts, local firewall
+      tables, export/restore.
+- [ ] Phase 2: LanceDB retrieval, Chroma legacy adapter, full-text/hybrid
+      search, retrieval planner, golden eval packs.
+- [ ] Phase 3: Kuzu graph store, entity/concept graph, cross-book relationships,
+      contradiction/supersession, graph path and impact tools.
+- [ ] Phase 4: document intelligence, OCR/vision adapters, coverage maps,
+      licensing metadata, draft analysis, promotion transactions.
+- [ ] Phase 5: agent workflows, context compiler, project capsules, design
+      knowledge compiler, skill-pack export, answer replay.
+- [ ] Phase 6: local Memory Inspector for migration, imports, drafts, graph,
+      receipts, quality, jobs, firewall, snapshots, coverage, and skill packs.
 
-- [x] Track 0: repo and branch hygiene audit; local `main` has been fast-forwarded to the planning/audit branch.
-- [x] Track 1: freeze MCP/tool/data contracts, version identity, docstrings, README tables, and alias behavior.
-- [x] Track 2: prove storage rebuild, import/export, backup/repair, JSON-first/Chroma-second ordering, migration round trip, and graph audit readiness.
-- [x] Track 3: harden source intake, lifecycle metadata, stale exclusion, explicit draft promotion, and daemon-routed source draft lifecycle.
-- [x] Track 4: modernize codebase mapping for the Memory OS runtime, including current daemon/document/migration/backend domains and data-root-aware mapping jobs.
-- [x] Track 5: implement book-scale document disassembly for the local core: PDF page/text/image inventory, quality reports, mandatory visual/OCR coverage requests, artifact manifests, chunk provenance, no-write understanding packets, auto document graph coverage proposals, and review-first promotion plans.
-- [x] Track 6: add opt-in daemon ownership for stable memory operations, source draft lifecycle operations, metadata updates/repair/delete, and no-write document disassembly preparation. Direct in-process mode remains supported; mapping jobs, import/export, rebuild, and live backend switching stay direct or operator-gated until a future durable job store.
-- [x] Track 8: expand release reliability coverage for source intake, workflow packets, retrieval receipts, document disassembly, mandatory visual evidence coverage, graph coverage proposals, and the Book Dismantling Gate.
-- [x] Track 10: publish release docs, checklist, migration notes, AGENTS.md updates, public README 1.0 framing, and the Book Dismantling Gate results.
-
-Post-1.0 tracks:
-
-- [ ] Track 7: run real-corpus backend decision gates for retrieval and graph storage. Current checkpoint: dependency profiles and thin daemon-client entrypoint are implemented; LanceDB table reopen is fixed and rerun against the migrated corpus; Kuzu graph parity passes behind the daemon-only assumption. Keep Chroma/JSON live until golden retrieval quality, daemon-owned backend switching, and recovery tests pass.
-- [ ] Track 9: expand WebUI operator surfaces for health, drafts, document imports, graph proposals, migration receipts, and evals without turning the dashboard into the collaboration app.
-- [ ] Hosted readiness: add tenant auth, object-level authorization, queue/job health, backup/restore, support-bundle redaction, and hosted deletion/export semantics before selling hosted Engram.
-
-1.0 does not include multi-user workspaces, permissions, comments, assignments, mentions, or rich collaboration pages. Those belong to the separate collaboration product.
+Post-1.0 is hosted work only: hosted sync, hosted tenant auth, billing, hosted
+MCP/API gateway, hosted collaboration bridge, hosted eval platform, marketplace,
+and commercial packaging.
 
 ## Key Decisions
-- **ChromaDB over SQLite FTS:** Real cosine similarity, not substring matching
-- **JSON-first / Chroma-second storage:** JSON files are authoritative and portable; ChromaDB is a rebuildable semantic index.
-- **Graph backend seam before graph DB:** Keep JSON graph edges local-first now, but isolate persistence behind GraphStore so a future graph database can import the same edge contract.
-- **Backend config is intent-only:** `ENGRAM_RETRIEVAL_BACKEND` and `ENGRAM_GRAPH_BACKEND` can request candidate readiness reporting, but they do not switch live storage without explicit promotion work and passing gates.
+- **SQLite ledger for rebuilt 1.0:** SQLite becomes the durable operational ledger for metadata, jobs, receipts, entities, concepts, transactions, snapshots, aliases, and import/export manifests.
+- **Content-addressed source store:** Raw and normalized evidence lives outside the ledger in portable content-addressed artifacts.
+- **LanceDB for rebuilt retrieval:** LanceDB is the target live retrieval index for rebuilt 1.0, with Chroma retained only as a legacy migration/rollback adapter.
+- **Kuzu for rebuilt graph:** Kuzu is the target live graph store for rebuilt 1.0, with JSON graph records imported as migration evidence.
+- **Daemon ownership:** `engramd` owns SQLite, source store writes, LanceDB, Kuzu, embeddings, jobs, repairs, migrations, and transactions; MCP stdio servers are thin clients.
 - **Local embeddings only:** No API cost, no privacy exposure, works offline
 - **No automatic memory writes from agents:** Agents must explicitly call `store_memory`. No surprise writes.
 - **Review helpers stay no-write:** Chunk preview, source connector preview, workflow templates, and pipeline listing must never promote active memories.
-- **Hybrid retrieval is opt-in:** Exact lexical/identifier scoring is useful for code and game-dev symbols, but semantic mode remains the default to avoid unnecessary ranking drift.
+- **Retrieval planner over manual mode-picking:** Agents should get an inspectable retrieval plan that chooses vector, full-text, graph, capsule, document evidence, and contradiction checks within budget.
 - **Token-proportional retrieval:** Agents should prefer search snippets, chunks, and context packs before full memory reads.
 - **Provider-neutral synthesis:** Codebase mapping prepares bounded context and source receipts; the connected agent performs synthesis.
 - **Review-first document intelligence:** Document imports, including OCR/vision extraction for image-bearing sources, create evidence and drafts before any active memory promotion.
+- **Prompt-injection firewall:** Imported source instructions are evidence, not guidance, unless reviewed and promoted through trusted workflows.
+- **Cross-document graph reasoning:** Books, documents, figures, tables, concepts, claims, and memories must connect through evidence-bearing graph edges.
+- **Post-1.0 equals hosted:** Hosted sync, tenant auth, billing, hosted collaboration bridge, and hosted MCP/API gateway do not define local rebuild 1.0.

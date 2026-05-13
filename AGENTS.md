@@ -4,10 +4,10 @@
 This file governs how AI agents (Codex, Claude Code, etc.) interact with the Engram codebase. Read this before making any changes.
 
 ## Project Overview
-Engram 1.0 is a local-first, agent-facing Memory OS exposed through MCP. Core stack: sentence-transformers + ChromaDB + FastMCP + Flask, with an opt-in loopback `engramd` daemon for shared local ownership.
+Engram 1.0 is now the full local-first, agent-facing Memory OS rebuild exposed through MCP. The target stack is `engramd` owning a SQLite ledger, content-addressed source store, LanceDB retrieval, Kuzu graph storage, embeddings, jobs, transactions, snapshots, and repairs, with thin MCP clients as the normal multi-session agent entrypoint. The current JSON/Chroma runtime is legacy migration input and remains protected until the rebuilt store passes import/export/retrieval/graph parity gates.
 
 ## Required Reading Before Changes
-Always read `plan.md` before modifying core architecture. The three-tier retrieval pattern and chunking strategy are intentional design decisions — don't simplify them away.
+Always read `plan.md` and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifying core architecture. The active implementation plan is `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md`. Archived local-core 1.0 docs under `docs/archive/legacy-local-core-1-0/` are historical only and must not be treated as the current roadmap.
 
 ## File Responsibilities
 

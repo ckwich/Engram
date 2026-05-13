@@ -1,5 +1,11 @@
 # Engram Backend Evaluation — 2026-05-13
 
+Status: historical backend evidence for the Memory OS rebuild. This document
+explains why Chroma/JSON stayed live during the earlier transition branch. It
+does not define the active Engram 1.0 target. The active rebuild target is
+`docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`, where SQLite ledger, LanceDB, Kuzu,
+content-addressed source storage, and daemon ownership are part of local 1.0.
+
 Scope: decide whether Engram can safely lighten its backend/dependency stack
 after the daemon-first and process-hygiene slices.
 
