@@ -31,6 +31,8 @@ def test_daemon_status_reports_direct_mode_without_env(monkeypatch):
     assert payload["configured_url"] is None
     assert payload["reachable"] is False
     assert payload["health"] is None
+    assert payload["autostart"]["enabled"] is True
+    assert payload["autostart"]["eligible"] is False
     assert payload["error"] is None
 
 
@@ -45,6 +47,9 @@ def test_daemon_status_checks_configured_daemon(monkeypatch):
     assert payload["configured_url"] == "http://127.0.0.1:8765"
     assert payload["reachable"] is True
     assert payload["health"]["status"] == "ok"
+    assert payload["autostart"]["enabled"] is True
+    assert payload["autostart"]["eligible"] is True
+    assert payload["autostart"]["startup_only"] is True
     assert payload["health"]["stats"]["total_chunks"] == 9
     assert "check_duplicate" in payload["stable_tools_routed"]
     assert "update_memory_metadata" in payload["stable_tools_routed"]
@@ -79,3 +84,5 @@ def test_memory_protocol_advertises_daemon_status():
     assert payload["progressive_discovery"]["load_next"]["daemon status"] == "daemon_status"
     assert "daemon_status" in payload["canonical_tools"]
     assert any("ENGRAM_DAEMON_URL" in warning for warning in payload["warnings"])
+    assert any("ENGRAM_DAEMON_AUTOSTART" in warning for warning in payload["warnings"])
+    assert "autostart" in payload["tool_groups"]["daemon_runtime"]["purpose"]

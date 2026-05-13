@@ -17,11 +17,14 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from contextvars import ContextVar
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastmcp import FastMCP
 from core.chunk_preview import preview_memory_chunks as build_chunk_preview
@@ -124,11 +127,230 @@ def _daemon_enabled() -> bool:
     return _daemon_url() is not None
 
 
+def _configured_data_dir() -> Path:
+    configured = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path(_mcp_env()["ENGRAM_DATA_DIR"]).resolve()
+
+
+def _daemon_autostart_enabled() -> bool:
+    configured = os.environ.get("ENGRAM_DAEMON_AUTOSTART", "1").strip().lower()
+    return configured not in {"0", "false", "no", "off", "disabled"}
+
+
+def _daemon_autostart_timeout_seconds() -> float:
+    configured = os.environ.get("ENGRAM_DAEMON_AUTOSTART_TIMEOUT", "12").strip()
+    try:
+        return max(float(configured), 0.1)
+    except ValueError:
+        return 12.0
+
+
+def _daemon_autostart_poll_seconds() -> float:
+    configured = os.environ.get("ENGRAM_DAEMON_AUTOSTART_POLL_SECONDS", "0.25").strip()
+    try:
+        return min(max(float(configured), 0.05), 2.0)
+    except ValueError:
+        return 0.25
+
+
+def _is_loopback_daemon_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    hostname = parsed.hostname
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _daemon_host_port(url: str) -> tuple[str, int]:
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port
+    if port is None:
+        port = urlparse(DEFAULT_DAEMON_URL).port or 8765
+    return host, port
+
+
 def _daemon_client() -> EngramDaemonClient:
     url = _daemon_url()
     if url is None:
         raise EngramDaemonClientError("ENGRAM_DAEMON_URL is not configured")
     return EngramDaemonClient(url)
+
+
+def _probe_daemon_health() -> dict[str, Any]:
+    return _daemon_client().health()
+
+
+def _sleep_for_daemon_start(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _start_local_daemon_process(url: str) -> dict[str, Any]:
+    host, port = _daemon_host_port(url)
+    repo_root = Path(__file__).resolve().parent
+    data_dir = _configured_data_dir()
+    log_dir = data_dir / "operations"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "engramd-autostart.log"
+
+    env = os.environ.copy()
+    env["ENGRAM_DATA_DIR"] = str(data_dir)
+    args = [
+        sys.executable,
+        str((repo_root / "engramd.py").resolve()),
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+
+    creationflags = 0
+    popen_kwargs: dict[str, Any] = {}
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        creationflags |= getattr(subprocess, "DETACHED_PROCESS", 0)
+        popen_kwargs["creationflags"] = creationflags
+    else:
+        popen_kwargs["start_new_session"] = True
+
+    with log_path.open("a", encoding="utf-8") as log_file:
+        process = subprocess.Popen(  # nosec B603
+            args,
+            cwd=str(repo_root),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
+            **popen_kwargs,
+        )
+
+    return {"pid": process.pid, "log_path": str(log_path)}
+
+
+def _daemon_startup_payload(
+    *,
+    reachable: bool,
+    health: dict[str, Any] | None,
+    autostart: dict[str, Any],
+    error: Exception | str | None = None,
+) -> dict[str, Any]:
+    message = str(error) if error is not None else None
+    return {
+        "mode": "daemon_client",
+        "configured_url": _daemon_url(),
+        "reachable": reachable,
+        "health": health,
+        "autostart": autostart,
+        "error": _tool_error("runtime_error", message) if message else None,
+    }
+
+
+def _ensure_daemon_available_for_mcp() -> dict[str, Any]:
+    configured_url = _daemon_url()
+    if configured_url is None:
+        return {
+            "mode": "direct",
+            "configured_url": None,
+            "reachable": False,
+            "health": None,
+            "autostart": {"attempted": False, "reason": "not_configured"},
+            "error": None,
+        }
+
+    try:
+        health = _probe_daemon_health()
+        return _daemon_startup_payload(
+            reachable=True,
+            health=health,
+            autostart={"attempted": False, "reason": "already_running"},
+        )
+    except Exception as first_error:
+        if not _daemon_autostart_enabled():
+            return _daemon_startup_payload(
+                reachable=False,
+                health=None,
+                autostart={"attempted": False, "reason": "disabled"},
+                error=first_error,
+            )
+        if not _is_loopback_daemon_url(configured_url):
+            return _daemon_startup_payload(
+                reachable=False,
+                health=None,
+                autostart={"attempted": False, "reason": "not_loopback_url"},
+                error=first_error,
+            )
+
+        try:
+            start_payload = _start_local_daemon_process(configured_url)
+        except Exception as start_error:
+            return _daemon_startup_payload(
+                reachable=False,
+                health=None,
+                autostart={
+                    "attempted": True,
+                    "started": False,
+                    "reason": "start_failed",
+                    "error": str(start_error),
+                },
+                error=start_error,
+            )
+
+        deadline = time.monotonic() + _daemon_autostart_timeout_seconds()
+        last_error: Exception | str = first_error
+        while time.monotonic() < deadline:
+            _sleep_for_daemon_start(_daemon_autostart_poll_seconds())
+            try:
+                health = _probe_daemon_health()
+                return _daemon_startup_payload(
+                    reachable=True,
+                    health=health,
+                    autostart={
+                        "attempted": True,
+                        "started": True,
+                        "pid": start_payload.get("pid"),
+                        "log_path": start_payload.get("log_path"),
+                    },
+                )
+            except Exception as poll_error:
+                last_error = poll_error
+
+        return _daemon_startup_payload(
+            reachable=False,
+            health=None,
+            autostart={
+                "attempted": True,
+                "started": True,
+                "pid": start_payload.get("pid"),
+                "log_path": start_payload.get("log_path"),
+                "reason": "health_timeout",
+            },
+            error=last_error,
+        )
+
+
+def _prepare_mcp_runtime_before_start() -> dict[str, Any]:
+    if _daemon_enabled():
+        return _ensure_daemon_available_for_mcp()
+
+    print("[Engram] Pre-loading embedding model...", file=sys.stderr)
+    embedder._load()
+    print("[Engram] Model ready.", file=sys.stderr)
+    print("[Engram] ChromaDB will initialize on first vector operation.", file=sys.stderr)
+    return {
+        "mode": "direct",
+        "configured_url": None,
+        "reachable": False,
+        "health": None,
+        "autostart": {"attempted": False, "reason": "direct_mode"},
+        "error": None,
+    }
 
 
 async def _call_daemon(method_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -834,7 +1056,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "tools": ["list_operation_jobs", "list_operation_events"],
             },
             "daemon_runtime": {
-                "purpose": "Inspect whether this MCP server is using direct in-process storage or an opt-in local engramd daemon.",
+                "purpose": "Inspect whether this MCP server is using direct in-process storage or an opt-in local engramd daemon, including daemon-client autostart eligibility.",
                 "stability": "beta",
                 "cost_class": "low",
                 "tools": ["daemon_status"],
@@ -948,7 +1170,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "usage_summary": "Engram-attributed token estimate rollups; not billed model usage.",
             "list_operation_jobs": "List recent local operation/job receipts.",
             "list_operation_events": "List recent local operation event records.",
-            "daemon_status": "Report whether stable memory tools will run direct in-process or through a configured ENGRAM_DAEMON_URL daemon.",
+            "daemon_status": "Report whether stable memory tools will run direct in-process or through a configured ENGRAM_DAEMON_URL daemon, plus autostart eligibility.",
             "migration_dry_run": "Validate legacy JSON memories against the Memory OS ledger schema without writing.",
             "memory_os_round_trip_check": "Run legacy import/export/restore parity checks in a migration work directory without active memory writes.",
             "retrieval_backend_status": "Report legacy Chroma, optional LanceDB, migrated-store, and rebuild-probe readiness without changing live retrieval.",
@@ -991,6 +1213,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "Use list_memories for browsing metadata, not topic lookup.",
             "Codex clients may lazy-load Engram; if mcp__engram__ tools are not initially visible, use tool discovery/search for Engram before concluding it is unavailable.",
             "ENGRAM_DAEMON_URL opt-in daemon mode routes stable memory tools through engramd; call daemon_status() to verify direct vs daemon-client mode.",
+            "ENGRAM_DAEMON_AUTOSTART defaults on for loopback daemon-client startup; set it to 0/false/no/off to require a manually started daemon.",
             "When multiple stdio Engram servers are live, only one process owns ChromaDB; secondary processes keep JSON-first writes available, and vector search/context tools return a runtime error until the owner exits.",
         ],
     }
@@ -1002,8 +1225,10 @@ async def daemon_status() -> dict[str, Any]:
     Report whether this MCP server is using direct storage or engramd.
 
     `ENGRAM_DAEMON_URL` enables daemon-client mode for routed MCP tools.
+    `ENGRAM_DAEMON_AUTOSTART` controls startup-time loopback daemon spawning.
     This status tool verifies the configured mode and, when a daemon URL is
-    present, performs a daemon health request without reading or writing memory.
+    present, performs a daemon health request without reading or writing memory;
+    it reports autostart eligibility but does not spawn a daemon itself.
     """
     configured_url = _daemon_url()
     base_payload: dict[str, Any] = {
@@ -1013,6 +1238,11 @@ async def daemon_status() -> dict[str, Any]:
         "configured_url": configured_url,
         "reachable": False,
         "health": None,
+        "autostart": {
+            "enabled": _daemon_autostart_enabled(),
+            "eligible": bool(configured_url and _is_loopback_daemon_url(configured_url)),
+            "startup_only": True,
+        },
         "stable_tools_routed": [
             "search_memories",
             "retrieve_chunk",
@@ -5157,13 +5387,24 @@ if __name__ == "__main__":
         sys.stdout.write(json.dumps(config, indent=2) + "\n")
         sys.exit(0)
 
-    # Pre-load everything before accepting connections so no blocking init
-    # happens on the event loop during MCP tool calls.
-    print("[Engram] Pre-loading embedding model...", file=sys.stderr)
-    embedder._load()
-    print("[Engram] Model ready.", file=sys.stderr)
-
-    print("[Engram] ChromaDB will initialize on first vector operation.", file=sys.stderr)
+    # Prepare the runtime before accepting MCP traffic. Direct mode pre-loads
+    # embeddings; daemon-client mode stays thin and leaves storage ownership to
+    # engramd.
+    runtime_payload = _prepare_mcp_runtime_before_start()
+    if runtime_payload["mode"] == "daemon_client":
+        if runtime_payload["reachable"]:
+            print(
+                f"[Engram] Daemon ready at {runtime_payload['configured_url']}. "
+                "MCP server is running as a thin client.",
+                file=sys.stderr,
+            )
+        else:
+            error = runtime_payload.get("error") or {}
+            print(
+                f"[Engram] Daemon unavailable at {runtime_payload['configured_url']}: "
+                f"{error.get('message', 'unknown error')}",
+                file=sys.stderr,
+            )
 
     if args.transport == "sse":
         print(f"[Engram] Starting — SSE on {args.host}:{args.port}", file=sys.stderr)

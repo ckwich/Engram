@@ -386,6 +386,18 @@ First implementation slice, 2026-05-12:
   Kuzu, add tenant authorization, or complete the full SQLite/content-addressed
   Memory OS runtime.
 
+Daemon-first hardening slice, 2026-05-13:
+
+- Daemon-client MCP startup now probes the configured `ENGRAM_DAEMON_URL`
+  before accepting tool traffic.
+- If the configured URL is loopback and unreachable, `server.py` starts
+  `engramd.py` with the same Python interpreter, pinned `ENGRAM_DATA_DIR`, and
+  stderr/stdout logs under `data/operations/engramd-autostart.log`.
+- Daemon-client startup skips local embedding and Chroma initialization so MCP
+  adapters remain thin clients instead of becoming competing storage owners.
+- `ENGRAM_DAEMON_AUTOSTART=0` disables automatic startup for operators who want
+  to manage the daemon manually.
+
 ## Agent-Facing MCP Surface
 
 The MCP surface should be workflow-oriented, not merely CRUD-oriented.

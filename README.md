@@ -361,6 +361,12 @@ $env:ENGRAM_DAEMON_URL = "http://127.0.0.1:8765"
 python server.py
 ```
 
+When `ENGRAM_DAEMON_URL` points at a loopback URL and the daemon is not already
+reachable, `server.py` will try to start `engramd.py` before accepting MCP
+traffic. This keeps daemon-client MCP adapters from becoming direct ChromaDB
+owners. Set `ENGRAM_DAEMON_AUTOSTART=0` to require a manually started daemon.
+Autostart writes daemon logs under `ENGRAM_DATA_DIR\operations\`.
+
 Health check:
 
 ```bash
