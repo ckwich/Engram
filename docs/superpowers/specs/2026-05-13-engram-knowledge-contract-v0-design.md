@@ -372,15 +372,103 @@ The complete EKC v0 product enhancement is done when:
 9. A small eval compares EKC project orientation to search-only orientation.
 10. Docs and release notes explain EKC v0, non-goals, and future phases.
 
-## Future Work
+## Path From v0 To 1.0
 
-After EKC v0 proves useful, the likely next slices are:
+EKC should mature in evidence-first order. The first expansion after v0 should
+not jump directly to generic artifact families. Higher-level artifacts are only
+trustworthy after Engram can orient around sources, prepare review work, audit
+evidence, and surface bounded graph evidence without poisoning answers.
 
-- chunk-level citations by default
-- persistent capsule refresh jobs
-- entity profile artifacts
-- graph-path packets
-- contradiction packets
-- locator-level citations
-- hosted/enterprise provider adapters
-- optional Pinecone/Nexus adapter behind the Engram-native contract
+### v0: Shape
+
+Prove that `query_knowledge` can return a typed `project_capsule_summary` with
+explicit status, citations, freshness, policy, budget, planner, and errors.
+
+### v0.1: Contract
+
+Stabilize request and response schema behavior: safe defaults, strict status
+semantics, explicit inference policy, stable error codes, and protocol docs.
+
+### v0.2: Persisted Artifact
+
+Move project capsules from generated responses into versioned, ledgered,
+content-addressed artifacts with source refs, compiler version, generated time,
+snapshot id, and invalidation state.
+
+### v0.3: Citations
+
+Make citation behavior reliable before adding more artifact families. The
+sequence is artifact-level citations, chunk-level citations, then locator-level
+citations where document evidence supports page, line, span, table, image, or
+AST locators.
+
+### v0.4: Accountable Planner
+
+Turn the planner into a legible decision receipt. It should choose artifact,
+hybrid search, source/document orientation, review-preparation, evidence audit,
+graph evidence, or no-answer paths within budget and explain what it skipped.
+
+### v0.5: Source And Document Orientation
+
+Add a source/document orientation response before adding generic knowledge
+artifacts. The response should answer "what is this source, what structure does
+it have, what evidence is available, what is missing, and what should an agent
+read first?" It should reuse document disassembly, source refs, quality
+warnings, and chunk manifests without promoting memory.
+
+Gate: EKC can orient an agent around a document or source collection with
+resolvable citations and clear missing-evidence warnings.
+
+### v0.6: Review Preparation
+
+Add review-preparation packets that help a human or agent decide what can be
+promoted. These packets should group candidate memories, source refs, quality
+warnings, low-confidence regions, and proposed next actions. They remain
+review-first and no-write.
+
+Gate: EKC can prepare a review queue from sources without silently turning
+source text into durable memory.
+
+### v0.7: Evidence Audit
+
+Add evidence audit responses that answer "why should I believe this?" and "what
+evidence is missing?" across project capsules, source/document orientation, and
+review-preparation packets. The audit should surface unsupported claims,
+unresolved citations, stale artifacts, extraction gaps, and policy issues.
+
+Gate: EKC can detect and report weak grounding instead of producing polished
+but under-supported context.
+
+### v0.8: Bounded Graph Evidence And Contradiction Surfacing
+
+Add graph evidence only after orientation and audit paths are reliable. Graph
+traversal must be bounded by edge types, hops, path count, edge confidence, and
+required edge citations. Contradictions must be surfaced as first-class response
+objects rather than smoothed into a single answer.
+
+Gate: EKC can explain relationships and conflicts with cited graph paths while
+keeping graph evidence from silently raising answer confidence.
+
+### v0.9: Higher-Level Artifact Families
+
+Only after v0.5-v0.8 are proven should EKC add generic artifact families:
+
+- `entity_profile`
+- `decision_packet`
+- `implementation_context`
+- richer `evidence_bundle`
+
+Each family needs a task-specific eval and should be rejected if it does not
+reduce rediscovery without lowering traceability.
+
+### EKC 1.0: Stable Agent Knowledge Contract
+
+EKC 1.0 is reached when agents can start with `query_knowledge` by default for
+project, source, document, review, audit, and bounded graph-evidence work. The
+1.0 contract must include stable schemas, persisted artifacts, reliable
+citations, freshness/invalidation receipts, policy-safe defaults, accountable
+planner receipts, contradiction/staleness surfacing, and eval proof that EKC
+reduces repeated orientation work without weakening trust.
+
+Hosted/enterprise provider adapters and optional Pinecone/Nexus translation
+remain post-local-core work behind the Engram-native contract.

@@ -1666,9 +1666,37 @@ Report:
 - Type consistency: The plan consistently uses `query_knowledge`,
   `engram.knowledge.request.v0`, `engram.knowledge.response.v0`,
   `project_orientation`, and `project_capsule_summary`.
-- Scope check: The plan intentionally excludes local KnowQL, Pinecone
-  integration, autonomous compilers, graph-path packets, entity profiles, and
-  locator-level citations.
+- Scope check: The implementation plan intentionally excludes local KnowQL,
+  Pinecone integration, autonomous compilers, graph-path packets, entity
+  profiles, and locator-level citations from the v0 implementation slice. The
+  product roadmap adds source/document orientation, review-preparation, evidence
+  audit, and bounded graph/contradiction work before any generic artifact
+  families.
+
+## EKC Roadmap After v0
+
+Keep v0 through v0.4 as the foundation:
+
+- v0: shape - one typed `query_knowledge` response over project capsules
+- v0.1: contract - stable schema, status, error, and inference-policy behavior
+- v0.2: persisted artifact - ledgered, versioned project capsules with source refs
+- v0.3: citations - artifact/chunk citations first, locator citations later
+- v0.4: accountable planner - explicit strategy, omissions, budget, and failure receipt
+
+Revise v0.5 onward as an evidence-first ladder:
+
+- v0.5: source/document orientation before generic artifact families
+- v0.6: review-preparation packets for candidate promotions and quality warnings
+- v0.7: evidence audit responses for grounding gaps, stale refs, and weak claims
+- v0.8: bounded graph evidence and contradiction surfacing with cited paths
+- v0.9: higher-level artifact families such as `entity_profile`,
+  `decision_packet`, `implementation_context`, and richer `evidence_bundle`
+- v1.0: stable agent knowledge contract proven by evals across project,
+  source/document, review-prep, evidence audit, and bounded graph workflows
+
+Do not add entity profiles, decision packets, or implementation-context
+artifacts before the source/document, review-prep, evidence-audit, and bounded
+graph stages have passed focused evals.
 
 ## Execution Options
 
