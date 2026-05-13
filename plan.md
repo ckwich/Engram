@@ -169,6 +169,8 @@ Engram 1.0 is the public, generic, local-first memory substrate release. The sep
 
 Status update, 2026-05-12: Engram 1.0 is the local agent-facing Memory OS core release. The release preserves the current JSON-first / Chroma-second runtime while adding migration dry runs, backend readiness reports, codebase mapping modernization, opt-in daemon routing, document disassembly, mandatory visual/OCR coverage contracts, document understanding packets with auto graph coverage proposals, and reliability gates. Hosted operation, tenant auth, live backend switching, and the collaboration product remain post-1.0 work.
 
+Status update, 2026-05-13: Daemon-client startup is now daemon-first. When `ENGRAM_DAEMON_URL` points at loopback, MCP startup probes the daemon, autostarts `engramd.py` if needed, and skips local embedding/Chroma initialization in the adapter process. `engramd.py --doctor` and `engramd.py --stop-server-pid <pid...>` provide process hygiene without fuzzy kill-all behavior or Chroma lock-file deletion.
+
 Tracked planning docs:
 
 - `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` — new rebuild spec for an agent-facing local memory OS with SQLite ledger, content-addressed sources, LanceDB retrieval, Kuzu graph reasoning, migration guarantees, document intelligence including mandatory OCR/vision coverage for visual artifacts, and optional hosted-edition direction.

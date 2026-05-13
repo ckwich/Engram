@@ -398,6 +398,18 @@ Daemon-first hardening slice, 2026-05-13:
 - `ENGRAM_DAEMON_AUTOSTART=0` disables automatic startup for operators who want
   to manage the daemon manually.
 
+Process hygiene slice, 2026-05-13:
+
+- `core/process_hygiene.py` classifies this checkout's Engram processes without
+  reading process environments, which are unreliable across Windows sessions.
+- `engramd.py --doctor` reports daemon health, live Engram daemon/MCP adapter
+  processes, explicit stop candidates, warnings, and recommendations.
+- `engramd.py --stop-server-pid <pid...>` stops only explicit PIDs classified
+  as this checkout's `server.py` MCP adapter and refuses daemon, one-shot CLI,
+  other-checkout, unknown, and current-process PIDs.
+- The cleanup surface deliberately avoids fuzzy kill-all behavior and never
+  deletes Chroma lock files; stale ownership is fixed by stopping the owner.
+
 ## Agent-Facing MCP Surface
 
 The MCP surface should be workflow-oriented, not merely CRUD-oriented.

@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from core.embedder import embedder
@@ -14,6 +15,11 @@ from core.engramd_api import EngramDaemonAPI
 from core.engramd_client import EngramDaemonClient
 from core.engramd_smoke import run_daemon_smoke
 from core.memory_manager import memory_manager
+from core.process_hygiene import (
+    build_process_hygiene_report,
+    discover_processes,
+    stop_server_pids,
+)
 
 DEFAULT_DAEMON_HOST = os.environ.get("ENGRAM_DAEMON_HOST", "127.0.0.1")
 DEFAULT_DAEMON_PORT = int(os.environ.get("ENGRAM_DAEMON_PORT", "8765"))
@@ -93,6 +99,34 @@ def run_daemon(host: str, port: int) -> None:
         server.server_close()
 
 
+def build_doctor_payload(host: str, port: int) -> dict[str, Any]:
+    """Build a no-write daemon/process hygiene report for operators."""
+    url = f"http://{host}:{port}"
+    daemon_health: dict[str, Any] | None = None
+    daemon_error: dict[str, str] | None = None
+    try:
+        daemon_health = EngramDaemonClient(url).health()
+    except Exception as exc:
+        daemon_error = {"code": "runtime_error", "message": str(exc)}
+
+    repo_root = Path(__file__).resolve().parent
+    try:
+        process_report = build_process_hygiene_report(discover_processes(), repo_root)
+        process_error = None
+    except Exception as exc:
+        process_report = None
+        process_error = {"code": "runtime_error", "message": str(exc)}
+
+    return {
+        "schema_version": "2026-05-13.engramd-doctor.v1",
+        "daemon_url": url,
+        "daemon_health": daemon_health,
+        "daemon_error": daemon_error,
+        "process_hygiene": process_report,
+        "process_error": process_error,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Engram local daemon")
     parser.add_argument("--host", default=DEFAULT_DAEMON_HOST, help=f"Host (default: {DEFAULT_DAEMON_HOST})")
@@ -104,6 +138,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run a duplicate/write/update/repair/search/read/delete smoke test against a running daemon and exit",
     )
+    check_group.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Print daemon health plus Engram process hygiene diagnostics and exit",
+    )
+    check_group.add_argument(
+        "--stop-server-pid",
+        type=int,
+        nargs="+",
+        metavar="PID",
+        help="Stop explicit PIDs only if they are this checkout's server.py MCP adapter processes",
+    )
     args = parser.parse_args(argv)
 
     url = f"http://{args.host}:{args.port}"
@@ -112,6 +158,18 @@ def main(argv: list[str] | None = None) -> int:
         payload = client.health()
         sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
         return 0 if payload.get("status") == "ok" and payload.get("error") is None else 1
+
+    if args.doctor:
+        payload = build_doctor_payload(args.host, args.port)
+        sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        return 0
+
+    if args.stop_server_pid:
+        repo_root = Path(__file__).resolve().parent
+        payload = stop_server_pids(args.stop_server_pid, discover_processes(), repo_root)
+        sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        kill_failed = any(item.get("reason") == "kill_failed" for item in payload["skipped"])
+        return 2 if kill_failed else 0
 
     if args.smoke_test:
         client = EngramDaemonClient(url)

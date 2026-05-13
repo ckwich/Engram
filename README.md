@@ -383,6 +383,23 @@ The smoke test checks duplicate risk, writes, updates metadata, dry-runs
 metadata repair, searches, reads, and deletes a temporary `_engramd_smoke_*`
 memory through the daemon.
 
+Process hygiene doctor:
+
+```bash
+python engramd.py --doctor --host 127.0.0.1 --port 8765
+```
+
+The doctor reports daemon health plus this checkout's `engramd.py` and
+`server.py` processes. To stop stale MCP adapter processes, pass explicit PIDs
+from the doctor report:
+
+```bash
+python engramd.py --stop-server-pid 12345 12346
+```
+
+The stop command refuses to terminate `engramd.py`, one-shot CLI checks,
+processes from other Engram checkouts, and the current process.
+
 Generate MCP client config for daemon-client mode:
 
 ```bash

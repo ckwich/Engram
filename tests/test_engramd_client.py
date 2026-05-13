@@ -94,3 +94,5 @@ def test_engramd_help_exposes_daemon_options():
     assert "--port" in result.stdout
     assert "--health" in result.stdout
     assert "--smoke-test" in result.stdout
+    assert "--doctor" in result.stdout
+    assert "--stop-server-pid" in result.stdout

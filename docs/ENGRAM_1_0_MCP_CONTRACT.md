@@ -168,6 +168,12 @@ health before starting MCP traffic and attempts to start `engramd.py` if the
 daemon is absent. `ENGRAM_DAEMON_AUTOSTART=0` disables this startup behavior.
 `daemon_status()` reports autostart eligibility but does not spawn processes.
 
+`engramd.py --doctor` is the operator process-hygiene gate. It reports daemon
+health and classifies this checkout's `engramd.py` and `server.py` processes.
+`engramd.py --stop-server-pid <pid...>` stops only explicit PIDs that match
+this checkout's MCP `server.py` adapter; it refuses daemon, one-shot CLI,
+other-checkout, unknown, and current-process PIDs.
+
 ## Non-Public Internals
 
 The following are implementation details, not public contracts:
