@@ -70,6 +70,29 @@ def test_process_hygiene_report_warns_about_multiple_daemons():
     assert any("Keep one daemon owner" in item for item in report["recommendations"])
 
 
+def test_process_hygiene_collapses_windows_venv_launcher_daemon_pair():
+    processes = [
+        _proc(
+            201,
+            r'"C:\Dev\Engram\venv\Scripts\python.exe" C:\Dev\Engram\engramd.py --host 127.0.0.1 --port 8765',
+            parent_pid=10,
+        ),
+        _proc(
+            202,
+            r'"C:\Users\colek\AppData\Local\Programs\Python\Python312\python.exe" C:\Dev\Engram\engramd.py --host 127.0.0.1 --port 8765',
+            parent_pid=201,
+        ),
+    ]
+
+    report = build_process_hygiene_report(processes, REPO_ROOT, current_pid=999)
+
+    assert report["counts"]["daemon"] == 1
+    assert report["counts"]["daemon_launcher"] == 1
+    assert report["processes"][0]["kind"] == "daemon_launcher"
+    assert report["processes"][1]["kind"] == "daemon"
+    assert not any("Multiple engramd.py daemon processes" in item for item in report["warnings"])
+
+
 def test_stop_server_pids_only_stops_exact_this_checkout_server_processes():
     processes = [
         _proc(101, r'"C:\Python\python.exe" "C:\Dev\Engram\server.py"'),

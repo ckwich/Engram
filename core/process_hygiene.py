@@ -80,8 +80,9 @@ def _process_payload(
     *,
     repo_root: Path,
     current_pid: int | None,
+    kind_override: str | None = None,
 ) -> dict[str, Any] | None:
-    kind = classify_engram_process(process, repo_root)
+    kind = kind_override or classify_engram_process(process, repo_root)
     if kind == "unrelated":
         return None
     explicit_stop_allowed = kind == "mcp_server" and process.pid != current_pid
@@ -93,6 +94,29 @@ def _process_payload(
         "command_line": process.command_line,
         "explicit_stop_allowed": explicit_stop_allowed,
     }
+
+
+def _daemon_launcher_parent_pids(
+    processes: Iterable[ProcessInfo],
+    repo_root: Path,
+) -> set[int]:
+    """Return parent PIDs that only represent a Windows venv launcher shim."""
+    process_by_pid = {process.pid: process for process in processes}
+    launchers: set[int] = set()
+
+    for process in process_by_pid.values():
+        if process.parent_pid is None:
+            continue
+        parent = process_by_pid.get(process.parent_pid)
+        if parent is None:
+            continue
+        if classify_engram_process(process, repo_root) != "daemon":
+            continue
+        if classify_engram_process(parent, repo_root) != "daemon":
+            continue
+        launchers.add(parent.pid)
+
+    return launchers
 
 
 def build_process_hygiene_report(
@@ -108,13 +132,22 @@ def build_process_hygiene_report(
     process_payloads: list[dict[str, Any]] = []
     counts: dict[str, int] = {
         "daemon": 0,
+        "daemon_launcher": 0,
         "daemon_cli": 0,
         "mcp_server": 0,
         "server_cli": 0,
     }
 
-    for process in sorted(processes, key=lambda item: item.pid):
-        payload = _process_payload(process, repo_root=repo_root, current_pid=current_pid)
+    process_list = sorted(processes, key=lambda item: item.pid)
+    launcher_pids = _daemon_launcher_parent_pids(process_list, repo_root)
+
+    for process in process_list:
+        payload = _process_payload(
+            process,
+            repo_root=repo_root,
+            current_pid=current_pid,
+            kind_override="daemon_launcher" if process.pid in launcher_pids else None,
+        )
         if payload is None:
             continue
         counts[payload["kind"]] = counts.get(payload["kind"], 0) + 1
