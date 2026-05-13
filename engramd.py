@@ -15,6 +15,7 @@ from core.engramd_api import EngramDaemonAPI
 from core.engramd_client import EngramDaemonClient
 from core.engramd_smoke import run_daemon_smoke
 from core.memory_manager import memory_manager
+from core.memory_os.runtime import MemoryOSRuntime
 from core.process_hygiene import (
     build_process_hygiene_report,
     discover_processes,
@@ -83,12 +84,26 @@ class EngramDaemonRequestHandler(BaseHTTPRequestHandler):
         print(f"[engramd] {self.address_string()} - {format % args}", file=sys.stderr)
 
 
+def _memory_os_root() -> Path:
+    data_root = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+    if data_root:
+        return Path(data_root) / "memory_os"
+    return Path(__file__).resolve().parent / "data" / "memory_os"
+
+
 def run_daemon(host: str, port: int) -> None:
     """Start the local daemon and own live storage/index state."""
     print("[engramd] Pre-loading embedding model...", file=sys.stderr)
     embedder._load()
     print("[engramd] Initializing memory store...", file=sys.stderr)
     memory_manager._ensure_initialized()
+    print("[engramd] Initializing Memory OS runtime...", file=sys.stderr)
+    memory_os_runtime = MemoryOSRuntime(_memory_os_root())
+    memory_os_runtime.initialize()
+    EngramDaemonRequestHandler.api = EngramDaemonAPI(
+        memory_manager=memory_manager,
+        memory_os_runtime=memory_os_runtime,
+    )
     server = ThreadingHTTPServer((host, port), EngramDaemonRequestHandler)
     print(f"[engramd] Listening on http://{host}:{port}", file=sys.stderr)
     try:

@@ -126,6 +126,7 @@ def memory_protocol() -> dict[str, Any]:
         "warnings": [
             "Start or autostart engramd before using this entrypoint.",
             "Use daemon_status() to prove daemon reachability before blaming missing memory.",
+            "Use memory_os_status() to inspect the rebuilt SQLite/LanceDB/Kuzu runtime container.",
             "Backend promotion remains config-gated; live storage belongs to engramd.",
         ],
         "error": None,
@@ -152,6 +153,19 @@ async def daemon_status() -> dict[str, Any]:
         "health": health,
         "error": health.get("error"),
     }
+
+
+@mcp.tool()
+async def memory_os_status() -> dict[str, Any]:
+    """Report daemon-owned Memory OS SQLite, LanceDB, Kuzu, job, transaction, and firewall readiness."""
+    try:
+        return await _call_daemon("memory_os_status")
+    except EngramDaemonClientError as exc:
+        return {
+            "status": "degraded",
+            "components": {},
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
 
 
 @mcp.tool()

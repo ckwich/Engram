@@ -7,7 +7,7 @@ import sys
 
 
 def test_thin_daemon_client_imports_without_storage_dependencies(monkeypatch):
-    blocked = {"chromadb", "sentence_transformers", "torch"}
+    blocked = {"chromadb", "sentence_transformers", "torch", "lancedb", "kuzu"}
     real_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
@@ -108,3 +108,21 @@ def test_thin_daemon_client_store_formats_daemon_response(monkeypatch):
 
     assert "Stored: 'Daemon Memory'" in message
     assert "2 chunks" in message
+
+
+def test_thin_daemon_client_memory_os_status_delegates_to_daemon(monkeypatch):
+    import server_daemon_client
+
+    class FakeClient:
+        def memory_os_status(self):
+            return {
+                "status": "ok",
+                "components": {"retrieval": {"backend": "LanceDBVectorIndex"}},
+            }
+
+    monkeypatch.setattr(server_daemon_client, "_daemon_client", lambda: FakeClient())
+
+    payload = asyncio.run(server_daemon_client.memory_os_status())
+
+    assert payload["status"] == "ok"
+    assert payload["components"]["retrieval"]["backend"] == "LanceDBVectorIndex"

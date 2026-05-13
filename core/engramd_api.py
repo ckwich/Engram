@@ -6,11 +6,14 @@ API as thin clients instead of each process trying to own embedded ChromaDB.
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from core.document_extractors import prepare_document_disassembly
 from core.memory_manager import DuplicateMemoryError, memory_manager
+from core.memory_os.runtime import MemoryOSRuntime
 from core.source_intake import source_intake_manager
 
 
@@ -22,10 +25,12 @@ class EngramDaemonAPI:
         memory_manager=memory_manager,
         source_intake_manager=source_intake_manager,
         document_disassembler=prepare_document_disassembly,
+        memory_os_runtime: MemoryOSRuntime | None = None,
     ):
         self.memory_manager = memory_manager
         self.source_intake_manager = source_intake_manager
         self.document_disassembler = document_disassembler
+        self.memory_os_runtime = memory_os_runtime
 
     def handle(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         """Handle one daemon request and return {status, body}."""
@@ -51,8 +56,12 @@ class EngramDaemonAPI:
                         "error": None,
                     }
                 )
+            if method == "GET" and route == "/v1/memory_os/status":
+                return self._ok(self._runtime().status())
             if method != "POST":
                 return self._error(405, "method_not_allowed", f"{method} is not allowed for {route}")
+            if route == "/v1/memory_os/source_import_job":
+                return self._memory_os_source_import_job(request)
             if route == "/v1/search_memories":
                 return await self._search_memories(request)
             if route == "/v1/retrieve_chunk":
@@ -246,6 +255,22 @@ class EngramDaemonAPI:
         if isinstance(disassembly, dict) and disassembly.get("error") is not None:
             payload["error"] = disassembly["error"]
         return self._ok(payload)
+
+    def _memory_os_source_import_job(self, request: dict[str, Any]) -> dict[str, Any]:
+        source_ref = request.get("source_ref")
+        if not isinstance(source_ref, dict):
+            return self._error(400, "invalid_request", "source_ref must be an object")
+        source_type = _optional_text(request.get("source_type"))
+        if not source_type:
+            return self._error(400, "invalid_request", "source_type is required")
+        connector_id = _optional_text(request.get("connector_id")) or "manual"
+        return self._ok(
+            self._runtime().prepare_source_import_job(
+                source_ref=source_ref,
+                source_type=source_type,
+                connector_id=connector_id,
+            )
+        )
 
     async def _list_source_drafts(self, request: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -506,6 +531,19 @@ class EngramDaemonAPI:
                 }
             },
         }
+
+    def _runtime(self) -> MemoryOSRuntime:
+        if self.memory_os_runtime is None:
+            self.memory_os_runtime = MemoryOSRuntime(_memory_os_root())
+            self.memory_os_runtime.initialize()
+        return self.memory_os_runtime
+
+
+def _memory_os_root() -> Path:
+    data_root = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+    if data_root:
+        return Path(data_root) / "memory_os"
+    return Path(__file__).resolve().parents[1] / "data" / "memory_os"
 
 
 def _chunk_payload(result: dict[str, Any] | None, key: str, chunk_id: int) -> dict[str, Any]:

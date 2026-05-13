@@ -57,6 +57,8 @@ def test_client_methods_map_to_daemon_routes():
     client.repair_memory_metadata({"keys": ["k"], "dry_run": False})
     client.prepare_source_memory({"source_text": "body", "source_type": "note"})
     client.prepare_document_disassembly({"source_path": "C:/docs/book.pdf", "source_type": "pdf", "max_pages": 5})
+    client.memory_os_status()
+    client.memory_os_source_import_job({"source_ref": {"source_uri": "file:///book.pdf"}})
     client.list_source_drafts(
         {"project": "Engram", "status": "draft", "limit": 10, "offset": 0}
     )
@@ -74,6 +76,8 @@ def test_client_methods_map_to_daemon_routes():
         "repair_memory_metadata",
         "prepare_source_memory",
         "prepare_document_disassembly",
+        "status",
+        "source_import_job",
         "list_source_drafts",
         "discard_source_draft",
         "store_prepared_memory",

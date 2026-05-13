@@ -172,6 +172,30 @@ def fake_document_disassembler(**kwargs):
     }
 
 
+class FakeMemoryOSRuntime:
+    def __init__(self):
+        self.source_jobs = []
+
+    def status(self):
+        return {
+            "status": "ok",
+            "components": {
+                "ledger": {"path": "C:/Dev/Engram/data/memory_os/ledger.sqlite3"},
+                "retrieval": {"backend": "LanceDBVectorIndex"},
+                "graph": {"backend": "KuzuGraphStore"},
+            },
+        }
+
+    def prepare_source_import_job(self, **kwargs):
+        self.source_jobs.append(kwargs)
+        return {
+            "job_id": "job:source",
+            "job_kind": "source_import",
+            "status": "queued",
+            "payload": kwargs,
+        }
+
+
 def test_health_reports_daemon_and_storage_stats():
     api = EngramDaemonAPI(memory_manager=FakeMemoryManager())
 
@@ -414,6 +438,48 @@ def test_prepare_document_disassembly_routes_to_document_disassembler():
     assert response["body"]["disassembly"]["record_type"] == "document_disassembly_preview"
     assert response["body"]["disassembly"]["source"]["path"] == "C:/docs/book.pdf"
     assert response["body"]["disassembly"]["document"]["page_limit"] == 5
+
+
+def test_memory_os_status_routes_to_runtime_container():
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        memory_os_runtime=FakeMemoryOSRuntime(),
+    )
+
+    response = api.handle("GET", "/v1/memory_os/status", None)
+
+    assert response["status"] == 200
+    assert response["body"]["status"] == "ok"
+    assert response["body"]["components"]["retrieval"]["backend"] == "LanceDBVectorIndex"
+    assert response["body"]["components"]["graph"]["backend"] == "KuzuGraphStore"
+
+
+def test_memory_os_source_import_route_creates_runtime_job():
+    runtime = FakeMemoryOSRuntime()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        memory_os_runtime=runtime,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/memory_os/source_import_job",
+        {
+            "source_ref": {"source_uri": "file:///books/design.pdf"},
+            "source_type": "pdf",
+            "connector_id": "local_path",
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["status"] == "queued"
+    assert runtime.source_jobs == [
+        {
+            "source_ref": {"source_uri": "file:///books/design.pdf"},
+            "source_type": "pdf",
+            "connector_id": "local_path",
+        }
+    ]
 
 
 def test_prepare_document_disassembly_returns_structured_invalid_request():
