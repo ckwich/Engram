@@ -235,6 +235,28 @@ Post-1.0 is hosted work only: hosted sync, hosted tenant auth, billing, hosted
 MCP/API gateway, hosted collaboration bridge, hosted eval platform, marketplace,
 and commercial packaging.
 
+## Engram Knowledge Contract v0 - Local Agent Contract Hardening
+
+EKC v0 is a planned local product enhancement, not a Pinecone/Nexus dependency
+and not a local KnowQL clone. It hardens Engram's agent-facing contract around
+one typed MCP request/response path, one deterministic `project_capsule`
+artifact, and one project-orientation eval.
+
+Tracked docs:
+
+- `docs/superpowers/specs/2026-05-13-engram-knowledge-contract-v0-design.md`
+- `docs/superpowers/plans/2026-05-13-engram-knowledge-contract-v0-plan.md`
+
+Key constraints:
+
+- no Pinecone dependency
+- no KnowQL compatibility layer
+- no autonomous compiler in v0
+- no automatic durable memory writes
+- unsupported inference defaults to forbidden
+- artifact-level or chunk-level citations are acceptable for v0; locator-level
+  citations remain future work.
+
 ## Key Decisions
 - **SQLite ledger for rebuilt 1.0:** SQLite becomes the durable operational ledger for metadata, jobs, receipts, entities, concepts, transactions, snapshots, aliases, and import/export manifests.
 - **Content-addressed source store:** Raw and normalized evidence lives outside the ledger in portable content-addressed artifacts.
