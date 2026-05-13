@@ -117,6 +117,7 @@ def prepare_document_disassembly(
     payload = {
         "schema_version": DOCUMENT_DISASSEMBLY_SCHEMA_VERSION,
         "record_type": "document_disassembly_preview",
+        "write_policy": "preview_only",
         "write_performed": False,
         "active_memory_write_performed": False,
         "source": source,
@@ -257,6 +258,7 @@ def _base_payload(
     return {
         "schema_version": DOCUMENT_DISASSEMBLY_SCHEMA_VERSION,
         "record_type": "document_disassembly_preview",
+        "write_policy": "preview_only",
         "write_performed": False,
         "active_memory_write_performed": False,
         "source": source,

@@ -73,6 +73,7 @@ def build_document_artifact_manifest(
             "pages_recorded": len(page_records),
             "states": states,
         },
+        "write_policy": "preview_only",
         "write_performed": False,
         "active_memory_write_performed": False,
         "error": None,

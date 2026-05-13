@@ -69,6 +69,8 @@ def preview_memory_chunks(
             "max_size": normalized_max_size,
             "max_chunks": normalized_max_chunks,
             "omitted_chunks": omitted_chunks,
+            "write_policy": "preview_only",
             "write_performed": False,
+            "active_memory_write_performed": False,
         },
     }

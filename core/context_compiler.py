@@ -71,7 +71,9 @@ def list_context_profiles() -> dict[str, Any]:
         "schema_version": CONTEXT_PROFILE_CATALOG_SCHEMA_VERSION,
         "count": len(profiles),
         "profiles": profiles,
+        "write_policy": "read_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
     }
 
 
@@ -159,9 +161,11 @@ def compile_context_packet(
             "context_pack": context_receipt,
             "conflict_scans": conflict_scan_receipts,
             "source": "context_pack",
-            "write_policy": "no_write",
+            "write_policy": "read_only",
         },
+        "write_policy": "read_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
     }
 
 
@@ -214,7 +218,9 @@ def build_handoff_packet(
             validation=normalized_validation,
             blockers=normalized_blockers,
         ),
+        "write_policy": "read_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
     }
 
 

@@ -78,6 +78,7 @@ def build_document_quality_report(disassembly: dict[str, Any]) -> dict[str, Any]
         "coverage": coverage,
         "warnings": warnings,
         "recommended_next_tools": _recommended_next_tools(warnings),
+        "write_policy": "read_only",
         "write_performed": False,
         "active_memory_write_performed": False,
         "error": None,

@@ -166,7 +166,9 @@ def preview_source_connector(
         "count": len(items),
         "items": items,
         "omitted": omitted,
+        "write_policy": "preview_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
         "error": None,
     }
 
@@ -285,7 +287,9 @@ def preview_document_source_connector(
             "max_source_text_chars": normalized_text_chars,
             "source_text_truncated_count": sum(1 for item in items if item.get("truncated")),
         },
+        "write_policy": "preview_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
         "error": None,
     }
 
@@ -370,6 +374,8 @@ def _preview_document_url(target: str) -> dict[str, Any]:
             "max_source_text_chars": DEFAULT_MAX_SOURCE_TEXT_CHARS,
             "source_text_truncated_count": 0,
         },
+        "write_policy": "preview_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
         "error": None,
     }

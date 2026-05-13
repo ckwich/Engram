@@ -63,7 +63,10 @@ def build_project_capsule_draft(
                 "reason": "Only explicitly store a reviewed capsule if it should become durable memory.",
             },
         ],
+        "write_policy": "draft_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
+        "promotion_required": True,
     }
 
 

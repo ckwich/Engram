@@ -86,7 +86,9 @@ def list_ingestion_pipelines() -> dict[str, Any]:
     return {
         "schema_version": PIPELINE_SCHEMA_VERSION,
         "default_pipeline": "generic",
+        "write_policy": "read_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
         "lifecycle_policy": deepcopy(LIFECYCLE_POLICY),
         "pipelines": deepcopy(_PIPELINES),
     }

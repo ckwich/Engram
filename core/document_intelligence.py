@@ -106,7 +106,9 @@ def list_document_extractors() -> dict[str, Any]:
     """List provider-neutral document extraction capabilities without running providers."""
     return {
         "schema_version": DOCUMENT_EXTRACTOR_CATALOG_SCHEMA_VERSION,
+        "write_policy": "read_only",
         "write_performed": False,
+        "active_memory_write_performed": False,
         "extractors": [
             {
                 "id": "engram-text-preview",
@@ -191,6 +193,8 @@ def prepare_document_record(
         "media_type": normalized_media_type,
         "metadata": dict(metadata or {}),
         "review_status": "evidence",
+        "write_policy": "draft_only",
+        "write_performed": False,
         "active_memory_write_performed": False,
         "promotion_required": True,
     }
@@ -260,6 +264,8 @@ def prepare_visual_artifact_record(
         "metadata": dict(metadata or {}),
         "review_status": "evidence",
         "trusted_memory": False,
+        "write_policy": "draft_only",
+        "write_performed": False,
         "promotion_required": True,
         "active_memory_write_performed": False,
     }
@@ -591,6 +597,8 @@ def prepare_document_draft(
         "document_id": document_id,
         "status": "draft",
         "created_by": normalized_created_by,
+        "write_policy": "draft_only",
+        "write_performed": False,
         "active_memory_write_performed": False,
         "review_required": True,
         "promotion_required": True,
@@ -780,6 +788,7 @@ def prepare_document_promotion_transaction(
         "status": "prepared",
         "approved_by": normalized_approved_by,
         "notes": _optional_text(notes, "notes"),
+        "write_policy": "promotion_required",
         "write_performed": False,
         "active_memory_write_performed": False,
         "operations": operations,
@@ -825,6 +834,7 @@ def preview_document_extraction(
     )
     return {
         "schema_version": DOCUMENT_PREVIEW_SCHEMA_VERSION,
+        "write_policy": "preview_only",
         "write_performed": False,
         "active_memory_write_performed": False,
         "review_required": True,
@@ -885,6 +895,7 @@ def preview_visual_extraction(
     )
     return {
         "schema_version": VISUAL_PREVIEW_SCHEMA_VERSION,
+        "write_policy": "preview_only",
         "write_performed": False,
         "active_memory_write_performed": False,
         "review_required": True,

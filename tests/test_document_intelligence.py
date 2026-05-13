@@ -77,6 +77,8 @@ def test_prepare_document_record_is_stable_reviewable_evidence_without_writes():
         "media_type": "application/pdf",
         "metadata": {"project": "Engram"},
         "review_status": "evidence",
+        "write_policy": "draft_only",
+        "write_performed": False,
         "active_memory_write_performed": False,
         "promotion_required": True,
     }
