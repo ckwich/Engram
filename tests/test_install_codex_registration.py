@@ -28,3 +28,10 @@ def test_register_codex_mcp_can_use_thin_daemon_client_entrypoint(monkeypatch):
     add_call = calls[-1]
     assert str(install.PROJECT_ROOT / "server_daemon_client.py") in add_call
     assert str(install.PROJECT_ROOT / "server.py") not in add_call
+
+
+def test_pip_command_uses_python_module_invocation():
+    python_path = Path("venv/Scripts/python.exe")
+    command = install.pip_command(python_path, "install", "--upgrade", "pip")
+
+    assert command == [str(python_path), "-m", "pip", "install", "--upgrade", "pip"]

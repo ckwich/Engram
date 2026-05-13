@@ -38,6 +38,11 @@ def get_venv_paths():
     return VENV_DIR / scripts / pip_name, VENV_DIR / scripts / python_name
 
 
+def pip_command(python_path: Path, *args: str) -> list[str]:
+    """Build a pip command through the venv Python executable."""
+    return [str(python_path), "-m", "pip", *args]
+
+
 def install_skill(skill_name: str, source_dir: Path, dest_dir: Path):
     """Copy a SKILL.md file to ~/.claude/skills/{skill_name}/."""
     skill_src = source_dir / "SKILL.md"
@@ -263,12 +268,12 @@ def main(argv: list[str] | None = None):
     else:
         print("\n[1/7] Virtual environment already exists")
 
-    pip, python = get_venv_paths()
+    _pip, python = get_venv_paths()
 
     # ── Install dependencies ───────────────────────────────────────────────
     print("\n[2/7] Installing dependencies (this may take a minute)...")
-    run([str(pip), "install", "--upgrade", "pip"], capture_output=True)
-    run([str(pip), "install", "-r", str(PROJECT_ROOT / "requirements.txt")])
+    run(pip_command(python, "install", "--upgrade", "pip"), capture_output=True)
+    run(pip_command(python, "install", "-r", str(PROJECT_ROOT / "requirements.txt")))
     print("  [ok] Dependencies installed")
 
     # ── Pre-download embedding model ───────────────────────────────────────
