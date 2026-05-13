@@ -27,6 +27,12 @@ GRAPH_EDGE_TYPES = {
     "example_of",
     "illustrates",
     "warns_against",
+    "same_as",
+    "similar_to",
+    "extends",
+    "refines",
+    "applies_to",
+    "synthesizes",
 }
 CONFLICT_EDGE_TYPES = {"contradicts", "invalidates", "supersedes"}
 GRAPH_EDGE_STATUSES = {"active", "archived"}

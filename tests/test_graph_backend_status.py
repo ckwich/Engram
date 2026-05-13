@@ -69,8 +69,10 @@ def test_graph_backend_status_reports_json_live_and_optional_kuzu_gate(tmp_path)
     assert status["candidate_backend"]["availability"]["installed"] is False
     assert status["store_probe"]["ledger_exists"] is True
     assert status["store_probe"]["graph_edge_count"] == 1
+    assert status["graph_parity_probe"]["status"] == "skipped"
     assert status["readiness_gates"]["graph_store_contract"]["status"] == "pass"
     assert status["readiness_gates"]["kuzu_dependency"]["status"] == "blocked"
+    assert status["readiness_gates"]["graph_parity"]["status"] == "skipped"
     assert status["readiness_gates"]["live_backend_switch"]["status"] == "blocked"
 
 

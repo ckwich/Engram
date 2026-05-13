@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from core.backend_config import load_backend_config
+from core.graph_backend_eval import skipped_graph_parity
 from core.graph_store import EDGES_PATH, JsonGraphStore
 from core.memory_os_migration import LEDGER_FILENAME, MemoryOSMigrationKernel
 
@@ -32,10 +33,14 @@ def build_graph_backend_status(
     kuzu_installed = module_available("kuzu")
     live_probe = _build_live_graph_probe(graph_path)
     store_probe = _build_store_probe(store_root)
+    graph_parity_probe = skipped_graph_parity(
+        "No Kuzu-vs-JSON graph parity run was requested."
+    )
     readiness_gates = _build_readiness_gates(
         kuzu_installed=kuzu_installed,
         live_probe=live_probe,
         store_probe=store_probe,
+        graph_parity_probe=graph_parity_probe,
     )
 
     return {
@@ -74,6 +79,7 @@ def build_graph_backend_status(
         },
         "live_graph_probe": live_probe,
         "store_probe": store_probe,
+        "graph_parity_probe": graph_parity_probe,
         "readiness_gates": readiness_gates,
         "recommendation": _recommendation(kuzu_installed, readiness_gates),
         "error": None,
@@ -155,6 +161,7 @@ def _build_readiness_gates(
     kuzu_installed: bool,
     live_probe: dict[str, Any],
     store_probe: dict[str, Any],
+    graph_parity_probe: dict[str, Any],
 ) -> dict[str, dict[str, str]]:
     store_requested = bool(store_probe.get("requested"))
     ledger_exists = bool(store_probe.get("ledger_exists"))
@@ -180,6 +187,10 @@ def _build_readiness_gates(
         "real_kuzu_corpus_spike": {
             "status": "blocked",
             "evidence": "Real Kuzu persistence, traversal, import parity, and Windows behavior are not yet proven against the migrated corpus.",
+        },
+        "graph_parity": {
+            "status": str(graph_parity_probe.get("status") or "skipped"),
+            "evidence": _graph_parity_evidence(graph_parity_probe),
         },
         "multi_session_daemon": {
             "status": "blocked",
@@ -208,9 +219,27 @@ def _store_probe_evidence(store_probe: dict[str, Any]) -> str:
     return str(store_probe.get("error") or "Ledger does not exist.")
 
 
+def _graph_parity_evidence(graph_parity_probe: dict[str, Any]) -> str:
+    status = graph_parity_probe.get("status")
+    if status == "pass":
+        return (
+            f"Graph parity passed for {graph_parity_probe.get('edge_count')} edges, "
+            f"including {graph_parity_probe.get('cross_document_edge_count')} cross-document edges."
+        )
+    if status == "fail":
+        return (
+            f"Graph parity failed with {graph_parity_probe.get('issue_count')} issues."
+        )
+    return str(
+        graph_parity_probe.get("reason")
+        or "Graph parity was not requested."
+    )
+
+
 def _promotion_blockers(kuzu_installed: bool) -> list[str]:
     blockers = [
         "real Kuzu corpus spike has not proven import parity, traversal behavior, and persistence",
+        "Kuzu-vs-JSON graph parity has not passed",
         "Memory OS daemon/single-owner graph backend has not replaced legacy JSON graph storage",
     ]
     if not kuzu_installed:
