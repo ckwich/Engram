@@ -215,6 +215,15 @@ def test_store_document_artifact_requires_accept_and_keeps_memory_and_graph_unch
     assert artifact["source_sha256"] == review_packet["source"]["sha256"]
     assert artifact["review_state"] == "ledgered_evidence"
     assert artifact["coverage_receipt"]["coverage_missing"] == ["ocr", "table", "visual"]
+    assert artifact["citations"] == [
+        {
+            "citation_id": "doc_artifact:doc_book:document",
+            "level": "document",
+            "source": "memory_os",
+            "document_id": "doc_book",
+            "source_ref": review_packet["source"]["source_uri"],
+        }
+    ]
 
 
 def test_store_document_artifact_requires_review_packet_for_compact_transaction(tmp_path):

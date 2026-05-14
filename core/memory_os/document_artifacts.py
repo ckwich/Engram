@@ -409,6 +409,7 @@ def _artifact_record(
         "coverage_receipt": coverage_receipt,
         "citations": [
             {
+                "citation_id": f"doc_artifact:{_slugify(str(document.get('document_id') or 'document'))}:document",
                 "level": "document",
                 "source": "memory_os",
                 "document_id": document.get("document_id"),
