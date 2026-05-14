@@ -315,6 +315,33 @@ class FakeMemoryOSRuntime:
         self.calls.append(("delete_memory", {"key": key}))
         return {"key": key, "deleted": True, "error": None}
 
+    def prepare_document_artifact_store(self, review_packet, *, artifact_family="document_evidence"):
+        self.calls.append(
+            (
+                "prepare_document_artifact_store",
+                {"review_packet": review_packet, "artifact_family": artifact_family},
+            )
+        )
+        return {
+            "status": "prepared",
+            "prepared_transaction_id": "txn-doc",
+            "error": None,
+        }
+
+    def store_document_artifact(self, prepared_transaction_id, *, accept=False):
+        self.calls.append(
+            (
+                "store_document_artifact",
+                {"prepared_transaction_id": prepared_transaction_id, "accept": accept},
+            )
+        )
+        return {
+            "status": "ok" if accept else "policy_denied",
+            "prepared_transaction_id": prepared_transaction_id,
+            "stored": bool(accept),
+            "error": None,
+        }
+
     def inspector(self, *, limit=20):
         return {
             "schema_version": "2026-05-13.memory-os-inspector.v1",
@@ -607,6 +634,40 @@ def test_document_workflow_routes_delegate_to_document_toolset():
         "prepare_document_understanding_packet",
         "prepare_document_draft",
         "prepare_document_promotion_transaction",
+    ]
+
+
+def test_document_artifact_routes_delegate_to_memory_os_runtime():
+    runtime = FakeMemoryOSRuntime()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        memory_os_runtime=runtime,
+    )
+
+    prepared = api.handle(
+        "POST",
+        "/v1/prepare_document_artifact_store",
+        {"review_packet": {"status": "ok"}, "artifact_family": "document_evidence"},
+    )
+    stored = api.handle(
+        "POST",
+        "/v1/store_document_artifact",
+        {"prepared_transaction_id": "txn-doc", "accept": True},
+    )
+
+    assert prepared["status"] == 200
+    assert prepared["body"]["prepared_transaction_id"] == "txn-doc"
+    assert stored["status"] == 200
+    assert stored["body"]["stored"] is True
+    assert runtime.calls[-2:] == [
+        (
+            "prepare_document_artifact_store",
+            {"review_packet": {"status": "ok"}, "artifact_family": "document_evidence"},
+        ),
+        (
+            "store_document_artifact",
+            {"prepared_transaction_id": "txn-doc", "accept": True},
+        ),
     ]
 
 

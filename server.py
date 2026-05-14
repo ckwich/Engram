@@ -1061,6 +1061,15 @@ async def memory_protocol() -> MemoryProtocolPayload:
                     "preview_visual_extraction",
                 ],
             },
+            "document_artifacts": {
+                "purpose": "Prepare and store explicit ledgered document evidence artifacts without active memory or graph promotion.",
+                "stability": "beta",
+                "cost_class": "medium-write",
+                "tools": [
+                    "prepare_document_artifact_store",
+                    "store_document_artifact",
+                ],
+            },
             "agent_workflows": {
                 "purpose": "Compile task-focused, cited context packets without writing memory.",
                 "stability": "beta",
@@ -1168,6 +1177,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "document draft": "prepare_document_draft",
                 "document understanding": "prepare_document_understanding_packet",
                 "document promotion": "prepare_document_promotion_transaction",
+                "document artifact store": "prepare_document_artifact_store",
+                "document artifact acceptance": "store_document_artifact",
                 "visual extraction request": "prepare_visual_extraction_request",
                 "visual extraction": "preview_visual_extraction",
                 "retrieval quality": "retrieval_eval",
@@ -1206,6 +1217,8 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_draft": "Prepare a no-write document draft with proposed memories and graph edges.",
             "prepare_document_understanding_packet": "Normalize agent-supplied document understanding into reviewable summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated coverage graph edge proposals.",
             "prepare_document_promotion_transaction": "Prepare a no-write operation plan for reviewed document draft promotion.",
+            "prepare_document_artifact_store": "Prepare an explicit reviewed document evidence artifact-store transaction; no active memory or graph edges are promoted.",
+            "store_document_artifact": "Store ledgered document evidence artifacts only when accept=True; active memories and graph edges remain untouched.",
             "prepare_visual_extraction_request": "Prepare a no-write OCR/vision work request for image-bearing documents; visual interpretation and per-image-ref coverage are required before draft promotion.",
             "preview_visual_extraction": "Preview caller-supplied OCR or vision observations as visual evidence without writing memory; pass visual_request to enforce requested image-ref coverage.",
             "retrieval_eval": "Run deterministic retrieval quality checks and report pass/fail scenarios.",
@@ -1263,6 +1276,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_understanding_packet(document_record=doc, analysis=agent_analysis) before preparing promotion decisions",
             "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
             "prepare_document_promotion_transaction(document_draft=draft, approved_by='agent-review') before executing writes",
+            "prepare_document_artifact_store(review_packet=packet) then store_document_artifact(prepared_transaction_id=txn, accept=True) for explicit ledgered document evidence",
             "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
             "preview_visual_extraction(document_record=doc, observations=vision_notes) before promoting image-derived claims",
             "migration_dry_run(legacy_dir='data/memories') before importing the current memory corpus into a Memory OS store",
@@ -2411,6 +2425,83 @@ async def prepare_document_promotion_transaction(
             "error": _tool_error("runtime_error", f"Unexpected document promotion failure: {e}"),
         }
     _record_usage_for_payload("prepare_document_promotion_transaction", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_artifact_store(
+    review_packet: dict[str, Any],
+    artifact_family: str = "document_evidence",
+) -> dict[str, Any]:
+    """
+    Prepare an explicit document evidence artifact-store transaction.
+
+    This requires the daemon-owned Memory OS path. The prepared transaction is
+    reviewable and does not promote active memory or graph edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"review_packet": review_packet, "artifact_family": artifact_family}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_artifact_store", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_artifact_store", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error("daemon_required", "prepare_document_artifact_store requires the daemon-owned Memory OS path."),
+    }
+    _record_usage_for_payload("prepare_document_artifact_store", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def store_document_artifact(
+    prepared_transaction_id: str,
+    accept: bool = False,
+) -> dict[str, Any]:
+    """
+    Store ledgered document evidence only when accept=True.
+
+    This requires the daemon-owned Memory OS path. It stores document evidence
+    artifacts and coverage receipts without promoting active memory or graph
+    edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"prepared_transaction_id": prepared_transaction_id, "accept": accept}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("store_document_artifact", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "stored": False,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("store_document_artifact", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "stored": False,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error("daemon_required", "store_document_artifact requires the daemon-owned Memory OS path."),
+    }
+    _record_usage_for_payload("store_document_artifact", input_payload, payload, started_at)
     return payload
 
 

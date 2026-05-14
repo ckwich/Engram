@@ -41,6 +41,10 @@ STABLE_DOCUMENT_WORKFLOW = [
     "prepare_document_draft",
     "prepare_document_promotion_transaction",
 ]
+DOCUMENT_ARTIFACT_WORKFLOW = [
+    "prepare_document_artifact_store",
+    "store_document_artifact",
+]
 
 
 def _daemon_url() -> str:
@@ -146,11 +150,17 @@ def memory_protocol() -> dict[str, Any]:
             "write_memory": "store_memory",
         },
         "document_workflow": STABLE_DOCUMENT_WORKFLOW,
+        "document_artifact_workflow": DOCUMENT_ARTIFACT_WORKFLOW,
         "tool_groups": {
             "document_intelligence": {
                 "stability": "stable",
                 "cost_class": "low-to-medium",
                 "tools": STABLE_DOCUMENT_WORKFLOW,
+            },
+            "document_artifacts": {
+                "stability": "stable",
+                "cost_class": "medium-write",
+                "tools": DOCUMENT_ARTIFACT_WORKFLOW,
             },
         },
         "canonical_tools": [
@@ -165,6 +175,7 @@ def memory_protocol() -> dict[str, Any]:
             "store_memory",
             "prepare_source_memory",
             *STABLE_DOCUMENT_WORKFLOW,
+            *DOCUMENT_ARTIFACT_WORKFLOW,
         ],
         "warnings": [
             "Start or autostart engramd before using this entrypoint.",
@@ -872,6 +883,45 @@ async def prepare_document_promotion_transaction(
     except EngramDaemonClientError as exc:
         return {
             "transaction": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_document_artifact_store(
+    review_packet: dict[str, Any],
+    artifact_family: str = "document_evidence",
+) -> dict[str, Any]:
+    """Prepare a reviewed document artifact-store transaction without promoting active memory."""
+    payload = {"review_packet": review_packet, "artifact_family": artifact_family}
+    try:
+        return await _call_daemon("prepare_document_artifact_store", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "status": "unavailable",
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "graph_write_performed": False,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def store_document_artifact(
+    prepared_transaction_id: str,
+    accept: bool = False,
+) -> dict[str, Any]:
+    """Store ledgered document evidence only after accept=True; never promotes active memory."""
+    payload = {"prepared_transaction_id": prepared_transaction_id, "accept": accept}
+    try:
+        return await _call_daemon("store_document_artifact", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "status": "unavailable",
+            "stored": False,
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "graph_write_performed": False,
             "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
         }
 

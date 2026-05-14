@@ -201,6 +201,8 @@ and protocol `schema_version: "2026-04-27"`.
 | `prepare_document_understanding_packet` | Normalize agent-supplied summaries, claims, concepts, entities, sections, warnings, and supplied plus auto-generated graph coverage proposals without writing. |
 | `prepare_document_draft` | Prepare no-write document memory/graph proposals. |
 | `prepare_document_promotion_transaction` | Prepare no-write document promotion operations. |
+| `prepare_document_artifact_store` | Prepare an explicit reviewed document evidence artifact-store transaction without active memory or graph promotion. |
+| `store_document_artifact` | Store ledgered document evidence only when `accept=True`; active memories and graph edges remain untouched. |
 | `prepare_visual_extraction_request` | Prepare a no-write OCR/vision work request with mandatory per-image-ref coverage. |
 | `preview_visual_extraction` | Preview OCR/vision observations without writing; pass the originating visual request to enforce coverage. |
 | `list_ingestion_pipelines` | List available source-intake pipelines. |

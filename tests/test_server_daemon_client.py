@@ -208,6 +208,28 @@ class FakeDaemonClient:
         self.calls.append(("prepare_document_promotion_transaction", payload))
         return {"transaction": {"approved_by": payload["approved_by"]}, "error": None}
 
+    def prepare_document_artifact_store(self, payload):
+        self.calls.append(("prepare_document_artifact_store", payload))
+        return {
+            "status": "prepared",
+            "prepared_transaction_id": "txn-doc",
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "graph_write_performed": False,
+            "error": None,
+        }
+
+    def store_document_artifact(self, payload):
+        self.calls.append(("store_document_artifact", payload))
+        return {
+            "status": "ok" if payload.get("accept") else "policy_denied",
+            "stored": bool(payload.get("accept")),
+            "write_performed": bool(payload.get("accept")),
+            "active_memory_write_performed": False,
+            "graph_write_performed": False,
+            "error": None,
+        }
+
     def list_source_drafts(self, payload):
         self.calls.append(("list_source_drafts", payload))
         return {
@@ -590,6 +612,28 @@ def test_document_intelligence_tools_use_daemon_when_configured(monkeypatch):
         "prepare_document_understanding_packet",
         "prepare_document_draft",
         "prepare_document_promotion_transaction",
+    ]
+
+
+def test_document_artifact_tools_use_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    prepared = asyncio.run(server.prepare_document_artifact_store({"status": "ok"}))
+    stored = asyncio.run(server.store_document_artifact("txn-doc", accept=True))
+
+    assert prepared["prepared_transaction_id"] == "txn-doc"
+    assert stored["stored"] is True
+    assert client.calls == [
+        (
+            "prepare_document_artifact_store",
+            {"review_packet": {"status": "ok"}, "artifact_family": "document_evidence"},
+        ),
+        (
+            "store_document_artifact",
+            {"prepared_transaction_id": "txn-doc", "accept": True},
+        ),
     ]
 
 

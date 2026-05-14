@@ -13,6 +13,7 @@ from core.memory_os._records import (
     upsert_record,
 )
 from core.memory_os.content_store import ContentAddressedStore
+from core.memory_os.document_artifacts import DocumentArtifactMaterializer
 from core.memory_os.firewall import MemoryFirewall
 from core.memory_os.graph import MemoryOSGraph
 from core.memory_os.inspector import build_memory_os_inspector
@@ -74,6 +75,7 @@ class MemoryOSRuntime:
             database_path=self.root / "kuzu",
         )
         self.knowledge_artifacts = KnowledgeArtifactStore(self.ledger, self.content_store)
+        self.document_artifacts = DocumentArtifactMaterializer(self.ledger, self.content_store)
 
     def initialize(self) -> dict[str, Any]:
         """Initialize durable Memory OS stores and return a status payload."""
@@ -430,6 +432,30 @@ class MemoryOSRuntime:
             "transaction_id": receipt["transaction_id"],
             "error": None,
         }
+
+    def prepare_document_artifact_store(
+        self,
+        review_packet: dict[str, Any],
+        *,
+        artifact_family: str = "document_evidence",
+    ) -> dict[str, Any]:
+        """Prepare an explicit document evidence artifact transaction."""
+        return self.document_artifacts.prepare_document_artifact_store(
+            review_packet,
+            artifact_family=artifact_family,
+        )
+
+    def store_document_artifact(
+        self,
+        prepared_transaction_id: str,
+        *,
+        accept: bool = False,
+    ) -> dict[str, Any]:
+        """Store prepared document evidence artifacts only after acceptance."""
+        return self.document_artifacts.store_document_artifact(
+            prepared_transaction_id,
+            accept=accept,
+        )
 
     def _build_project_capsule_artifact(self, normalized: dict[str, Any]) -> dict[str, Any]:
         budget = normalized["budget"]

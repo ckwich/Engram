@@ -205,6 +205,10 @@ class EngramDaemonAPI:
                     request,
                     result_key="transaction",
                 )
+            if route == "/v1/prepare_document_artifact_store":
+                return await self._prepare_document_artifact_store(request)
+            if route == "/v1/store_document_artifact":
+                return await self._store_document_artifact(request)
             if route == "/v1/list_source_drafts":
                 return await self._list_source_drafts(request)
             if route == "/v1/discard_source_draft":
@@ -231,6 +235,36 @@ class EngramDaemonAPI:
                 "query_knowledge requires daemon-owned Memory OS runtime.",
             )
         return self._ok(self.memory_os_runtime.query_knowledge(request))
+
+    async def _prepare_document_artifact_store(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.memory_os_runtime is None:
+            return self._error(
+                503,
+                "memory_os_unavailable",
+                "prepare_document_artifact_store requires daemon-owned Memory OS runtime.",
+            )
+        review_packet = request.get("review_packet")
+        artifact_family = str(request.get("artifact_family") or "document_evidence")
+        return self._ok(
+            self.memory_os_runtime.prepare_document_artifact_store(
+                review_packet,
+                artifact_family=artifact_family,
+            )
+        )
+
+    async def _store_document_artifact(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.memory_os_runtime is None:
+            return self._error(
+                503,
+                "memory_os_unavailable",
+                "store_document_artifact requires daemon-owned Memory OS runtime.",
+            )
+        return self._ok(
+            self.memory_os_runtime.store_document_artifact(
+                str(request.get("prepared_transaction_id") or ""),
+                accept=bool(request.get("accept", False)),
+            )
+        )
 
     async def _search_memories(self, request: dict[str, Any]) -> dict[str, Any]:
         query = str(request.get("query") or "").strip()
