@@ -661,7 +661,7 @@ Project workflow:
 - `resume_project`
 - `export_skill_pack`
 
-`query_knowledge` accepts EKC v0 project, source, document orientation,
+`query_knowledge` accepts EKC 1.0 project, source, document orientation,
 review-preparation, evidence-audit, bounded graph-evidence, and higher-level
 artifact-family requests for entity profiles, decision packets, implementation
 context, and evidence bundles. It returns typed responses with citations,
@@ -690,6 +690,9 @@ orientation, review-preparation, evidence audit, and bounded graph evidence:
 they only return `ok` or `partial` when cited evidence exists, and they return
 `no_answer` rather than fabricating profiles, decisions, implementation context,
 or evidence bundles from unsupported records.
+The public request/response envelope remains `engram.knowledge.request.v0` and
+`engram.knowledge.response.v0` for compatibility; EKC 1.0 is the stable release
+track proven by the eval pack in `core/memory_os/knowledge_eval.py`.
 
 Operations:
 

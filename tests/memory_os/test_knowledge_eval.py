@@ -1,4 +1,9 @@
-from core.memory_os.knowledge_eval import DEFAULT_QUESTIONS, run_project_orientation_eval
+from core.memory_os.knowledge_eval import (
+    DEFAULT_QUESTIONS,
+    DEFAULT_WORKFLOW_SCENARIOS,
+    run_knowledge_contract_eval,
+    run_project_orientation_eval,
+)
 
 
 class FakeRuntime:
@@ -55,10 +60,59 @@ class FakeRuntime:
 
     def query_knowledge(self, request):
         self.knowledge_calls += 1
+        task_type = request["ask"]["task_type"]
         return {
+            "contract_version": "engram.knowledge.response.v0",
+            "request_id": request.get("request_id") or f"req-{task_type}",
             "status": "ok",
-            "answer": {"summary": "Engram is a local-first Memory OS."},
-            "citations": [{"citation_id": "cit_001"}],
+            "answer": {
+                "project": request["ask"]["project"],
+                "summary": f"Stable EKC fixture for {task_type}.",
+                "task_type": task_type,
+            },
+            "citations": [
+                {
+                    "citation_id": "cit_001",
+                    "level": "chunk",
+                    "source": "memory_os",
+                    "key": f"{task_type}_fixture",
+                    "chunk_id": 0,
+                }
+            ],
+            "freshness": {"state": "fresh", "basis": "eval_fixture"},
+            "policy": {
+                "unreviewed_sources_used": False,
+                "unsupported_inferences_used": False,
+                "review_state_available": False,
+                "review_filter_enforced": False,
+                "review_state_basis": "not_available_in_current_memory_os_records",
+            },
+            "budget_used": {
+                "artifacts_built": 1 if task_type == "project_orientation" else 0,
+                "artifacts_read": 0,
+                "source_reads": 1,
+                "tokens_out_estimate": 64,
+            },
+            "planner": {
+                "strategy": task_type,
+                "methods_used": ["ledger_records"],
+                "omissions": [],
+                "budget": {
+                    "requested": {
+                        "max_artifacts": 1,
+                        "max_source_reads": 12,
+                        "max_tokens_out": 2500,
+                    },
+                    "used": {
+                        "artifacts_built": 1 if task_type == "project_orientation" else 0,
+                        "artifacts_read": 0,
+                        "source_reads": 1,
+                        "tokens_out_estimate": 64,
+                    },
+                },
+                "failure_receipts": [],
+                "response_status": "ok",
+            },
             "errors": [],
         }
 
@@ -86,4 +140,33 @@ def test_project_orientation_eval_compares_search_only_to_ekc():
     assert report["tool_call_reduction_rate"] >= 0.3
     assert report["human_usefulness"]["status"] == "scored"
     assert report["human_usefulness"]["preserved"] is True
+    assert report["passes"] is True
+
+
+def test_knowledge_contract_eval_covers_stable_1_0_workflows():
+    runtime = FakeRuntime()
+    human_ratings = {
+        question: {"search_only": 4.0, "ekc": 4.0}
+        for question in DEFAULT_QUESTIONS
+    }
+
+    report = run_knowledge_contract_eval(
+        runtime,
+        project="Engram",
+        human_ratings=human_ratings,
+    )
+
+    task_types = {row["task_type"] for row in report["workflow_coverage"]["scenarios"]}
+    assert report["schema_version"] == "2026-05-14.ekc-1.0.eval.v1"
+    assert report["contract_release"] == "1.0"
+    assert report["compatibility_contract_versions"] == {
+        "request": "engram.knowledge.request.v0",
+        "response": "engram.knowledge.response.v0",
+    }
+    assert report["stability"] == "stable"
+    assert task_types == {scenario["task_type"] for scenario in DEFAULT_WORKFLOW_SCENARIOS}
+    assert report["workflow_coverage"]["scenario_count"] == len(DEFAULT_WORKFLOW_SCENARIOS)
+    assert report["workflow_coverage"]["schema_valid_rate"] == 1.0
+    assert report["workflow_coverage"]["citation_presence_rate"] == 1.0
+    assert report["project_orientation"]["passes"] is True
     assert report["passes"] is True

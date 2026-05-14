@@ -1,7 +1,13 @@
-"""EKC v0 project-orientation eval helpers."""
+"""EKC project-orientation and 1.0 contract eval helpers."""
 from __future__ import annotations
 
 from typing import Any
+
+from core.memory_os.knowledge_contract import (
+    REQUEST_SCHEMA_VERSION,
+    RESPONSE_SCHEMA_VERSION,
+    validate_knowledge_response,
+)
 
 DEFAULT_QUESTIONS = (
     "What is Engram's current architecture direction?",
@@ -9,6 +15,68 @@ DEFAULT_QUESTIONS = (
     "What should I know before modifying the MCP interface?",
     "What decisions already exist about local-first memory?",
     "What are the open questions for project capsule implementation?",
+)
+DEFAULT_WORKFLOW_SCENARIOS = (
+    {
+        "scenario_id": "project_orientation",
+        "task_type": "project_orientation",
+        "goal": "Orient me to this project.",
+        "focus": ["architecture"],
+    },
+    {
+        "scenario_id": "source_orientation",
+        "task_type": "source_orientation",
+        "goal": "Orient me to available source evidence.",
+        "focus": ["source"],
+    },
+    {
+        "scenario_id": "document_orientation",
+        "task_type": "document_orientation",
+        "goal": "Orient me to available document evidence.",
+        "focus": ["document"],
+    },
+    {
+        "scenario_id": "review_preparation",
+        "task_type": "review_preparation",
+        "goal": "Prepare review evidence for promotion decisions.",
+        "focus": ["review"],
+    },
+    {
+        "scenario_id": "evidence_audit",
+        "task_type": "evidence_audit",
+        "goal": "Audit evidence coverage and citation health.",
+        "focus": ["evidence"],
+    },
+    {
+        "scenario_id": "graph_evidence",
+        "task_type": "graph_evidence",
+        "goal": "Show bounded graph evidence and contradictions.",
+        "focus": ["claim"],
+    },
+    {
+        "scenario_id": "entity_profile",
+        "task_type": "entity_profile",
+        "goal": "Build a cited entity profile.",
+        "focus": ["entity"],
+    },
+    {
+        "scenario_id": "decision_packet",
+        "task_type": "decision_packet",
+        "goal": "Build a cited decision packet.",
+        "focus": ["decision"],
+    },
+    {
+        "scenario_id": "implementation_context",
+        "task_type": "implementation_context",
+        "goal": "Build cited implementation context.",
+        "focus": ["implementation"],
+    },
+    {
+        "scenario_id": "evidence_bundle",
+        "task_type": "evidence_bundle",
+        "goal": "Build a cited evidence bundle.",
+        "focus": ["evidence"],
+    },
 )
 
 
@@ -52,6 +120,47 @@ def run_project_orientation_eval(
             and citation_preserved
             and human_usefulness["preserved"] is True
         ),
+    }
+
+
+def run_knowledge_contract_eval(
+    runtime: Any,
+    *,
+    project: str,
+    human_ratings: dict[str, dict[str, float]] | None = None,
+    workflow_scenarios: tuple[dict[str, Any], ...] | None = None,
+) -> dict[str, Any]:
+    """Run the EKC 1.0 continuation gate across every proven workflow."""
+    project_orientation = run_project_orientation_eval(
+        runtime,
+        project=project,
+        human_ratings=human_ratings,
+    )
+    scenarios = tuple(workflow_scenarios or DEFAULT_WORKFLOW_SCENARIOS)
+    workflow_rows = [
+        _run_ekc_workflow_scenario(runtime, project, scenario)
+        for scenario in scenarios
+    ]
+    workflow_coverage = _summarize_workflows(workflow_rows)
+    passes = project_orientation["passes"] is True and workflow_coverage["passes"] is True
+    return {
+        "schema_version": "2026-05-14.ekc-1.0.eval.v1",
+        "contract_release": "1.0",
+        "compatibility_contract_versions": {
+            "request": REQUEST_SCHEMA_VERSION,
+            "response": RESPONSE_SCHEMA_VERSION,
+        },
+        "project": project,
+        "stability": "stable" if passes else "beta",
+        "project_orientation": project_orientation,
+        "workflow_coverage": workflow_coverage,
+        "release_threshold": {
+            "requires_project_orientation_pass": True,
+            "requires_all_workflows_ok_or_partial": True,
+            "requires_schema_valid_rate": 1.0,
+            "requires_citation_presence_rate": 1.0,
+        },
+        "passes": passes,
     }
 
 
@@ -103,21 +212,43 @@ def _run_ekc_question(runtime: Any, project: str, question: str) -> dict[str, An
             }
         }
     )
+    validation = validate_knowledge_response(payload)
     return {
         "question": question,
         "tool_calls": 1,
         "status": payload.get("status"),
         "has_citation": bool(payload.get("citations")),
-        "schema_valid": payload.get("answer") is not None
-        or payload.get("status")
-        in {
-            "no_answer",
-            "partial",
-            "schema_failed",
-            "policy_denied",
-            "budget_exceeded",
-            "unavailable",
-        },
+        "schema_valid": validation["valid"],
+        "schema_errors": validation.get("errors", []),
+    }
+
+
+def _run_ekc_workflow_scenario(
+    runtime: Any,
+    project: str,
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    task_type = str(scenario["task_type"])
+    payload = runtime.query_knowledge(
+        {
+            "request_id": f"eval-{scenario['scenario_id']}",
+            "ask": {
+                "goal": scenario["goal"],
+                "task_type": task_type,
+                "project": project,
+                "focus": list(scenario.get("focus") or []),
+            },
+        }
+    )
+    validation = validate_knowledge_response(payload)
+    return {
+        "scenario_id": scenario["scenario_id"],
+        "task_type": task_type,
+        "tool_calls": 1,
+        "status": payload.get("status"),
+        "has_citation": bool(payload.get("citations")),
+        "schema_valid": validation["valid"],
+        "schema_errors": validation.get("errors", []),
     }
 
 
@@ -135,6 +266,26 @@ def _summarize_ekc(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "ok_or_partial_count": sum(1 for row in rows if row["status"] in {"ok", "partial"}),
         "schema_valid_rate": _rate(rows, "schema_valid"),
         "citation_presence_rate": _rate(rows, "has_citation"),
+    }
+
+
+def _summarize_workflows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    ok_or_partial_count = sum(1 for row in rows if row["status"] in {"ok", "partial"})
+    schema_valid_rate = _rate(rows, "schema_valid")
+    citation_presence_rate = _rate(rows, "has_citation")
+    passes = (
+        ok_or_partial_count == len(rows)
+        and schema_valid_rate == 1.0
+        and citation_presence_rate == 1.0
+    )
+    return {
+        "scenario_count": len(rows),
+        "tool_calls": sum(int(row["tool_calls"]) for row in rows),
+        "ok_or_partial_count": ok_or_partial_count,
+        "schema_valid_rate": schema_valid_rate,
+        "citation_presence_rate": citation_presence_rate,
+        "scenarios": rows,
+        "passes": passes,
     }
 
 

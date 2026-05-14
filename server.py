@@ -948,7 +948,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "source_intake": "beta",
             "document_intelligence": "beta",
             "agent_workflows": "beta",
-            "knowledge_contract": "beta",
+            "knowledge_contract": "stable",
             "review_helpers": "beta",
             "retrieval_quality": "beta",
             "retrieval_backend": "beta",
@@ -1066,7 +1066,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "tools": ["list_context_profiles", "prepare_context", "make_handoff", "prepare_project_capsule"],
             },
             "knowledge_contract": {
-                "stability": "beta",
+                "stability": "stable",
                 "cost_class": "low-to-medium",
                 "tools": ["query_knowledge"],
             },
@@ -1187,7 +1187,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_context": "Compile a no-write, cited context packet for a task using retrieval profiles.",
             "make_handoff": "Generate a no-write handoff packet with context refs, citations, next steps, and validation notes.",
             "prepare_project_capsule": "Prepare a no-write project capsule draft from context refs and quality signals.",
-            "query_knowledge": "Return an EKC v0 project capsule, source/document orientation, review-preparation, evidence-audit, graph-evidence, or evidence-gated artifact-family response with citations, freshness, policy, budget, planner, and typed errors.",
+            "query_knowledge": "Return an EKC 1.0 project capsule, source/document orientation, review-preparation, evidence-audit, graph-evidence, or evidence-gated artifact-family response with citations, freshness, policy, budget, planner, and typed errors. The envelope remains engram.knowledge.*.v0 for compatibility.",
             "audit_memory_quality": "Read-only metadata quality audit for scope, lifecycle, chunking, and retrieval risk signals.",
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "conflict_scan": "List active contradiction, invalidation, and supersession graph edges without loading memory bodies.",
@@ -1347,7 +1347,7 @@ async def daemon_status() -> dict[str, Any]:
 @mcp.tool()
 async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
     """
-    Return an Engram Knowledge Contract v0 orientation, review-preparation, evidence-audit, graph-evidence, or artifact-family response.
+    Return an Engram Knowledge Contract 1.0 orientation, review-preparation, evidence-audit, graph-evidence, or artifact-family response.
 
     This tool is read-only. It requires the daemon-owned Memory OS path because
     EKC v0 is a serving contract over compiled local context and ledgered

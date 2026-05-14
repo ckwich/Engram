@@ -134,6 +134,7 @@ def test_memory_protocol_marks_new_v06_surfaces_as_beta_or_stable():
     payload = asyncio.run(server.memory_protocol())
 
     assert payload["tool_groups"]["retrieval"]["stability"] == "stable"
+    assert payload["tool_groups"]["knowledge_contract"]["stability"] == "stable"
     assert payload["tool_groups"]["graph"]["stability"] == "beta"
     assert payload["tool_groups"]["source_intake"]["stability"] == "beta"
     assert payload["tool_groups"]["document_intelligence"]["stability"] == "beta"
@@ -150,13 +151,14 @@ def test_memory_protocol_advertises_knowledge_contract_v0():
     payload = asyncio.run(server.memory_protocol())
 
     assert payload["tool_groups"]["knowledge_contract"] == {
-        "stability": "beta",
+        "stability": "stable",
         "cost_class": "low-to-medium",
         "tools": ["query_knowledge"],
     }
     assert payload["progressive_discovery"]["load_next"]["knowledge contract"] == "query_knowledge"
     assert "query_knowledge" in payload["canonical_tools"]
     assert "project capsule" in payload["canonical_tools"]["query_knowledge"]
+    assert "artifact-family" in payload["canonical_tools"]["query_knowledge"]
 
 
 def test_readme_mcp_tool_table_covers_protocol_tools():
