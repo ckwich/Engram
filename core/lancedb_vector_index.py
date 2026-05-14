@@ -120,13 +120,9 @@ class LanceDBVectorIndex:
 
         open_table = getattr(self._db, "open_table", None)
         if callable(open_table):
-            table_names = getattr(self._db, "table_names", None)
-            if callable(table_names):
-                try:
-                    if self.table_name not in table_names():
-                        return
-                except Exception:
-                    pass
+            table_names = self._list_table_names()
+            if table_names is not None and self.table_name not in table_names:
+                return
             try:
                 self._table = open_table(self.table_name)
                 return
@@ -137,6 +133,17 @@ class LanceDBVectorIndex:
             self._table = self._db[self.table_name]
         except (KeyError, TypeError, AttributeError):
             self._table = None
+
+    def _list_table_names(self) -> set[str] | None:
+        for method_name in ("list_tables", "table_names"):
+            table_names = getattr(self._db, method_name, None)
+            if not callable(table_names):
+                continue
+            try:
+                return {str(name) for name in table_names()}
+            except Exception:
+                continue
+        return None
 
     @staticmethod
     def _row_from_document(document: VectorIndexDocument) -> dict[str, Any]:

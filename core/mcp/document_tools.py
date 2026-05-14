@@ -29,6 +29,23 @@ def _document_intake_unavailable_payload(
             "graph_edges_promoted": False,
         },
         "resume": None,
+        "review_completeness": {
+            "status": "unavailable",
+            "complete_review": False,
+            "page_window": {
+                "start": None,
+                "end": None,
+                "pages_returned": 0,
+                "page_count": None,
+                "has_more": False,
+                "next_page": None,
+            },
+            "coverage_missing": [],
+            "open_obligations": ["resolve_infrastructure_error"],
+            "reviewer_warning": "Document review is incomplete until remaining page windows and coverage obligations are resolved.",
+            "artifact_store_review_ready": False,
+            "active_promotion_allowed": False,
+        },
         "receipts": {"artifacts_built": 0, "artifacts_read": 0, "coverage_missing": []},
         "error": error,
     }

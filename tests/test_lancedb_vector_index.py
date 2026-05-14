@@ -68,6 +68,26 @@ class FakeLanceDB:
         return self.tables[table_name]
 
 
+class FakeLanceDBWithTableListing(FakeLanceDB):
+    def __init__(self) -> None:
+        super().__init__()
+        self.list_tables_calls = 0
+        self.table_names_calls = 0
+        self.open_table_calls = 0
+
+    def list_tables(self) -> list[str]:
+        self.list_tables_calls += 1
+        return list(self.tables)
+
+    def table_names(self) -> list[str]:
+        self.table_names_calls += 1
+        raise AssertionError("deprecated table_names should not be called when list_tables is available")
+
+    def open_table(self, table_name: str) -> FakeLanceTable:
+        self.open_table_calls += 1
+        return self.tables[table_name]
+
+
 def test_lancedb_vector_index_reopens_existing_table_before_search(tmp_path):
     fake_db = FakeLanceDB()
     first = LanceDBVectorIndex(tmp_path / "lance", connect=lambda uri: fake_db)
@@ -78,6 +98,20 @@ def test_lancedb_vector_index_reopens_existing_table_before_search(tmp_path):
 
     assert [result.document_id for result in results] == ["alpha-0"]
     assert reopened.stats() == {"document_count": 1}
+
+
+def test_lancedb_vector_index_prefers_list_tables_over_deprecated_table_names(tmp_path):
+    fake_db = FakeLanceDBWithTableListing()
+    first = LanceDBVectorIndex(tmp_path / "lance", connect=lambda uri: fake_db)
+    first.rebuild([VectorIndexDocument("alpha-0", "alpha", 0, "Alpha notes", [1.0])])
+
+    reopened = LanceDBVectorIndex(tmp_path / "lance", connect=lambda uri: fake_db)
+    results = reopened.search(VectorIndexQuery("alpha", [1.0], limit=5))
+
+    assert [result.document_id for result in results] == ["alpha-0"]
+    assert fake_db.list_tables_calls >= 1
+    assert fake_db.table_names_calls == 0
+    assert fake_db.open_table_calls >= 1
 
 
 def test_lancedb_vector_index_rebuild_searches_and_filters_with_citations(tmp_path):

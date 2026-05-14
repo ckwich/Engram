@@ -12,6 +12,10 @@ block the event loop — critical for MCP server responsiveness on large memorie
 """
 from __future__ import annotations
 import asyncio
+import contextlib
+import io
+import logging
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
@@ -36,10 +40,10 @@ class Embedder:
             # Other errors (corrupt cache, permission denied) propagate immediately
             # so they're diagnosed rather than masked by a slow network fallback.
             try:
-                self._model = SentenceTransformer(MODEL_NAME, local_files_only=True)
+                self._model = _load_model_quietly(lambda: SentenceTransformer(MODEL_NAME, local_files_only=True))
             except OSError:
                 print(f"[Engram] Model not cached, downloading from HuggingFace...", file=sys.stderr)
-                self._model = SentenceTransformer(MODEL_NAME)
+                self._model = _load_model_quietly(lambda: SentenceTransformer(MODEL_NAME))
 
             print(f"[Engram] Model loaded.", file=sys.stderr)
 
@@ -91,3 +95,53 @@ class Embedder:
 
 # Singleton
 embedder = Embedder()
+
+
+def _load_model_quietly(load_model):
+    if os.environ.get("ENGRAM_EMBEDDER_VERBOSE") == "1":
+        return load_model()
+    captured_stdout = io.StringIO()
+    captured_stderr = io.StringIO()
+    try:
+        with (
+            _suppress_transformers_load_warnings(),
+            contextlib.redirect_stdout(captured_stdout),
+            contextlib.redirect_stderr(captured_stderr),
+        ):
+            return load_model()
+    except Exception:
+        stdout_text = captured_stdout.getvalue()
+        stderr_text = captured_stderr.getvalue()
+        if stdout_text:
+            print(stdout_text, file=sys.stderr, end="")
+        if stderr_text:
+            print(stderr_text, file=sys.stderr, end="")
+        raise
+
+
+@contextlib.contextmanager
+def _suppress_transformers_load_warnings():
+    target_loggers = [
+        logging.getLogger("transformers"),
+        logging.getLogger("transformers.utils.loading_report"),
+    ]
+    previous_levels = [(logger, logger.level) for logger in target_loggers]
+    transformers_logging = None
+    previous_verbosity = None
+    try:
+        try:
+            from transformers.utils import logging as imported_transformers_logging
+
+            transformers_logging = imported_transformers_logging
+            previous_verbosity = transformers_logging.get_verbosity()
+            transformers_logging.set_verbosity_error()
+        except Exception:
+            transformers_logging = None
+        for logger in target_loggers:
+            logger.setLevel(logging.ERROR)
+        yield
+    finally:
+        for logger, level in previous_levels:
+            logger.setLevel(level)
+        if transformers_logging is not None and previous_verbosity is not None:
+            transformers_logging.set_verbosity(previous_verbosity)

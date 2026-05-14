@@ -30,7 +30,10 @@ query_knowledge({ask: {task_type: "document_orientation", project: "Engram", foc
 
 `prepare_document_intake_review` returns a read-only packet with disassembly,
 text preview, quality warnings, artifact manifest, coverage receipts, and the
-next extraction request when OCR, visual, or table coverage is missing.
+next extraction request when OCR, visual, or table coverage is missing. It also
+returns `review_completeness`, a compact reviewer-facing summary of the current
+page window, missing coverage obligations, and whether the packet is complete
+enough to accept as a reviewed artifact.
 
 ## Full Review Packet
 
@@ -129,6 +132,18 @@ $env:ENGRAM_DOCUMENT_FIXTURE_DIR = "C:\Users\colek\Downloads\Design Books"
 .\venv\Scripts\python.exe -m pytest tests\test_document_disassembly.py -m local_pdf -q
 Remove-Item Env:\ENGRAM_DOCUMENT_FIXTURE_DIR
 ```
+
+For an ad hoc PDF smoke that prints only metadata, receipts, ids, and coverage
+state, use the reusable JSON runner:
+
+```powershell
+powershell -NoProfile -Command ".\venv\Scripts\python.exe scripts\document_pdf_smoke.py C:\docs\book.pdf --max-pages 25"
+powershell -NoProfile -Command ".\venv\Scripts\python.exe scripts\document_pdf_smoke.py C:\docs\book.pdf --full --store-artifact --accept --timeout 600"
+```
+
+The smoke runner suppresses common local progress chatter and never prints
+extracted page or chunk text. The daemon still receives the full reviewed packet
+when `--store-artifact --accept` is used.
 
 Do not commit copyrighted PDFs, extracted book text, rendered page images, OCR
 output, or table exports.

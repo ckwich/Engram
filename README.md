@@ -172,6 +172,9 @@ apply_document_promotion_transaction(transaction, accept=True)
 The first half of the document workflow is intentionally no-write. Large PDFs
 should be reviewed in bounded page windows, and a partial packet should stay
 partial until the missing OCR, table, visual, and resume coverage is resolved.
+Each intake packet includes `review_completeness`, which makes truncation,
+missing visual/table/OCR evidence, and remaining resume work explicit before a
+reviewer accepts a ledgered artifact.
 `store_document_artifact` records ledgered document evidence; it does not create
 active memories or graph edges. Those writes stay behind the separate reviewed
 promotion transaction.

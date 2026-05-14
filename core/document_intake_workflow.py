@@ -209,6 +209,82 @@ def _has_more(disassembly: dict[str, Any]) -> bool:
     return bool(isinstance(resume, dict) and resume.get("has_more"))
 
 
+def _review_completeness(
+    *,
+    status: str,
+    disassembly: dict[str, Any] | None,
+    coverage_missing: list[str],
+    error: dict[str, str] | None,
+) -> dict[str, Any]:
+    page_window = _page_window(disassembly)
+    open_obligations: list[str] = []
+    if page_window.get("has_more"):
+        open_obligations.append("resume_remaining_pages")
+    if "ocr" in coverage_missing:
+        open_obligations.append("resolve_ocr_coverage")
+    if "table" in coverage_missing:
+        open_obligations.append("resolve_table_coverage")
+    if "visual" in coverage_missing:
+        open_obligations.append("resolve_visual_coverage")
+    if error:
+        open_obligations.append(f"resolve_{error.get('category') or 'error'}_error")
+
+    complete_review = bool(
+        status == "ok"
+        and not open_obligations
+        and not coverage_missing
+        and not page_window.get("has_more")
+        and error is None
+    )
+    completeness_status = "complete" if complete_review else status
+    if completeness_status in {"ok", "partial"}:
+        completeness_status = "incomplete"
+    return {
+        "status": completeness_status,
+        "complete_review": complete_review,
+        "page_window": page_window,
+        "coverage_missing": list(coverage_missing),
+        "open_obligations": open_obligations,
+        "reviewer_warning": None
+        if complete_review
+        else "Document review is incomplete until remaining page windows and coverage obligations are resolved.",
+        "artifact_store_review_ready": complete_review,
+        "active_promotion_allowed": False,
+    }
+
+
+def _page_window(disassembly: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(disassembly, dict):
+        return {
+            "start": None,
+            "end": None,
+            "pages_returned": 0,
+            "page_count": None,
+            "has_more": False,
+            "next_page": None,
+        }
+    pages = [page for page in disassembly.get("pages") or [] if isinstance(page, dict)]
+    page_numbers = [
+        int(page["page_number"])
+        for page in pages
+        if isinstance(page.get("page_number"), int)
+        or (isinstance(page.get("page_number"), str) and str(page.get("page_number")).isdigit())
+    ]
+    resume = disassembly.get("resume") if isinstance(disassembly.get("resume"), dict) else {}
+    page_range = resume.get("page_range") if isinstance(resume.get("page_range"), dict) else {}
+    document = disassembly.get("document") if isinstance(disassembly.get("document"), dict) else {}
+    start = page_range.get("start") if page_range.get("start") is not None else (min(page_numbers) if page_numbers else None)
+    end = page_range.get("end") if page_range.get("end") is not None else (max(page_numbers) if page_numbers else None)
+    return {
+        "start": start,
+        "end": end,
+        "pages_returned": len(pages),
+        "page_count": resume.get("page_count") or document.get("page_count"),
+        "has_more": bool(resume.get("has_more")),
+        "next_page": resume.get("next_page"),
+    }
+
+
 def _normalize_disassembly_error(error: dict[str, Any]) -> dict[str, str]:
     code = str(error.get("code") or "runtime_error")
     category = "infrastructure" if code in {"missing_extractor", "tool_failed", "runtime_error"} else "validation"
@@ -261,6 +337,12 @@ def _packet(
     promotion_guidance = {**promotion_guidance, "auto_promote": False}
     documents_consulted = 1 if isinstance(disassembly, dict) and isinstance(disassembly.get("document"), dict) else 0
     resume = disassembly.get("resume") if isinstance(disassembly, dict) else None
+    review_completeness = _review_completeness(
+        status=status,
+        disassembly=disassembly,
+        coverage_missing=coverage_missing,
+        error=error,
+    )
     return {
         "schema_version": DOCUMENT_INTAKE_REVIEW_SCHEMA_VERSION,
         "record_type": "document_intake_review",
@@ -278,6 +360,7 @@ def _packet(
         "promotion_guidance": promotion_guidance,
         "policy": dict(READ_ONLY_POLICY),
         "resume": resume if isinstance(resume, dict) else None,
+        "review_completeness": review_completeness,
         "receipts": {
             "artifacts_built": 1 if isinstance(disassembly, dict) else 0,
             "artifacts_read": 0,

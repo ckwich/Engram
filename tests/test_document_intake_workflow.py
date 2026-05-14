@@ -7,7 +7,17 @@ from core.document_intake_workflow import prepare_document_intake_review
 from core.document_intelligence import prepare_document_record, preview_document_extraction
 
 
-def _base_disassembly(*, pages, text="Useful extracted text.", image_pages=None, visual_request=None, error=None):
+def _base_disassembly(
+    *,
+    pages,
+    text="Useful extracted text.",
+    image_pages=None,
+    visual_request=None,
+    error=None,
+    resume=None,
+    document_page_count=None,
+    page_limit=None,
+):
     return {
         "record_type": "document_disassembly_preview",
         "write_performed": False,
@@ -25,8 +35,8 @@ def _base_disassembly(*, pages, text="Useful extracted text.", image_pages=None,
             "source_type": "pdf",
             "media_type": "application/pdf",
             "content_hash": "sha256:" + "a" * 64,
-            "page_count": len(pages),
-            "page_limit": len(pages),
+            "page_count": document_page_count if document_page_count is not None else len(pages),
+            "page_limit": page_limit if page_limit is not None else len(pages),
         },
         "pages": pages,
         "text": {"content": text, "char_count": len(text), "page_count": len(pages)} if text is not None else None,
@@ -44,6 +54,7 @@ def _base_disassembly(*, pages, text="Useful extracted text.", image_pages=None,
         "visual_artifact_candidates": [],
         "promotion_guidance": {"auto_promote": False},
         "error": error,
+        "resume": resume,
     }
 
 
@@ -79,6 +90,10 @@ def test_prepare_document_intake_review_returns_ok_for_text_complete_pdf():
     } == {"doc_book"}
     assert packet["extraction_request"] is None
     assert packet["resume"] is None
+    assert packet["review_completeness"]["status"] == "complete"
+    assert packet["review_completeness"]["complete_review"] is True
+    assert packet["review_completeness"]["open_obligations"] == []
+    assert packet["review_completeness"]["page_window"]["page_count"] == 1
     assert packet["receipts"]["artifacts_built"] == 1
     assert packet["receipts"]["artifacts_read"] == 0
     assert packet["error"] is None
@@ -141,6 +156,11 @@ def test_prepare_document_intake_review_returns_partial_when_visual_coverage_is_
     assert packet["graph_write_performed"] is False
     assert packet["extraction_request"] == visual_request
     assert packet["receipts"]["coverage_missing"] == ["ocr", "table", "visual"]
+    assert packet["review_completeness"]["status"] == "incomplete"
+    assert packet["review_completeness"]["complete_review"] is False
+    assert "resolve_ocr_coverage" in packet["review_completeness"]["open_obligations"]
+    assert "resolve_table_coverage" in packet["review_completeness"]["open_obligations"]
+    assert "resolve_visual_coverage" in packet["review_completeness"]["open_obligations"]
     assert packet["promotion_guidance"]["auto_promote"] is False
     assert packet["error"] is None
 
@@ -171,6 +191,8 @@ def test_prepare_document_intake_review_reports_missing_poppler_as_infrastructur
         "message": "Missing local PDF tools: pdfinfo, pdftotext, pdfimages",
     }
     assert packet["document_preview"] is None
+    assert packet["review_completeness"]["status"] == "unavailable"
+    assert packet["review_completeness"]["complete_review"] is False
 
 
 def test_prepare_document_intake_review_reports_missing_source_as_schema_failed():
@@ -192,6 +214,46 @@ def test_prepare_document_intake_review_reports_missing_source_as_schema_failed(
         "message": "source_path does not exist or is not a file: C:/docs/missing.pdf",
     }
     assert packet["policy"]["write_behavior"] == "read_only"
+    assert packet["review_completeness"]["status"] == "schema_failed"
+    assert packet["review_completeness"]["complete_review"] is False
+
+
+def test_prepare_document_intake_review_surfaces_resume_obligation():
+    resume = {
+        "has_more": True,
+        "next_page": 6,
+        "page_count": 10,
+        "page_range": {"start": 1, "end": 5},
+        "resume_token": "resume-1",
+    }
+
+    def fake_disassembler(**kwargs):
+        return _base_disassembly(
+            pages=[{"page_number": page, "text_status": "text", "visual_review_needed": False} for page in range(1, 6)],
+            text="Windowed text.",
+            resume=resume,
+            document_page_count=10,
+            page_limit=5,
+        )
+
+    packet = prepare_document_intake_review(
+        "C:/docs/book.pdf",
+        max_pages=5,
+        document_disassembler=fake_disassembler,
+    )
+
+    completeness = packet["review_completeness"]
+    assert completeness["status"] == "incomplete"
+    assert completeness["complete_review"] is False
+    assert completeness["page_window"] == {
+        "start": 1,
+        "end": 5,
+        "pages_returned": 5,
+        "page_count": 10,
+        "has_more": True,
+        "next_page": 6,
+    }
+    assert "resume_remaining_pages" in completeness["open_obligations"]
 
 
 def test_prepare_document_disassembly_reports_timeout_as_infrastructure_error(tmp_path):
