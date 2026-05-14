@@ -12,6 +12,7 @@ from core.memory_os.knowledge_contract import (
     unavailable_response,
     validate_knowledge_response,
 )
+from core.memory_os.knowledge_planner import build_planner_receipt
 
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "knowledge_contract"
@@ -129,7 +130,17 @@ def test_validate_knowledge_response_accepts_required_success_and_failure_envelo
             "source_reads": 1,
             "tokens_out_estimate": 10,
         },
-        "planner": {"strategy": "project_capsule", "methods_used": ["artifact"], "omissions": []},
+        "planner": build_planner_receipt(
+            strategy="project_capsule",
+            methods_used=["artifact"],
+            request_budget={"max_artifacts": 1, "max_source_reads": 12, "max_tokens_out": 2500},
+            budget_used={
+                "artifacts_built": 1,
+                "artifacts_read": 0,
+                "source_reads": 1,
+                "tokens_out_estimate": 10,
+            },
+        ),
         "errors": [],
     }
     unavailable = unavailable_response(
@@ -140,6 +151,7 @@ def test_validate_knowledge_response_accepts_required_success_and_failure_envelo
 
     assert validate_knowledge_response(ok)["valid"] is True
     assert validate_knowledge_response(unavailable)["valid"] is True
+    assert unavailable["planner"]["failure_receipts"][0]["category"] == "infrastructure"
 
 
 def test_validate_knowledge_response_rejects_malformed_success_citations():
@@ -163,7 +175,17 @@ def test_validate_knowledge_response_rejects_malformed_success_citations():
             "source_reads": 1,
             "tokens_out_estimate": 10,
         },
-        "planner": {"strategy": "project_capsule", "methods_used": ["artifact"], "omissions": []},
+        "planner": build_planner_receipt(
+            strategy="project_capsule",
+            methods_used=["artifact"],
+            request_budget={"max_artifacts": 1, "max_source_reads": 12, "max_tokens_out": 2500},
+            budget_used={
+                "artifacts_built": 1,
+                "artifacts_read": 0,
+                "source_reads": 1,
+                "tokens_out_estimate": 10,
+            },
+        ),
         "errors": [],
     }
 
@@ -172,6 +194,46 @@ def test_validate_knowledge_response_rejects_malformed_success_citations():
     assert result["valid"] is False
     assert "invalid_citation_0_missing_level" in result["errors"]
     assert "invalid_citation_0_missing_source" in result["errors"]
+
+
+def test_validate_knowledge_response_rejects_malformed_planner_receipt():
+    invalid = {
+        "contract_version": RESPONSE_SCHEMA_VERSION,
+        "request_id": "req-bad-planner",
+        "status": "ok",
+        "answer": {"project": "Engram"},
+        "citations": [
+            {
+                "citation_id": "cit_001",
+                "level": "chunk",
+                "source": "memory_os",
+                "key": "engram_direction",
+                "chunk_id": 0,
+            }
+        ],
+        "freshness": {"state": "fresh"},
+        "policy": {
+            "unreviewed_sources_used": False,
+            "unsupported_inferences_used": False,
+            "review_state_available": False,
+            "review_filter_enforced": False,
+            "review_state_basis": "not_available_in_current_memory_os_records",
+        },
+        "budget_used": {
+            "artifacts_built": 1,
+            "artifacts_read": 0,
+            "source_reads": 1,
+            "tokens_out_estimate": 10,
+        },
+        "planner": {"strategy": "project_capsule", "methods_used": ["artifact"], "omissions": []},
+        "errors": [],
+    }
+
+    result = validate_knowledge_response(invalid)
+
+    assert result["valid"] is False
+    assert "invalid_planner_missing_budget" in result["errors"]
+    assert "invalid_planner_missing_failure_receipts" in result["errors"]
 
 
 def test_validate_knowledge_response_rejects_missing_envelope_fields():

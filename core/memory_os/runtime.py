@@ -26,6 +26,7 @@ from core.memory_os.knowledge_contract import (
     normalize_knowledge_request,
     ok_response,
 )
+from core.memory_os.knowledge_planner import build_planner_receipt
 from core.memory_os.project_capsule_artifact import build_project_capsule_artifact
 from core.memory_os.retrieval import MemoryOSRetrievalIndex
 from core.memory_os.snapshots import SnapshotService
@@ -293,11 +294,11 @@ class MemoryOSRuntime:
             return _project_capsule_response(
                 normalized,
                 artifact_record=persisted,
-                planner={
-                    "strategy": "project_capsule",
-                    "methods_used": ["persisted_artifact"],
-                    "omissions": [],
-                },
+                planner=build_planner_receipt(
+                    strategy="project_capsule",
+                    methods_used=["persisted_artifact"],
+                    request_budget=normalized["budget"],
+                ),
                 artifacts_built=0,
                 artifacts_read=1,
                 source_reads=0,
@@ -364,11 +365,11 @@ class MemoryOSRuntime:
             retrieval_mode="hybrid",
         )
         results = list(search.get("results") or [])
-        planner = {
-            "strategy": "project_capsule",
-            "methods_used": ["artifact", "hybrid_search"],
-            "omissions": [],
-        }
+        planner = build_planner_receipt(
+            strategy="project_capsule",
+            methods_used=["artifact", "hybrid_search"],
+            request_budget=budget,
+        )
         if not results:
             return {
                 "response": no_answer_response(

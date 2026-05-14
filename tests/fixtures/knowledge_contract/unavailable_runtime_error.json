@@ -24,7 +24,25 @@
   "planner": {
     "strategy": "none",
     "methods_used": [],
-    "omissions": []
+    "omissions": [],
+    "budget": {
+      "requested": {},
+      "used": {
+        "artifacts_built": 0,
+        "artifacts_read": 0,
+        "source_reads": 0,
+        "tokens_out_estimate": 0
+      }
+    },
+    "failure_receipts": [
+      {
+        "code": "runtime_error",
+        "category": "infrastructure",
+        "message": "daemon unavailable",
+        "recoverable": true
+      }
+    ],
+    "response_status": "unavailable"
   },
   "errors": [
     {

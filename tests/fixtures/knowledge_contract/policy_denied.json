@@ -24,7 +24,25 @@
   "planner": {
     "strategy": "none",
     "methods_used": [],
-    "omissions": []
+    "omissions": [],
+    "budget": {
+      "requested": {},
+      "used": {
+        "artifacts_built": 0,
+        "artifacts_read": 0,
+        "source_reads": 0,
+        "tokens_out_estimate": 0
+      }
+    },
+    "failure_receipts": [
+      {
+        "code": "unreviewed_sources_not_allowed",
+        "category": "policy",
+        "message": "EKC v0 does not allow unreviewed sources.",
+        "recoverable": false
+      }
+    ],
+    "response_status": "policy_denied"
   },
   "errors": [
     {

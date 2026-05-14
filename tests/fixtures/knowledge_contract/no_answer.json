@@ -24,7 +24,30 @@
   "planner": {
     "strategy": "project_capsule",
     "methods_used": [],
-    "omissions": ["no cited project context found"]
+    "omissions": [
+      {
+        "code": "omitted",
+        "message": "no cited project context found"
+      }
+    ],
+    "budget": {
+      "requested": {},
+      "used": {
+        "artifacts_built": 0,
+        "artifacts_read": 0,
+        "source_reads": 0,
+        "tokens_out_estimate": 0
+      }
+    },
+    "failure_receipts": [
+      {
+        "code": "no_cited_context",
+        "category": "grounding",
+        "message": "No cited project context was available for the requested project.",
+        "recoverable": true
+      }
+    ],
+    "response_status": "no_answer"
   },
   "errors": [
     {

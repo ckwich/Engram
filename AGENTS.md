@@ -21,6 +21,8 @@ Always read `plan.md` and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifyi
 | `core/kuzu_graph_store.py` | Kuzu-backed graph persistence adapter | Must preserve the GraphStore document contract; used by `core/memory_os/graph.py` under daemon-owned Memory OS runtime |
 | `core/memory_os/` | Rebuilt Memory OS runtime services | SQLite ledger, content store, LanceDB retrieval, Kuzu graph, jobs, transactions, snapshots, firewall, inspector, imports, bundles, and skill packs |
 | `core/memory_os/knowledge_artifacts.py` | Ledgered EKC artifact records | Explicit materialization only; `query_knowledge` may read artifacts but must not write them implicitly |
+| `core/memory_os/knowledge_citations.py` | EKC citation envelope normalization and validation | Keep artifact, chunk, document, and graph citation refs explicit |
+| `core/memory_os/knowledge_planner.py` | EKC accountable planner receipts | Planner receipts must expose strategy, methods, omissions, budget, failure receipts, and response status |
 | `core/backend_config.py` | Backend selection policy | Records operator intent only; defaults keep Chroma/JSON live and never promote candidates by itself |
 | `core/retrieval_backend_eval.py` | No-write retrieval backend comparison gates | Compares baseline and candidate VectorIndex adapters without touching live Chroma or memories |
 | `core/graph_backend_eval.py` | No-write graph parity and cross-document readiness gates | Reports edge contract health, cross-document concept links, and daemon-only Kuzu promotion requirements |

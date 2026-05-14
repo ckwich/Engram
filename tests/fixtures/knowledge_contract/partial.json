@@ -37,7 +37,34 @@
   "planner": {
     "strategy": "project_capsule",
     "methods_used": ["artifact"],
-    "omissions": ["focus:runtime edge cases"]
+    "omissions": [
+      {
+        "code": "omitted",
+        "message": "focus:runtime edge cases"
+      }
+    ],
+    "budget": {
+      "requested": {
+        "max_artifacts": 1,
+        "max_source_reads": 12,
+        "max_tokens_out": 2500
+      },
+      "used": {
+        "artifacts_built": 1,
+        "artifacts_read": 0,
+        "source_reads": 4,
+        "tokens_out_estimate": 180
+      }
+    },
+    "failure_receipts": [
+      {
+        "code": "focus_partially_unanswered",
+        "category": "grounding",
+        "message": "One requested focus area had insufficient cited support.",
+        "recoverable": true
+      }
+    ],
+    "response_status": "partial"
   },
   "errors": [
     {

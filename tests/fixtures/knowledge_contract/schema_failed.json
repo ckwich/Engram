@@ -24,7 +24,25 @@
   "planner": {
     "strategy": "none",
     "methods_used": [],
-    "omissions": []
+    "omissions": [],
+    "budget": {
+      "requested": {},
+      "used": {
+        "artifacts_built": 0,
+        "artifacts_read": 0,
+        "source_reads": 0,
+        "tokens_out_estimate": 0
+      }
+    },
+    "failure_receipts": [
+      {
+        "code": "missing_project",
+        "category": "schema",
+        "message": "ask.project is required",
+        "recoverable": false
+      }
+    ],
+    "response_status": "schema_failed"
   },
   "errors": [
     {

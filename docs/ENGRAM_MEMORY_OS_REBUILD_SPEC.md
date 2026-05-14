@@ -669,6 +669,10 @@ Persisted EKC artifacts are ledgered in `knowledge_artifacts` with immutable
 content-addressed JSON payloads. `query_knowledge` may read a fresh persisted
 project capsule and report `artifacts_read=1`, but durable artifact writes
 remain an explicit materialization operation.
+EKC citations use explicit artifact, chunk, document, or graph levels. EKC
+planner receipts expose the selected strategy, methods used, structured
+omissions, requested/used budget, failure receipts, and response status so
+agents can audit why a response was complete, partial, or unavailable.
 
 Operations:
 

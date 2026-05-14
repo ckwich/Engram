@@ -6,6 +6,10 @@ from typing import Any
 from uuid import uuid4
 
 from core.memory_os.knowledge_citations import validate_knowledge_citation
+from core.memory_os.knowledge_planner import (
+    normalize_planner_receipt,
+    validate_planner_receipt,
+)
 
 
 REQUEST_SCHEMA_VERSION = "engram.knowledge.request.v0"
@@ -172,17 +176,24 @@ def ok_response(
     partial: bool = False,
     errors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    status = "partial" if partial else "ok"
+    response_errors = list(errors or [])
     return {
         "contract_version": RESPONSE_SCHEMA_VERSION,
         "request_id": request_id,
-        "status": "partial" if partial else "ok",
+        "status": status,
         "answer": answer,
         "citations": citations,
         "freshness": freshness,
         "policy": _policy_metadata(),
         "budget_used": budget_used,
-        "planner": planner,
-        "errors": list(errors or []),
+        "planner": normalize_planner_receipt(
+            planner,
+            budget_used=budget_used,
+            failures=response_errors,
+            response_status=status,
+        ),
+        "errors": response_errors,
     }
 
 
@@ -199,7 +210,12 @@ def no_answer_response(
         errors=[{"code": code, "message": message}],
     )
     if planner is not None:
-        response["planner"] = planner
+        response["planner"] = normalize_planner_receipt(
+            planner,
+            budget_used=response["budget_used"],
+            failures=response["errors"],
+            response_status="no_answer",
+        )
     return response
 
 
@@ -209,6 +225,12 @@ def _empty_response(
     status: str,
     errors: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    budget_used = {
+        "artifacts_built": 0,
+        "artifacts_read": 0,
+        "source_reads": 0,
+        "tokens_out_estimate": 0,
+    }
     return {
         "contract_version": RESPONSE_SCHEMA_VERSION,
         "request_id": request_id,
@@ -217,13 +239,13 @@ def _empty_response(
         "citations": [],
         "freshness": {"state": "unknown"},
         "policy": _policy_metadata(),
-        "budget_used": {
-            "artifacts_built": 0,
-            "artifacts_read": 0,
-            "source_reads": 0,
-            "tokens_out_estimate": 0,
-        },
-        "planner": {"strategy": "none", "methods_used": [], "omissions": []},
+        "budget_used": budget_used,
+        "planner": normalize_planner_receipt(
+            {"strategy": "none", "methods_used": [], "omissions": []},
+            budget_used=budget_used,
+            failures=errors,
+            response_status=status,
+        ),
         "errors": errors,
     }
 
@@ -264,6 +286,11 @@ def validate_knowledge_response(response: dict[str, Any]) -> dict[str, Any]:
     ):
         if field not in (response.get("policy") or {}):
             errors.append(f"missing_policy_{field}")
+    for planner_error in validate_planner_receipt(
+        response.get("planner") or {},
+        response_status=response.get("status"),
+    ):
+        errors.append(f"invalid_planner_{planner_error}")
     if response.get("status") == "unavailable":
         categories = {
             error.get("category")

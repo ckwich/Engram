@@ -163,6 +163,9 @@ def test_memory_os_runtime_query_knowledge_returns_project_capsule_response(tmp_
     assert response["citations"]
     assert response["budget_used"]["artifacts_built"] == 1
     assert response["budget_used"]["artifacts_read"] == 0
+    assert response["planner"]["budget"]["requested"]["max_source_reads"] == 12
+    assert response["planner"]["budget"]["used"]["artifacts_built"] == 1
+    assert response["planner"]["failure_receipts"] == []
     assert response["policy"]["unsupported_inferences_used"] is False
     assert response["policy"]["review_state_available"] is False
     assert response["policy"]["review_filter_enforced"] is False
@@ -210,8 +213,41 @@ def test_memory_os_runtime_materializes_and_reads_persisted_project_capsule(tmp_
     assert response["citations"][0]["artifact_id"] == materialized["artifact_record"]["artifact_id"]
     assert any(citation.get("level") == "chunk" for citation in response["citations"])
     assert "persisted_artifact" in response["planner"]["methods_used"]
+    assert response["planner"]["budget"]["used"]["artifacts_read"] == 1
     assert inspector["summary"]["knowledge_artifact_count"] == 1
     assert inspector["knowledge_artifacts"]["items"][0]["artifact_id"] == materialized["artifact_record"]["artifact_id"]
+
+
+def test_memory_os_runtime_query_knowledge_no_answer_has_failure_receipt(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-no-answer",
+            "ask": {
+                "goal": "Get current project context.",
+                "task_type": "project_orientation",
+                "project": "Engram",
+            },
+        }
+    )
+
+    assert response["status"] == "no_answer"
+    assert response["planner"]["strategy"] == "project_capsule"
+    assert response["planner"]["budget"]["requested"]["max_artifacts"] == 1
+    assert response["planner"]["failure_receipts"] == [
+        {
+            "code": "no_project_sources",
+            "category": "grounding",
+            "message": "No eligible project sources found for Engram.",
+            "recoverable": True,
+        }
+    ]
 
 
 def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):
