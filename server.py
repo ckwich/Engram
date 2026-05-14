@@ -49,6 +49,7 @@ from core.document_intelligence import (
     preview_visual_extraction as build_visual_extraction_preview,
 )
 from core.document_extractors import prepare_document_disassembly as build_document_disassembly
+from core.document_intake_workflow import prepare_document_intake_review as build_document_intake_review
 from core.embedder import embedder
 from core.engramd_client import EngramDaemonClient, EngramDaemonClientError
 from core.graph_backend_status import build_graph_backend_status
@@ -1048,6 +1049,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "tools": [
                     "list_document_extractors",
                     "prepare_document_disassembly",
+                    "prepare_document_intake_review",
                     "prepare_document_draft",
                     "prepare_document_extraction_request",
                     "prepare_document_extraction_result",
@@ -1159,6 +1161,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "document extraction": "preview_document_extraction",
                 "document extractor discovery": "list_document_extractors",
                 "document disassembly": "prepare_document_disassembly",
+                "document intake review": "prepare_document_intake_review",
                 "document extraction request": "prepare_document_extraction_request",
                 "document extraction result": "prepare_document_extraction_result",
                 "document source connector": "preview_document_source_connector",
@@ -1195,6 +1198,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "preview_source_connector": "Preview local-path source items and draft arguments without writing memory.",
             "list_document_extractors": "List bundled and external document extraction capabilities without running providers.",
             "prepare_document_disassembly": "Prepare a no-write local PDF page/text/image inventory, quality report, artifact manifest, visual candidates, and visual extraction request using local tools when available.",
+            "prepare_document_intake_review": "Prepare a no-write end-to-end document intake review packet from local disassembly, text preview, quality, coverage receipts, and follow-up extraction requests.",
             "preview_document_source_connector": "Preview local Markdown/text/HTML extraction arguments plus URL/external parser request arguments without writing memory.",
             "prepare_document_extraction_request": "Prepare a no-write external document parsing request for PDF/DOCX/image-bearing sources.",
             "prepare_document_extraction_result": "Normalize external parser output into no-write preview arguments and provenance.",
@@ -1253,6 +1257,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "list_document_extractors() before choosing a local parser, OCR/vision adapter, or agent-native preview path",
             "preview_document_source_connector(connector_type='local_path', target='docs') before document extraction",
             "prepare_document_disassembly(source_path='C:/docs/book.pdf') for no-write local PDF page/text/image inventory plus visual/OCR follow-up request",
+            "prepare_document_intake_review(source_path='C:/docs/book.pdf') for the no-write review packet, coverage receipts, and next extraction request",
             "prepare_document_extraction_request(source_ref={'source_uri': 'file:///notes.pdf'}, source_type='pdf', requested_outputs=['markdown', 'page_images']) before running a local parser",
             "prepare_document_extraction_result(extraction_request=req, title='Notes', content=markdown, media_type='text/markdown') before preview_document_extraction",
             "prepare_document_understanding_packet(document_record=doc, analysis=agent_analysis) before preparing promotion decisions",
@@ -1961,6 +1966,94 @@ async def prepare_document_disassembly(
             "error": _tool_error("runtime_error", f"Unexpected document disassembly failure: {e}"),
         }
     _record_usage_for_payload("prepare_document_disassembly", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_intake_review(
+    source_path: str,
+    extractor_id: str | None = None,
+    max_pages: int | None = None,
+    require_visual_coverage: bool = True,
+    require_table_coverage: bool = True,
+    require_ocr_coverage: bool = True,
+    source_type: str = "pdf",
+) -> dict[str, Any]:
+    """
+    Prepare an end-to-end no-write document intake review packet.
+
+    This wraps local disassembly, text preview, quality signals, artifact
+    manifest, and missing OCR/visual/table coverage receipts into a single
+    read-only packet. It does not promote active memory or graph edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source_path": source_path,
+        "extractor_id": extractor_id,
+        "max_pages": max_pages,
+        "require_visual_coverage": require_visual_coverage,
+        "require_table_coverage": require_table_coverage,
+        "require_ocr_coverage": require_ocr_coverage,
+        "source_type": source_type,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_intake_review", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "source": {"source_path": source_path},
+                "disassembly": None,
+                "extraction_request": None,
+                "document_preview": None,
+                "quality": None,
+                "artifact_manifest": None,
+                "draft_candidates": [],
+                "promotion_guidance": {"auto_promote": False},
+                "policy": {
+                    "write_behavior": "read_only",
+                    "active_memory_promoted": False,
+                    "graph_edges_promoted": False,
+                },
+                "receipts": {
+                    "artifacts_built": 0,
+                    "artifacts_read": 0,
+                    "coverage_missing": [],
+                },
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_intake_review", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = build_document_intake_review(
+            source_path=source_path,
+            extractor_id=extractor_id,
+            max_pages=max_pages,
+            require_visual_coverage=require_visual_coverage,
+            require_table_coverage=require_table_coverage,
+            require_ocr_coverage=require_ocr_coverage,
+            source_type=source_type,
+        )
+    except Exception as e:
+        payload = {
+            "status": "unavailable",
+            "source": {"source_path": source_path},
+            "disassembly": None,
+            "extraction_request": None,
+            "document_preview": None,
+            "quality": None,
+            "artifact_manifest": None,
+            "draft_candidates": [],
+            "promotion_guidance": {"auto_promote": False},
+            "policy": {
+                "write_behavior": "read_only",
+                "active_memory_promoted": False,
+                "graph_edges_promoted": False,
+            },
+            "receipts": {"artifacts_built": 0, "artifacts_read": 0, "coverage_missing": []},
+            "error": _tool_error("runtime_error", f"Unexpected document intake review failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_intake_review", input_payload, payload, started_at)
     return payload
 
 

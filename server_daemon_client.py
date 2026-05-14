@@ -31,6 +31,7 @@ STABLE_DOCUMENT_WORKFLOW = [
     "list_document_extractors",
     "preview_document_source_connector",
     "prepare_document_disassembly",
+    "prepare_document_intake_review",
     "prepare_document_extraction_request",
     "prepare_document_extraction_result",
     "preview_document_extraction",
@@ -610,6 +611,49 @@ async def prepare_document_disassembly(
     except EngramDaemonClientError as exc:
         return {
             "disassembly": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_document_intake_review(
+    source_path: str,
+    extractor_id: str | None = None,
+    max_pages: int | None = None,
+    require_visual_coverage: bool = True,
+    require_table_coverage: bool = True,
+    require_ocr_coverage: bool = True,
+    source_type: str = "pdf",
+) -> dict[str, Any]:
+    """Prepare an end-to-end no-write document review packet without promoting memory."""
+    payload = {
+        "source_path": source_path,
+        "extractor_id": extractor_id,
+        "max_pages": max_pages,
+        "require_visual_coverage": require_visual_coverage,
+        "require_table_coverage": require_table_coverage,
+        "require_ocr_coverage": require_ocr_coverage,
+        "source_type": source_type,
+    }
+    try:
+        return await _call_daemon("prepare_document_intake_review", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "status": "unavailable",
+            "source": {"source_path": source_path},
+            "disassembly": None,
+            "extraction_request": None,
+            "document_preview": None,
+            "quality": None,
+            "artifact_manifest": None,
+            "draft_candidates": [],
+            "promotion_guidance": {"auto_promote": False},
+            "policy": {
+                "write_behavior": "read_only",
+                "active_memory_promoted": False,
+                "graph_edges_promoted": False,
+            },
+            "receipts": {"artifacts_built": 0, "artifacts_read": 0, "coverage_missing": []},
             "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
         }
 

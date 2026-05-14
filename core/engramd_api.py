@@ -23,6 +23,7 @@ from core.document_intelligence import (
     preview_visual_extraction,
 )
 from core.document_extractors import prepare_document_disassembly
+from core.document_intake_workflow import prepare_document_intake_review
 from core.memory_manager import DuplicateMemoryError, memory_manager
 from core.memory_os.runtime import MemoryOSRuntime
 from core.source_connectors import preview_document_source_connector
@@ -43,6 +44,9 @@ class DocumentWorkflow:
 
     def prepare_document_disassembly(self, **kwargs: Any) -> dict[str, Any]:
         return self.document_disassembler(**kwargs)
+
+    def prepare_document_intake_review(self, **kwargs: Any) -> dict[str, Any]:
+        return prepare_document_intake_review(**kwargs)
 
     def prepare_document_extraction_request(self, **kwargs: Any) -> dict[str, Any]:
         return prepare_document_extraction_request(**kwargs)
@@ -147,6 +151,12 @@ class EngramDaemonAPI:
                 )
             if route == "/v1/prepare_document_disassembly":
                 return await self._prepare_document_disassembly(request)
+            if route == "/v1/prepare_document_intake_review":
+                return await self._document_tool(
+                    "prepare_document_intake_review",
+                    request,
+                    result_key=None,
+                )
             if route == "/v1/prepare_document_extraction_request":
                 return await self._document_tool(
                     "prepare_document_extraction_request",

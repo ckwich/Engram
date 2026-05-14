@@ -93,6 +93,9 @@ class EngramDaemonClient:
     def prepare_document_disassembly(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/prepare_document_disassembly", payload)
 
+    def prepare_document_intake_review(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_document_intake_review", payload)
+
     def prepare_document_extraction_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/prepare_document_extraction_request", payload)
 

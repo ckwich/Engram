@@ -94,6 +94,7 @@ def test_client_document_methods_map_to_stable_daemon_routes():
     client.list_document_extractors({})
     client.preview_document_source_connector({"connector_type": "local_path", "target": "docs"})
     client.prepare_document_disassembly({"source_path": "C:/docs/book.pdf"})
+    client.prepare_document_intake_review({"source_path": "C:/docs/book.pdf"})
     client.prepare_document_extraction_request({"source_ref": {"source_uri": "file:///book.pdf"}})
     client.prepare_document_extraction_result({"title": "Book", "content": "body"})
     client.preview_document_extraction({"title": "Book", "content": "body"})
@@ -107,6 +108,7 @@ def test_client_document_methods_map_to_stable_daemon_routes():
         "list_document_extractors",
         "preview_document_source_connector",
         "prepare_document_disassembly",
+        "prepare_document_intake_review",
         "prepare_document_extraction_request",
         "prepare_document_extraction_result",
         "preview_document_extraction",

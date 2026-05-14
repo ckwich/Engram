@@ -188,6 +188,10 @@ class FakeDocumentWorkflow:
         self.calls.append(("prepare_document_disassembly", kwargs))
         return {"disassembly": {"source": {"path": kwargs["source_path"]}}, "error": None}
 
+    def prepare_document_intake_review(self, **kwargs):
+        self.calls.append(("prepare_document_intake_review", kwargs))
+        return {"status": "ok", "source": {"source_path": kwargs["source_path"]}, "error": None}
+
     def prepare_document_extraction_request(self, **kwargs):
         self.calls.append(("prepare_document_extraction_request", kwargs))
         return {"extraction_request": kwargs, "error": None}
@@ -576,6 +580,7 @@ def test_document_workflow_routes_delegate_to_document_toolset():
         ("/v1/list_document_extractors", {}),
         ("/v1/preview_document_source_connector", {"connector_type": "local_path", "target": "docs"}),
         ("/v1/prepare_document_disassembly", {"source_path": "C:/docs/book.pdf"}),
+        ("/v1/prepare_document_intake_review", {"source_path": "C:/docs/book.pdf"}),
         ("/v1/prepare_document_extraction_request", {"source_ref": {"source_uri": "file:///book.pdf"}}),
         ("/v1/prepare_document_extraction_result", {"title": "Book", "content": "body"}),
         ("/v1/preview_document_extraction", {"title": "Book", "content": "body"}),
@@ -593,6 +598,7 @@ def test_document_workflow_routes_delegate_to_document_toolset():
         "list_document_extractors",
         "preview_document_source_connector",
         "prepare_document_disassembly",
+        "prepare_document_intake_review",
         "prepare_document_extraction_request",
         "prepare_document_extraction_result",
         "preview_document_extraction",

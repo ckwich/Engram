@@ -11,6 +11,7 @@ STABLE_DOCUMENT_WORKFLOW = [
     "list_document_extractors",
     "preview_document_source_connector",
     "prepare_document_disassembly",
+    "prepare_document_intake_review",
     "prepare_document_extraction_request",
     "prepare_document_extraction_result",
     "preview_document_extraction",
@@ -143,6 +144,27 @@ class FakeDaemonClient:
                 "active_memory_write_performed": False,
                 "error": None,
             },
+            "error": None,
+        }
+
+    def prepare_document_intake_review(self, payload):
+        self.calls.append(("prepare_document_intake_review", payload))
+        return {
+            "status": "ok",
+            "source": {"source_path": payload["source_path"], "document_id": "doc_1"},
+            "disassembly": {"record_type": "document_disassembly_preview"},
+            "extraction_request": None,
+            "document_preview": {"preview": {"document": {"document_id": "doc_1"}}},
+            "quality": {},
+            "artifact_manifest": {},
+            "draft_candidates": [],
+            "promotion_guidance": {"auto_promote": False},
+            "policy": {
+                "write_behavior": "read_only",
+                "active_memory_promoted": False,
+                "graph_edges_promoted": False,
+            },
+            "receipts": {"artifacts_built": 1, "artifacts_read": 0, "coverage_missing": []},
             "error": None,
         }
 
@@ -498,6 +520,7 @@ def test_document_intelligence_tools_use_daemon_when_configured(monkeypatch):
 
     asyncio.run(server.list_document_extractors())
     asyncio.run(server.preview_document_source_connector("local_path", "docs"))
+    asyncio.run(server.prepare_document_intake_review("C:/docs/book.pdf"))
     asyncio.run(
         server.prepare_document_extraction_request(
             source_ref={"source_uri": "file:///book.pdf"},
@@ -558,6 +581,7 @@ def test_document_intelligence_tools_use_daemon_when_configured(monkeypatch):
     assert [call[0] for call in client.calls] == [
         "list_document_extractors",
         "preview_document_source_connector",
+        "prepare_document_intake_review",
         "prepare_document_extraction_request",
         "prepare_document_extraction_result",
         "preview_document_extraction",

@@ -194,6 +194,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `list_document_extractors` | List bundled and external document extraction capabilities. |
 | `preview_document_source_connector` | Preview local Markdown/text/HTML and URL/external parser request arguments without writing. |
 | `prepare_document_disassembly` | Prepare a no-write local PDF page/text/image inventory with quality warnings, portable artifact refs, visual candidates, and an OCR/vision follow-up request. |
+| `prepare_document_intake_review` | Prepare a no-write end-to-end document review packet with disassembly, text preview, quality, artifact, and missing OCR/visual/table coverage receipts. |
 | `prepare_document_extraction_request` | Prepare a no-write external parser request for PDF/DOCX/image-bearing sources. |
 | `prepare_document_extraction_result` | Normalize external parser output into no-write preview arguments. |
 | `preview_document_extraction` | Preview document evidence and chunks without writing. |
