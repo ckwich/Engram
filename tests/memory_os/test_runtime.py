@@ -396,6 +396,54 @@ def test_memory_os_runtime_query_knowledge_returns_evidence_audit(tmp_path):
     assert response["citations"][0]["level"] == "artifact"
 
 
+def test_memory_os_runtime_query_knowledge_returns_graph_evidence(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    upsert_record(
+        runtime.ledger,
+        "graph_edges",
+        "edge:contradicts",
+        {
+            "edge_id": "edge:contradicts",
+            "from_ref": {"kind": "claim", "key": "new_claim"},
+            "to_ref": {"kind": "claim", "key": "old_claim"},
+            "edge_type": "contradicts",
+            "confidence": 0.9,
+            "evidence": "New claim contradicts old claim.",
+            "source": "memory_os_test",
+            "status": "active",
+            "created_by": "agent",
+            "created_at": "2026-05-14T00:00:00+00:00",
+            "updated_at": "2026-05-14T00:00:00+00:00",
+            "project": "Engram",
+            "content": "Do not expose this body.",
+        },
+    )
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-graph-evidence",
+            "ask": {
+                "goal": "Show bounded graph evidence.",
+                "task_type": "graph_evidence",
+                "project": "Engram",
+                "focus": ["claim"],
+            },
+        }
+    )
+
+    assert response["status"] == "partial"
+    assert response["answer"]["packet_type"] == "graph_evidence"
+    assert response["answer"]["contradiction_count"] == 1
+    assert "content" not in response["answer"]["evidence_paths"][0]["edges"][0]
+    assert response["citations"][0]["level"] == "graph"
+    assert response["planner"]["strategy"] == "graph_evidence"
+
+
 def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):
     runtime = MemoryOSRuntime(
         tmp_path,

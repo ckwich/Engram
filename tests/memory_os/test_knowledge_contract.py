@@ -102,6 +102,21 @@ def test_normalize_knowledge_request_supports_evidence_audit_defaults():
     assert request["policy"]["write_behavior"] == "read_only"
 
 
+def test_normalize_knowledge_request_supports_graph_evidence_defaults():
+    request = normalize_knowledge_request(
+        {
+            "ask": {
+                "goal": "Show bounded graph evidence.",
+                "task_type": "graph_evidence",
+                "project": "Engram",
+            }
+        }
+    )
+
+    assert request["shape"]["response_type"] == "graph_evidence_summary"
+    assert request["policy"]["write_behavior"] == "read_only"
+
+
 def test_normalize_knowledge_request_rejects_unsafe_policy_overrides():
     for unsafe_policy, expected_code in (
         ({"allow_unreviewed_sources": True}, "unreviewed_sources_not_allowed"),

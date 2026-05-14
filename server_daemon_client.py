@@ -121,7 +121,7 @@ def memory_protocol() -> dict[str, Any]:
             "tool": "query_knowledge",
             "contract_version": "engram.knowledge.request.v0",
             "response_version": "engram.knowledge.response.v0",
-            "scope": "project_orientation, source_orientation, document_orientation, review_preparation, evidence_audit",
+            "scope": "project_orientation, source_orientation, document_orientation, review_preparation, evidence_audit, graph_evidence",
         },
         "aliases": {
             "find_memories": "search_memories",
@@ -180,9 +180,9 @@ async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
     Return an Engram Knowledge Contract v0 response for task-shaped orientation.
 
     EKC v0 supports project_orientation, source_orientation,
-    document_orientation, review_preparation, and evidence_audit requests with
-    citations, freshness, policy, budget, planner, and explicit errors. This
-    tool is read-only.
+    document_orientation, review_preparation, evidence_audit, and
+    graph_evidence requests with citations, freshness, policy, budget, planner,
+    and explicit errors. This tool is read-only.
     """
     try:
         return await _call_daemon("query_knowledge", request)

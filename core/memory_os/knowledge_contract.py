@@ -20,6 +20,7 @@ SUPPORTED_TASK_TYPES = {
     "document_orientation",
     "review_preparation",
     "evidence_audit",
+    "graph_evidence",
 }
 SUPPORTED_RESPONSE_TYPES = {
     "project_capsule_summary",
@@ -27,6 +28,7 @@ SUPPORTED_RESPONSE_TYPES = {
     "document_orientation_summary",
     "review_preparation_packet",
     "evidence_audit_report",
+    "graph_evidence_summary",
 }
 STATUSES = (
     "ok",
@@ -45,6 +47,7 @@ DEFAULT_SHAPES = {
     "document_orientation": {"response_type": "document_orientation_summary", "format": "json"},
     "review_preparation": {"response_type": "review_preparation_packet", "format": "json"},
     "evidence_audit": {"response_type": "evidence_audit_report", "format": "json"},
+    "graph_evidence": {"response_type": "graph_evidence_summary", "format": "json"},
 }
 DEFAULT_SCOPE = {
     "review_state": ["reviewed", "accepted"],

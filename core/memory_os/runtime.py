@@ -27,6 +27,7 @@ from core.memory_os.knowledge_contract import (
     normalize_knowledge_request,
     ok_response,
 )
+from core.memory_os.knowledge_graph import build_graph_evidence
 from core.memory_os.knowledge_orientations import (
     build_document_orientation,
     build_source_orientation,
@@ -333,6 +334,17 @@ class MemoryOSRuntime:
                     max_records=int(normalized["budget"].get("max_source_reads", 12)),
                 ),
                 strategy="evidence_audit",
+            )
+        if ask["task_type"] == "graph_evidence":
+            return _orientation_response(
+                normalized,
+                build_graph_evidence(
+                    self.ledger,
+                    project=ask["project"],
+                    focus=ask["focus"],
+                    max_records=int(normalized["budget"].get("max_source_reads", 12)),
+                ),
+                strategy="graph_evidence",
             )
         persisted = self.knowledge_artifacts.read_latest_artifact(
             project=ask["project"],
