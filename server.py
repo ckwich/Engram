@@ -861,6 +861,37 @@ def _render_retrieve_memory_payload(payload: dict[str, Any]) -> str:
     )
 
 
+def _query_knowledge_runtime_error(
+    request: dict[str, Any] | None,
+    message: str,
+    *,
+    code: str = "runtime_error",
+) -> dict[str, Any]:
+    return {
+        "contract_version": "engram.knowledge.response.v0",
+        "request_id": str((request or {}).get("request_id") or ""),
+        "status": "unavailable",
+        "answer": None,
+        "citations": [],
+        "freshness": {"state": "unknown"},
+        "policy": {
+            "unreviewed_sources_used": False,
+            "unsupported_inferences_used": False,
+            "review_state_available": False,
+            "review_filter_enforced": False,
+            "review_state_basis": "not_available_in_current_memory_os_records",
+        },
+        "budget_used": {
+            "artifacts_built": 0,
+            "artifacts_read": 0,
+            "source_reads": 0,
+            "tokens_out_estimate": 0,
+        },
+        "planner": {"strategy": "none", "methods_used": [], "omissions": []},
+        "errors": [{"code": code, "category": "infrastructure", "message": message}],
+    }
+
+
 @mcp.tool()
 async def memory_protocol() -> MemoryProtocolPayload:
     """
@@ -895,6 +926,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "source_intake": "beta",
             "document_intelligence": "beta",
             "agent_workflows": "beta",
+            "knowledge_contract": "beta",
             "review_helpers": "beta",
             "retrieval_quality": "beta",
             "retrieval_backend": "beta",
@@ -1011,6 +1043,11 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "cost_class": "medium",
                 "tools": ["list_context_profiles", "prepare_context", "make_handoff", "prepare_project_capsule"],
             },
+            "knowledge_contract": {
+                "stability": "beta",
+                "cost_class": "low-to-medium",
+                "tools": ["query_knowledge"],
+            },
             "retrieval_quality": {
                 "purpose": "Inspect retrieval cost, quality, citations, and workflow recipes before scaling memory.",
                 "stability": "beta",
@@ -1090,6 +1127,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "retrieval profiles": "list_context_profiles",
                 "handoff generator": "make_handoff",
                 "project capsule": "prepare_project_capsule",
+                "knowledge contract": "query_knowledge",
                 "relationship inspection": "impact_scan",
                 "conflict inspection": "conflict_scan",
                 "graph backend status": "graph_backend_status",
@@ -1127,6 +1165,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_context": "Compile a no-write, cited context packet for a task using retrieval profiles.",
             "make_handoff": "Generate a no-write handoff packet with context refs, citations, next steps, and validation notes.",
             "prepare_project_capsule": "Prepare a no-write project capsule draft from context refs and quality signals.",
+            "query_knowledge": "Return an EKC v0 project capsule response with citations, freshness, policy, budget, planner, and typed errors.",
             "audit_memory_quality": "Read-only metadata quality audit for scope, lifecycle, chunking, and retrieval risk signals.",
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "conflict_scan": "List active contradiction, invalidation, and supersession graph edges without loading memory bodies.",
@@ -1261,6 +1300,7 @@ async def daemon_status() -> dict[str, Any]:
             "update_memory_metadata",
             "repair_memory_metadata",
             "delete_memory",
+            "query_knowledge",
         ] if configured_url else [],
         "error": None,
     }
@@ -1280,6 +1320,27 @@ async def daemon_status() -> dict[str, Any]:
         if error:
             base_payload["error"] = error
     return base_payload
+
+
+@mcp.tool()
+async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return an Engram Knowledge Contract v0 project capsule response.
+
+    This tool is read-only. It requires the daemon-owned Memory OS path because
+    EKC v0 is a serving contract over compiled local context, not a legacy
+    direct-mode memory write path.
+    """
+    if _daemon_enabled():
+        try:
+            return await asyncio.to_thread(_daemon_client().query_knowledge, request)
+        except EngramDaemonClientError as exc:
+            return _query_knowledge_runtime_error(request, str(exc))
+    return _query_knowledge_runtime_error(
+        request,
+        "query_knowledge requires the daemon-owned Memory OS path.",
+        code="daemon_required",
+    )
 
 
 @mcp.tool()

@@ -144,6 +144,21 @@ def test_memory_protocol_marks_new_v06_surfaces_as_beta_or_stable():
     assert payload["tool_groups"]["retrieval_backend"]["stability"] == "beta"
 
 
+def test_memory_protocol_advertises_knowledge_contract_v0():
+    server = load_server_module()
+
+    payload = asyncio.run(server.memory_protocol())
+
+    assert payload["tool_groups"]["knowledge_contract"] == {
+        "stability": "beta",
+        "cost_class": "low-to-medium",
+        "tools": ["query_knowledge"],
+    }
+    assert payload["progressive_discovery"]["load_next"]["knowledge contract"] == "query_knowledge"
+    assert "query_knowledge" in payload["canonical_tools"]
+    assert "project capsule" in payload["canonical_tools"]["query_knowledge"]
+
+
 def test_readme_mcp_tool_table_covers_protocol_tools():
     server = load_server_module()
     payload = asyncio.run(server.memory_protocol())

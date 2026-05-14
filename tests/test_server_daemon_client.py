@@ -164,6 +164,32 @@ class FakeDaemonClient:
         self.calls.append(("delete_memory", payload))
         return {"key": payload["key"], "deleted": True, "error": None}
 
+    def query_knowledge(self, payload):
+        self.calls.append(("query_knowledge", payload))
+        return {
+            "contract_version": "engram.knowledge.response.v0",
+            "request_id": payload["request_id"],
+            "status": "ok",
+            "answer": {"project": payload["ask"]["project"]},
+            "citations": [{"citation_id": "cit_001", "level": "chunk"}],
+            "freshness": {"state": "fresh"},
+            "policy": {
+                "unreviewed_sources_used": False,
+                "unsupported_inferences_used": False,
+                "review_state_available": False,
+                "review_filter_enforced": False,
+                "review_state_basis": "not_available_in_current_memory_os_records",
+            },
+            "budget_used": {
+                "artifacts_built": 1,
+                "artifacts_read": 0,
+                "source_reads": 0,
+                "tokens_out_estimate": 0,
+            },
+            "planner": {"strategy": "project_capsule", "methods_used": ["artifact"], "omissions": []},
+            "errors": [],
+        }
+
 
 def test_search_memories_uses_daemon_when_configured(monkeypatch):
     client = FakeDaemonClient()
@@ -232,6 +258,29 @@ def test_write_and_delete_tools_use_daemon_when_configured(monkeypatch):
     assert "Stored: 'Daemon Memory'" in stored
     assert "Deleted memory: 'daemon_memory'" in deleted
     assert [call[0] for call in client.calls] == ["store_memory", "delete_memory"]
+
+
+def test_query_knowledge_uses_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    payload = asyncio.run(
+        server.query_knowledge(
+            {
+                "request_id": "req-server",
+                "ask": {
+                    "goal": "Get context.",
+                    "task_type": "project_orientation",
+                    "project": "Engram",
+                },
+            }
+        )
+    )
+
+    assert payload["request_id"] == "req-server"
+    assert payload["answer"]["project"] == "Engram"
+    assert client.calls[-1][0] == "query_knowledge"
 
 
 def test_update_memory_metadata_uses_daemon_when_configured(monkeypatch):
