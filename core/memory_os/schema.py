@@ -1,7 +1,7 @@
 """Canonical Memory OS schema constants."""
 from __future__ import annotations
 
-SCHEMA_VERSION = "2026-05-13.memory-os.v1"
+SCHEMA_VERSION = "2026-05-14.memory-os.v1"
 
 TABLES = (
     "sources",
@@ -16,6 +16,7 @@ TABLES = (
     "graph_edges",
     "transactions",
     "retrieval_receipts",
+    "knowledge_artifacts",
     "jobs",
     "job_events",
     "snapshots",

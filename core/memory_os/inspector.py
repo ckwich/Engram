@@ -20,6 +20,7 @@ def build_memory_os_inspector(runtime: Any, *, limit: int = 20) -> dict[str, Any
     firewall = _records_section(ledger, "firewall_events", bounded_limit)
     snapshots = _records_section(ledger, "snapshots", bounded_limit)
     skill_packs = _records_section(ledger, "skill_packs", bounded_limit)
+    knowledge_artifacts = _records_section(ledger, "knowledge_artifacts", bounded_limit)
     graph_edges = _latest(list_records(ledger, "graph_edges"), bounded_limit)
     entities = _latest(list_records(ledger, "entities"), bounded_limit)
     concepts = _latest(list_records(ledger, "concepts"), bounded_limit)
@@ -40,6 +41,7 @@ def build_memory_os_inspector(runtime: Any, *, limit: int = 20) -> dict[str, Any
             "firewall_event_count": firewall["count"],
             "snapshot_count": snapshots["count"],
             "skill_pack_count": skill_packs["count"],
+            "knowledge_artifact_count": knowledge_artifacts["count"],
             "graph_edge_count": len(graph_edges),
             "entity_count": len(entities),
             "concept_count": len(concepts),
@@ -71,6 +73,7 @@ def build_memory_os_inspector(runtime: Any, *, limit: int = 20) -> dict[str, Any
         },
         "firewall_queue": firewall,
         "coverage_maps": coverage_maps,
+        "knowledge_artifacts": knowledge_artifacts,
         "snapshots": snapshots,
         "skill_packs": skill_packs,
     }

@@ -169,6 +169,51 @@ def test_memory_os_runtime_query_knowledge_returns_project_capsule_response(tmp_
     assert response["policy"]["review_state_basis"] == "not_available_in_current_memory_os_records"
 
 
+def test_memory_os_runtime_materializes_and_reads_persisted_project_capsule(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    runtime.store_memory(
+        key="engram_persisted_direction",
+        content="# Summary\n\nEngram persists reviewed project capsule artifacts.",
+        title="Persisted Direction",
+        project="Engram",
+        tags=["reviewed", "decision"],
+    )
+    request = {
+        "request_id": "req-materialize",
+        "ask": {
+            "goal": "Get current project context.",
+            "task_type": "project_orientation",
+            "project": "Engram",
+            "focus": ["persistence"],
+        },
+    }
+
+    materialized = runtime.materialize_project_capsule_artifact(request)
+    response = runtime.query_knowledge(request)
+    inspector = runtime.inspector()
+
+    assert materialized["write_performed"] is True
+    assert materialized["transaction_id"].startswith("txn:")
+    assert materialized["artifact_record"]["artifact_type"] == "project_capsule"
+    assert response["status"] == "ok"
+    assert response["answer"]["summary"] == "Engram persists reviewed project capsule artifacts."
+    assert response["budget_used"]["artifacts_read"] == 1
+    assert response["budget_used"]["artifacts_built"] == 0
+    assert response["budget_used"]["source_reads"] == 0
+    assert response["freshness"]["artifact_id"] == materialized["artifact_record"]["artifact_id"]
+    assert response["citations"][0]["level"] == "artifact"
+    assert response["citations"][0]["artifact_id"] == materialized["artifact_record"]["artifact_id"]
+    assert any(citation.get("level") == "chunk" for citation in response["citations"])
+    assert "persisted_artifact" in response["planner"]["methods_used"]
+    assert inspector["summary"]["knowledge_artifact_count"] == 1
+    assert inspector["knowledge_artifacts"]["items"][0]["artifact_id"] == materialized["artifact_record"]["artifact_id"]
+
+
 def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):
     runtime = MemoryOSRuntime(
         tmp_path,

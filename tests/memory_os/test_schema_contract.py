@@ -14,6 +14,7 @@ def test_schema_declares_required_core_tables():
         "graph_edges",
         "transactions",
         "retrieval_receipts",
+        "knowledge_artifacts",
         "jobs",
         "snapshots",
         "firewall_events",

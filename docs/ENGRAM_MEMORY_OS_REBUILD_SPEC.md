@@ -665,6 +665,10 @@ Project workflow:
 typed project capsule response with citations, freshness, policy, budget,
 planner, and explicit errors. It is read-only and does not replace
 `prepare_project_capsule`, which remains a draft/review helper.
+Persisted EKC artifacts are ledgered in `knowledge_artifacts` with immutable
+content-addressed JSON payloads. `query_knowledge` may read a fresh persisted
+project capsule and report `artifacts_read=1`, but durable artifact writes
+remain an explicit materialization operation.
 
 Operations:
 

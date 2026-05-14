@@ -20,6 +20,7 @@ Always read `plan.md` and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifyi
 | `core/graph_store.py` | Swappable graph persistence backend | Preserve GraphStore contract for legacy JSON and Memory OS Kuzu paths |
 | `core/kuzu_graph_store.py` | Kuzu-backed graph persistence adapter | Must preserve the GraphStore document contract; used by `core/memory_os/graph.py` under daemon-owned Memory OS runtime |
 | `core/memory_os/` | Rebuilt Memory OS runtime services | SQLite ledger, content store, LanceDB retrieval, Kuzu graph, jobs, transactions, snapshots, firewall, inspector, imports, bundles, and skill packs |
+| `core/memory_os/knowledge_artifacts.py` | Ledgered EKC artifact records | Explicit materialization only; `query_knowledge` may read artifacts but must not write them implicitly |
 | `core/backend_config.py` | Backend selection policy | Records operator intent only; defaults keep Chroma/JSON live and never promote candidates by itself |
 | `core/retrieval_backend_eval.py` | No-write retrieval backend comparison gates | Compares baseline and candidate VectorIndex adapters without touching live Chroma or memories |
 | `core/graph_backend_eval.py` | No-write graph parity and cross-document readiness gates | Reports edge contract health, cross-document concept links, and daemon-only Kuzu promotion requirements |
@@ -77,7 +78,7 @@ The dashboard CSP must not require `'unsafe-inline'`. Keep dashboard JavaScript 
 - For ordinary multi-session agent work, use `server_daemon_client.py` with a running loopback `engramd` daemon. Use `server.py` direct mode only for local debug, compatibility checks, or deliberate single-process development.
 - `context_pack(query, ...)` is the preferred compact working-set helper when snippets are too small but full memories would be wasteful.
 - `list_context_profiles()`, `prepare_context(task, ...)`, `make_handoff(task, ...)`, and `prepare_project_capsule(project, ...)` are no-write agent workflow helpers for task-focused context packets, resume handoffs, and reviewable project capsules. They wrap context-pack retrieval with profile defaults, receipts, warnings, next actions, and citation refs; they must not promote memory or hide citations.
-- Use `query_knowledge` for project-orientation context when the thin daemon client advertises EKC v0. It is a read-only serving contract. It must not be treated as permission to write or promote memory.
+- Use `query_knowledge` for project-orientation context when the thin daemon client advertises EKC v0. It is a read-only serving contract. It may read ledgered EKC artifacts when present, but it must not be treated as permission to write or promote memory.
 - `retrieval_mode="semantic"` is the stable default. Use `retrieval_mode="hybrid"` only for identifier-heavy queries where exact symbols, filenames, class names, or domain terms should influence ranking.
 - `context_pack()` returns grounded citation entries for every returned chunk. Use citations to justify which memory/chunk shaped an answer; do not treat citations as permission to load full memories automatically.
 - `list_ingestion_pipelines()`, `preview_memory_chunks()`, `preview_source_connector()`, and `list_workflow_templates()` are review/helper surfaces. They must remain no-write.

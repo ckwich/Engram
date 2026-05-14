@@ -17,6 +17,7 @@ from core.memory_os.firewall import MemoryFirewall
 from core.memory_os.graph import MemoryOSGraph
 from core.memory_os.inspector import build_memory_os_inspector
 from core.memory_os.jobs import JobQueue
+from core.memory_os.knowledge_artifacts import KnowledgeArtifactStore
 from core.memory_os.ledger import MemoryOSLedger
 from core.memory_os.knowledge_contract import (
     RESPONSE_SCHEMA_VERSION,
@@ -59,6 +60,7 @@ class MemoryOSRuntime:
             graph_store=graph_store,
             database_path=self.root / "kuzu",
         )
+        self.knowledge_artifacts = KnowledgeArtifactStore(self.ledger, self.content_store)
 
     def initialize(self) -> dict[str, Any]:
         """Initialize durable Memory OS stores and return a status payload."""
@@ -279,6 +281,77 @@ class MemoryOSRuntime:
         if normalized.get("contract_version") == RESPONSE_SCHEMA_VERSION:
             return normalized
 
+        ask = normalized["ask"]
+        persisted = self.knowledge_artifacts.read_latest_artifact(
+            project=ask["project"],
+            artifact_type="project_capsule",
+            artifact_version="v0",
+            require_fresh=True,
+        )
+        if persisted is not None:
+            return _project_capsule_response(
+                normalized,
+                artifact_record=persisted,
+                planner={
+                    "strategy": "project_capsule",
+                    "methods_used": ["persisted_artifact"],
+                    "omissions": [],
+                },
+                artifacts_built=0,
+                artifacts_read=1,
+                source_reads=0,
+            )
+
+        built = self._build_project_capsule_artifact(normalized)
+        if built.get("response") is not None:
+            return built["response"]
+
+        return _project_capsule_response(
+            normalized,
+            artifact_record={"artifact": built["artifact"]},
+            planner=built["planner"],
+            artifacts_built=1,
+            artifacts_read=0,
+            source_reads=len(built["results"]),
+        )
+
+    def materialize_project_capsule_artifact(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Explicitly persist a project capsule artifact for later read-only EKC serving."""
+        normalized = normalize_knowledge_request(request)
+        if normalized.get("contract_version") == RESPONSE_SCHEMA_VERSION:
+            return {**normalized, "write_performed": False}
+
+        built = self._build_project_capsule_artifact(normalized)
+        if built.get("response") is not None:
+            return {**built["response"], "write_performed": False}
+
+        artifact_record = self.knowledge_artifacts.store_artifact(
+            built["artifact"],
+            request_id=normalized["request_id"],
+        )
+        receipt = self.transactions.promote(
+            operation_kind="materialize_knowledge_artifact",
+            proposed_writes=[
+                {"table": "knowledge_artifacts", "id": artifact_record["artifact_id"]},
+            ],
+            idempotency_key=f"materialize_knowledge_artifact:{artifact_record['artifact_id']}",
+            affected_refs=[
+                {
+                    "kind": "knowledge_artifact",
+                    "artifact_id": artifact_record["artifact_id"],
+                    "project": artifact_record["project"],
+                },
+            ],
+        )
+        return {
+            "status": "ok",
+            "write_performed": True,
+            "artifact_record": artifact_record,
+            "transaction_id": receipt["transaction_id"],
+            "error": None,
+        }
+
+    def _build_project_capsule_artifact(self, normalized: dict[str, Any]) -> dict[str, Any]:
         budget = normalized["budget"]
         ask = normalized["ask"]
         query = _knowledge_search_query(ask)
@@ -296,12 +369,14 @@ class MemoryOSRuntime:
             "omissions": [],
         }
         if not results:
-            return no_answer_response(
-                request_id=normalized["request_id"],
-                code="no_project_sources",
-                message=f"No eligible project sources found for {ask['project']}.",
-                planner=planner,
-            )
+            return {
+                "response": no_answer_response(
+                    request_id=normalized["request_id"],
+                    code="no_project_sources",
+                    message=f"No eligible project sources found for {ask['project']}.",
+                    planner=planner,
+                )
+            }
 
         context_packet = {
             "profile": {"id": "project_capsule"},
@@ -323,43 +398,7 @@ class MemoryOSRuntime:
             quality_payload={"summary": {}, "issue_count": 0},
             source_snapshot_id="memory_os:latest",
         )
-        answer = {
-            "project": artifact["project"],
-            "summary": artifact["summary"],
-            "current_goals": artifact["current_goals"],
-            "active_decisions": artifact["active_decisions"],
-            "constraints": artifact["constraints"],
-            "open_questions": artifact["open_questions"],
-            "important_entities": artifact["important_entities"],
-            "recent_changes": artifact["recent_changes"],
-        }
-        partial = artifact["staleness"]["state"] != "fresh" or not artifact["summary"]
-        return ok_response(
-            request_id=normalized["request_id"],
-            answer=answer,
-            citations=artifact["citations"],
-            freshness={
-                "state": artifact["staleness"]["state"],
-                "artifact_generated_at": artifact["generated_at"],
-                "source_snapshot_id": artifact["source_snapshot_id"],
-            },
-            budget_used={
-                "artifacts_built": 1,
-                "artifacts_read": 0,
-                "source_reads": len(results),
-                "tokens_out_estimate": len(str(answer)) // 4,
-            },
-            planner=planner,
-            partial=partial,
-            errors=[]
-            if not partial
-            else [
-                {
-                    "code": "partial_capsule",
-                    "message": "Capsule is missing one or more optional orientation fields.",
-                }
-            ],
-        )
+        return {"artifact": artifact, "results": results, "planner": planner, "response": None}
 
     def retrieve_chunk(self, key: str, chunk_id: int) -> dict[str, Any]:
         """Retrieve one Memory OS chunk by memory key and chunk id."""
@@ -466,6 +505,85 @@ def _knowledge_search_query(ask: dict[str, Any]) -> str:
     parts = [ask.get("goal") or "project orientation", ask.get("project") or ""]
     parts.extend(ask.get("focus") or [])
     return " ".join(str(part).strip() for part in parts if str(part).strip())
+
+
+def _project_capsule_response(
+    normalized: dict[str, Any],
+    *,
+    artifact_record: dict[str, Any],
+    planner: dict[str, Any],
+    artifacts_built: int,
+    artifacts_read: int,
+    source_reads: int,
+) -> dict[str, Any]:
+    artifact = dict(artifact_record.get("artifact") or {})
+    answer = {
+        "project": artifact.get("project"),
+        "summary": artifact.get("summary") or "",
+        "current_goals": list(artifact.get("current_goals") or []),
+        "active_decisions": list(artifact.get("active_decisions") or []),
+        "constraints": list(artifact.get("constraints") or []),
+        "open_questions": list(artifact.get("open_questions") or []),
+        "important_entities": list(artifact.get("important_entities") or []),
+        "recent_changes": list(artifact.get("recent_changes") or []),
+    }
+    citations = _artifact_response_citations(artifact_record)
+    staleness = dict(artifact.get("staleness") or {})
+    partial = staleness.get("state") != "fresh" or not answer["summary"]
+    freshness = {
+        "state": staleness.get("state") or "unknown",
+        "artifact_generated_at": artifact.get("generated_at"),
+        "source_snapshot_id": artifact.get("source_snapshot_id"),
+    }
+    if artifact_record.get("artifact_id"):
+        freshness["artifact_id"] = artifact_record["artifact_id"]
+        freshness["artifact_persisted_at"] = artifact_record.get("created_at")
+    return ok_response(
+        request_id=normalized["request_id"],
+        answer=answer,
+        citations=citations,
+        freshness=freshness,
+        budget_used={
+            "artifacts_built": artifacts_built,
+            "artifacts_read": artifacts_read,
+            "source_reads": source_reads,
+            "tokens_out_estimate": len(str(answer)) // 4,
+        },
+        planner=planner,
+        partial=partial,
+        errors=[]
+        if not partial
+        else [
+            {
+                "code": "partial_capsule",
+                "message": "Capsule is missing one or more optional orientation fields.",
+            }
+        ],
+    )
+
+
+def _artifact_response_citations(artifact_record: dict[str, Any]) -> list[dict[str, Any]]:
+    artifact = dict(artifact_record.get("artifact") or {})
+    citations = []
+    artifact_id = artifact_record.get("artifact_id")
+    if artifact_id:
+        citations.append(
+            {
+                "citation_id": "artifact_001",
+                "level": "artifact",
+                "artifact_id": artifact_id,
+                "artifact_type": artifact_record.get("artifact_type"),
+                "artifact_version": artifact_record.get("artifact_version"),
+                "project": artifact_record.get("project"),
+                "source": "memory_os",
+            }
+        )
+    citations.extend(
+        citation
+        for citation in list(artifact.get("citations") or [])
+        if isinstance(citation, dict)
+    )
+    return citations
 
 
 def _default_embed_text(text: str) -> list[float]:
