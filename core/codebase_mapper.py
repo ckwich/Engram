@@ -63,6 +63,12 @@ DRAFT_SPINE_STEM_HINTS = {
     "store",
     "system",
 }
+CENTRAL_MAPPING_PATHS = (
+    "server.py",
+    "server_daemon_client.py",
+    "webui.py",
+    "core/memory_manager.py",
+)
 CODEBASE_SOURCE_SUFFIXES = {
     ".cs",
     ".cpp",
@@ -167,18 +173,11 @@ ENGRAM_MEMORY_OS_PLANNING_PATHS = [
     "docs/superpowers/plans/2026-05-12-engram-1-0-memory-os-document-disassembly-plan.md",
 ]
 ENGRAM_MEMORY_OS_DOMAINS: dict[str, dict[str, Any]] = {
-    "server_tools": {
-        "file_globs": ["server.py", "tests/test_server*.py"],
-        "questions": [
-            "What MCP tools are exposed and which manager or daemon route owns each one?",
-            "What docstrings are agent-facing contracts?",
-            "What compatibility aliases or protocol fields must remain stable?",
-        ],
-    },
-    "daemon_runtime": {
+    "daemon": {
         "file_globs": [
+            "engramd.py",
+            "server_daemon_client.py",
             "core/engramd_*.py",
-            "server.py",
             "tests/test_engramd*.py",
             "tests/test_server_daemon*.py",
         ],
@@ -188,41 +187,49 @@ ENGRAM_MEMORY_OS_DOMAINS: dict[str, dict[str, Any]] = {
             "What must stay data-root aware?",
         ],
     },
-    "storage": {
+    "memory_os": {
         "file_globs": [
-            "core/memory_manager.py",
-            "core/embedder.py",
-            "core/chunker.py",
-            "tests/test_memory*.py",
-            "tests/test_storage*.py",
+            "core/memory_os/**/*.py",
+            "tests/memory_os/**/*.py",
         ],
         "questions": [
-            "How are JSON-first writes and rebuildable vector indexes preserved?",
-            "What failure modes must not close MCP transport?",
-            "What storage invariants must a backend migration keep?",
+            "Which daemon-owned services make up the rebuilt Memory OS runtime?",
+            "How do ledger, content store, retrieval, graph, jobs, transactions, and inspector state interact?",
+            "What records are stable contracts for migration and recovery?",
         ],
     },
-    "document_intelligence": {
-        "file_globs": ["core/document_*.py", "tests/test_document*.py"],
-        "questions": [
-            "How does document intelligence keep extraction evidence review-first?",
-            "What records preserve page, visual, table, chunk, and quality provenance?",
-            "Where are external OCR or vision adapters allowed to plug in?",
+    "migration": {
+        "file_globs": [
+            "core/memory_os_migration.py",
+            "tests/test_memory_os_migration.py",
         ],
-    },
-    "memory_os_migration": {
-        "file_globs": ["core/memory_os_migration.py", "tests/test_memory_os_migration.py"],
         "questions": [
             "How does the migration ledger import existing memories without loss?",
             "What parity checks prove rollback and restore behavior?",
             "Which fields are durable migration contracts?",
         ],
     },
+    "document_intelligence": {
+        "file_globs": [
+            "core/document_*.py",
+            "core/document_intake_workflow.py",
+            "core/memory_os/document*.py",
+            "tests/test_document*.py",
+            "tests/memory_os/test_document*.py",
+        ],
+        "questions": [
+            "How does document intelligence keep extraction evidence review-first?",
+            "What records preserve page, visual, table, chunk, and quality provenance?",
+            "Where are external OCR or vision adapters allowed to plug in?",
+        ],
+    },
     "backend_status": {
         "file_globs": [
             "core/*backend_status.py",
+            "core/backend_gates/**/*.py",
             "core/lancedb_vector_index.py",
             "core/kuzu_graph_store.py",
+            "tests/backend_gates/**/*.py",
             "tests/test_*backend*.py",
         ],
         "questions": [
@@ -232,14 +239,21 @@ ENGRAM_MEMORY_OS_DOMAINS: dict[str, dict[str, Any]] = {
         ],
     },
     "graph": {
-        "file_globs": ["core/graph*.py", "core/kuzu_graph_store.py", "tests/test_graph*.py"],
+        "file_globs": [
+            "core/graph*.py",
+            "core/kuzu_graph_store.py",
+            "core/memory_os/graph.py",
+            "core/memory_os/knowledge_graph.py",
+            "tests/test_graph*.py",
+            "tests/memory_os/test_graph*.py",
+        ],
         "questions": [
             "How are graph edges validated, persisted, and traversed?",
             "What evidence comes back from traversal without loading memory bodies?",
             "What must a graph DB adapter preserve?",
         ],
     },
-    "source_intake": {
+    "source": {
         "file_globs": [
             "core/source_*.py",
             "core/ingestion_pipelines.py",
@@ -250,27 +264,6 @@ ENGRAM_MEMORY_OS_DOMAINS: dict[str, dict[str, Any]] = {
             "How do source drafts remain reviewable before promotion?",
             "What validation prevents malformed agent inputs from escaping the MCP boundary?",
             "How does draft promotion preserve JSON-first storage?",
-        ],
-    },
-    "codebase_mapping": {
-        "file_globs": ["core/codebase_mapper.py", "engram_index.py", "tests/test_codebase_mapper.py"],
-        "questions": [
-            "How does Engram prepare source-hashed repo context for connected agents?",
-            "How are stale stores blocked?",
-            "How are mapping jobs stored and made data-root aware?",
-        ],
-    },
-    "reliability": {
-        "file_globs": [
-            "core/reliability_harness.py",
-            "core/retrieval_eval.py",
-            "tests/test_retrieval*.py",
-            "tests/test_agent*.py",
-        ],
-        "questions": [
-            "Which deterministic evals prove agent-facing retrieval quality?",
-            "How are temporary eval memories seeded and cleaned up?",
-            "What regressions should block 1.0?",
         ],
     },
     "webui": {
@@ -285,6 +278,59 @@ ENGRAM_MEMORY_OS_DOMAINS: dict[str, dict[str, Any]] = {
             "Which dashboard surfaces are operator review tools rather than collaboration features?",
             "How is exposed-host auth enforced?",
             "What client-side patterns avoid unsafe inline handlers?",
+        ],
+    },
+    "codebase_mapping": {
+        "file_globs": ["core/codebase_mapper.py", "engram_index.py", "tests/test_codebase_mapper.py"],
+        "questions": [
+            "How does Engram prepare source-hashed repo context for connected agents?",
+            "How are stale stores blocked?",
+            "How are mapping jobs stored and made data-root aware?",
+        ],
+    },
+    "mcp_tools": {
+        "file_globs": [
+            "server.py",
+            "server_daemon_client.py",
+            "core/mcp/**/*.py",
+            "tests/mcp/**/*.py",
+            "tests/test_agent_protocol_tools.py",
+            "tests/test_server*.py",
+        ],
+        "questions": [
+            "What MCP tools are exposed and which manager or daemon route owns each one?",
+            "What docstrings and protocol metadata are agent-facing contracts?",
+            "What compatibility aliases or protocol fields must remain stable?",
+        ],
+    },
+    "legacy_adapters": {
+        "file_globs": [
+            "core/legacy/**/*.py",
+            "core/memory_manager.py",
+            "core/embedder.py",
+            "core/chunker.py",
+            "tests/legacy/**/*.py",
+            "tests/test_memory*.py",
+            "tests/test_storage*.py",
+            "tests/test_write_helpers.py",
+        ],
+        "questions": [
+            "Where do direct JSON/Chroma compatibility paths still exist?",
+            "Which imports are allowed to cross the legacy adapter boundary?",
+            "What invariants keep legacy storage recoverable during migration?",
+        ],
+    },
+    "reliability": {
+        "file_globs": [
+            "core/reliability_harness.py",
+            "core/retrieval_eval.py",
+            "tests/test_retrieval*.py",
+            "tests/test_agent*.py",
+        ],
+        "questions": [
+            "Which deterministic evals prove agent-facing retrieval quality?",
+            "How are temporary eval memories seeded and cleaned up?",
+            "What regressions should block 1.0?",
         ],
     },
 }
@@ -719,6 +765,48 @@ def collect_mapping_files(
     return [files_by_relative_path[key] for key in sorted(files_by_relative_path)]
 
 
+def central_file_size_warnings(
+    project_root: Path,
+    domain_config: dict[str, Any],
+    max_file_size_kb: int,
+) -> list[dict[str, Any]]:
+    """Report important files that matched a domain but were skipped by size."""
+    warnings_by_path: dict[str, dict[str, Any]] = {}
+    for pattern in domain_config.get("file_globs", []):
+        for path in sorted(project_root.glob(pattern)):
+            if not path.is_file():
+                continue
+            try:
+                resolved_path = path.resolve(strict=True)
+            except OSError:
+                continue
+            if not _is_relative_to(resolved_path, project_root):
+                continue
+            relative = path.relative_to(project_root).as_posix()
+            if relative not in CENTRAL_MAPPING_PATHS:
+                continue
+            if _should_skip_mapping_path(path, project_root):
+                continue
+            try:
+                size_kb = path.stat().st_size / 1024
+            except OSError:
+                continue
+            if size_kb <= max_file_size_kb:
+                continue
+            warnings_by_path[relative] = {
+                "code": "central_file_excluded_by_size",
+                "path": relative,
+                "size_kb": round(size_kb, 2),
+                "max_file_size_kb": max_file_size_kb,
+                "message": (
+                    f"{relative} matched this mapping domain but exceeded "
+                    f"max_file_size_kb={max_file_size_kb}; raise max_file_size_kb "
+                    "or map it in a narrower domain before trusting the summary."
+                ),
+            }
+    return [warnings_by_path[key] for key in sorted(warnings_by_path)]
+
+
 def memory_key(project_name: str, domain_name: str) -> str:
     safe_project = _safe_key_part(project_name)
     safe_domain = _safe_key_part(domain_name)
@@ -1021,7 +1109,7 @@ class CodebaseMappingManager:
             drift = source_drift(
                 project_root,
                 domain_config,
-                domain_entry.get("file_hashes"),
+                domain_entry.get("source_hashes") or domain_entry.get("file_hashes"),
                 max_kb,
             )
             context = assemble_mapping_context(project_root, config, domain, domain_config)
@@ -1038,6 +1126,8 @@ class CodebaseMappingManager:
                 "context_chars": len(context),
                 "memory_key": domain_entry["memory_key"],
                 "source_drift": drift,
+                "source_hashes": dict(domain_entry.get("source_hashes") or domain_entry.get("file_hashes") or {}),
+                "warnings": list(domain_entry.get("warnings") or []),
                 "synthesis_prompt": build_synthesis_prompt(job["project_name"], domain, domain_config),
                 "agent_steps": [
                     "Read every context part for this domain.",
@@ -1071,7 +1161,7 @@ class CodebaseMappingManager:
             drift = source_drift(
                 project_root,
                 domain_config,
-                domain_entry.get("file_hashes"),
+                domain_entry.get("source_hashes") or domain_entry.get("file_hashes"),
                 max_kb,
             )
             if drift["changed"] and not force:
@@ -1245,6 +1335,11 @@ class CodebaseMappingManager:
             path.relative_to(project_root).as_posix(): sha256_file(path)
             for path in files
         }
+        warnings = central_file_size_warnings(
+            project_root,
+            domain_config,
+            config.get("max_file_size_kb", DEFAULT_MAX_FILE_SIZE_KB),
+        )
         context = assemble_mapping_context(project_root, config, domain_name, domain_config)
         return {
             "domain": domain_name,
@@ -1253,6 +1348,8 @@ class CodebaseMappingManager:
             "file_count": len(files),
             "files": [path.relative_to(project_root).as_posix() for path in files],
             "file_hashes": file_hashes,
+            "source_hashes": file_hashes,
+            "warnings": warnings,
             "context_chars": len(context),
             "context_part_count": max(1, math.ceil(len(context) / budget_chars)),
             "questions": domain_config.get("questions", DEFAULT_QUESTIONS),

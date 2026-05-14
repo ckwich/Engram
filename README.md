@@ -544,11 +544,19 @@ It does not secretly spawn a provider-specific model to write architecture summa
 
 Mapping jobs are data-root aware: when `ENGRAM_DATA_DIR` is set, prepared job
 records are written under `ENGRAM_DATA_DIR/codebase_mapping_jobs` instead of the
-default repo `data/` folder. Engram's own draft mapping config uses Memory OS
-domains for daemon runtime, document intelligence, migration, backend status,
-graph, source intake, codebase mapping, reliability, WebUI, server tools, and
-storage so agents can map the current 1.0 architecture instead of the older
-pre-daemon shape.
+default repo `data/` folder. Engram's own draft mapping config uses current
+Memory OS domains for `daemon`, `memory_os`, `migration`,
+`document_intelligence`, `backend_status`, `graph`, `source`, `webui`,
+`reliability`, `codebase_mapping`, `mcp_tools`, and `legacy_adapters` so agents
+can map the current 1.0 architecture instead of the older pre-daemon shape.
+
+Each prepared domain records source hashes and returns a source-drift receipt
+when context is read or stored. `store_codebase_mapping_result` rejects stale
+prepared context unless the caller explicitly passes `force=True`, and even a
+forced store reports the changed, new, or missing source files. Central files
+such as `server.py` and `core/memory_manager.py` also produce warnings when a
+size filter excludes them, so a reviewer knows the mapping context skipped an
+important architecture file.
 
 Typical MCP flow:
 

@@ -2605,7 +2605,9 @@ async def draft_codebase_mapping_config(
     Draft a safe .engram/config.json for a repo without writing it.
 
     The draft is heuristic and agent-reviewable. Call store_codebase_mapping_config
-    with the returned config, optionally edited, to persist it.
+    with the returned config, optionally edited, to persist it. Engram's own
+    repo draft uses current Memory OS domains such as daemon, memory_os,
+    migration, source, mcp_tools, and legacy_adapters.
     """
     started_at = time.perf_counter()
     input_payload = {"project_root": project_root, "project_name": project_name}
@@ -2660,7 +2662,8 @@ async def preview_codebase_mapping(
     Dry-run configured codebase mapping domains without writing a mapping job.
 
     Use this after config setup and before prepare_codebase_mapping when an
-    agent wants file counts, context sizes, and selected domains.
+    agent wants file counts, context sizes, selected domains, and warnings for
+    important central files excluded by size filters.
     """
     started_at = time.perf_counter()
     input_payload = {
@@ -2733,8 +2736,8 @@ async def read_codebase_mapping_context(
     Read one bounded context part from a prepared codebase mapping job.
 
     Call this for every part in a domain before synthesizing. The returned
-    context is source text plus a source-drift receipt; Engram still does not
-    invoke a model.
+    context is source text plus source hashes, warnings, and a source-drift
+    receipt; Engram still does not invoke a model.
     """
     started_at = time.perf_counter()
     input_payload = {"job_id": job_id, "domain": domain, "part_index": part_index}
@@ -2755,7 +2758,8 @@ async def store_codebase_mapping_result(
 
     This is the promotion step after the connected agent has synthesized
     architecture markdown from read_codebase_mapping_context output. If source
-    files changed since prepare, storage fails unless force=True.
+    files changed since prepare, storage fails unless force=True; forced stores
+    still report the source-drift receipt.
     """
     started_at = time.perf_counter()
     input_payload = {"job_id": job_id, "domain": domain, "content": content, "force": force}

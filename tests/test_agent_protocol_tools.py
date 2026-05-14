@@ -221,6 +221,29 @@ def test_readme_mcp_tool_table_covers_protocol_tools():
     assert missing == []
 
 
+def test_readme_documents_current_codebase_mapping_domains():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    codebase_section = readme.split("\n## Codebase Mapping\n", 1)[1].split("\n---", 1)[0]
+
+    for domain_name in [
+        "daemon",
+        "memory_os",
+        "migration",
+        "document_intelligence",
+        "backend_status",
+        "graph",
+        "source",
+        "webui",
+        "reliability",
+        "mcp_tools",
+        "legacy_adapters",
+    ]:
+        assert domain_name in codebase_section
+
+    assert "source-drift" in codebase_section
+    assert "force=True" in codebase_section
+
+
 def test_mcp_contract_doc_covers_server_tools():
     server_source = (REPO_ROOT / "server.py").read_text(encoding="utf-8")
     active_contract_docs = "\n".join(

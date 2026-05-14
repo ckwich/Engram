@@ -172,6 +172,10 @@ def _write_engram_like_project(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# {relative_path}\n", encoding="utf-8")
     (project / "server.py").write_text("# server\n" + ("x = 1\n" * 25000), encoding="utf-8")
+    (project / "core" / "memory_manager.py").write_text(
+        "# memory manager\n" + ("x = 1\n" * 25000),
+        encoding="utf-8",
+    )
     return project
 
 
@@ -377,19 +381,49 @@ def test_draft_codebase_mapping_config_uses_memory_os_domains_for_engram(tmp_pat
     assert config["project_name"] == "Engram"
     assert config["max_file_size_kb"] >= 512
     assert {
-        "daemon_runtime",
+        "daemon",
+        "memory_os",
+        "migration",
         "document_intelligence",
-        "memory_os_migration",
         "backend_status",
         "graph",
+        "source",
         "webui",
         "reliability",
         "codebase_mapping",
-        "server_tools",
-        "storage",
+        "mcp_tools",
+        "legacy_adapters",
     }.issubset(domains)
-    server_files = mapper_module.collect_mapping_files(project, domains["server_tools"], config["max_file_size_kb"])
+    server_files = mapper_module.collect_mapping_files(project, domains["mcp_tools"], config["max_file_size_kb"])
     assert "server.py" in {path.relative_to(project).as_posix() for path in server_files}
+
+
+def test_mapping_domain_entries_warn_when_central_files_are_size_excluded(tmp_path, monkeypatch):
+    import core.codebase_mapper as mapper_module
+
+    monkeypatch.setattr(mapper_module, "CODEBASE_MAPPING_DIR", tmp_path / "mapping_jobs")
+    project = _write_engram_like_project(tmp_path)
+    manager = mapper_module.CodebaseMappingManager()
+    config = manager.draft_config(project_root=project)["config"]
+    config["max_file_size_kb"] = 1
+    manager.store_config(project_root=project, config=config, overwrite=False)
+
+    payload = manager.preview_mapping(project_root=project, mode="bootstrap", domain="mcp_tools")
+
+    assert payload["error"] is None
+    domain_entry = payload["preview"]["domains"][0]
+    assert "server.py" not in domain_entry["files"]
+    assert {
+        "code": "central_file_excluded_by_size",
+        "path": "server.py",
+        "max_file_size_kb": 1,
+    }.items() <= domain_entry["warnings"][0].items()
+    assert "raise max_file_size_kb" in domain_entry["warnings"][0]["message"]
+
+    legacy_payload = manager.preview_mapping(project_root=project, mode="bootstrap", domain="legacy_adapters")
+    legacy_entry = legacy_payload["preview"]["domains"][0]
+    warning_paths = {warning["path"] for warning in legacy_entry["warnings"]}
+    assert "core/memory_manager.py" in warning_paths
 
 
 def test_preview_codebase_mapping_counts_drafted_gradle_and_message_assets(tmp_path, monkeypatch):
@@ -591,6 +625,7 @@ def test_read_context_reports_source_drift_since_prepare(tmp_path, monkeypatch):
     assert payload["error"] is None
     assert payload["source_drift"]["changed"] is True
     assert payload["source_drift"]["changed_files"] == ["src/player.py"]
+    assert payload["source_hashes"]["src/player.py"] == job["domains"][0]["source_hashes"]["src/player.py"]
 
 
 def test_store_result_rejects_stale_prepare_without_force(tmp_path, monkeypatch):
@@ -621,6 +656,39 @@ def test_store_result_rejects_stale_prepare_without_force(tmp_path, monkeypatch)
 
     assert payload["stored"] is None
     assert payload["error"]["code"] == "source_drift"
+
+
+def test_store_result_with_force_records_stale_drift_and_writes(tmp_path, monkeypatch):
+    import core.codebase_mapper as mapper_module
+
+    monkeypatch.setattr(mapper_module, "CODEBASE_MAPPING_DIR", tmp_path / "mapping_jobs")
+    project = _write_project(tmp_path)
+
+    class FakeMemoryManager:
+        def __init__(self):
+            self.calls = []
+
+        def store_memory(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"key": kwargs["key"], "chunk_count": 1}
+
+    manager = mapper_module.CodebaseMappingManager()
+    job = manager.prepare_mapping(project_root=project, mode="bootstrap", budget_chars=400)["job"]
+    (project / "src" / "player.py").write_text("class Changed:\n    pass\n", encoding="utf-8")
+    fake_memory_manager = FakeMemoryManager()
+
+    payload = manager.store_result(
+        job_id=job["job_id"],
+        domain="gameplay",
+        content="## Architecture\n\nForce-accepted stale synthesis.",
+        memory_manager=fake_memory_manager,
+        force=True,
+    )
+
+    assert payload["error"] is None
+    assert payload["source_drift"]["changed"] is True
+    assert payload["source_drift"]["changed_files"] == ["src/player.py"]
+    assert fake_memory_manager.calls[0]["force"] is True
 
 
 def test_mapping_job_ids_cannot_escape_mapping_dir(tmp_path, monkeypatch):
