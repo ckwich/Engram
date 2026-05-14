@@ -131,6 +131,13 @@ def prepare_document_disassembly(
     low_text_pages = [page["page_number"] for page in pages if page["text_status"] == "low_text"]
     text_content = "\f".join(page_texts[:page_batch_count or len(page_texts)])
     title = info.get("title") or path.stem
+    document_record = prepare_document_record(
+        title=title,
+        source_uri=source["source_uri"],
+        source_type=normalized_source_type,
+        content_hash=source["content_hash"],
+        media_type=PDF_MEDIA_TYPE,
+    )
     resume = _resume_payload(
         source_hash=source["content_hash"],
         page_count=page_count,
@@ -148,7 +155,7 @@ def prepare_document_disassembly(
         "source": source,
         "capabilities": capabilities,
         "document": {
-            "document_id": _stable_id("doc", f"{source['source_uri']}|{source['content_hash']}"),
+            "document_id": document_record["document_id"],
             "title": title,
             "source_type": normalized_source_type,
             "media_type": PDF_MEDIA_TYPE,
@@ -212,15 +219,23 @@ def prepare_document_disassembly(
 
 
 def _run_command(args: list[str], timeout_seconds: int) -> ExtractorCommandResult:
-    completed = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout_seconds,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        return ExtractorCommandResult(
+            returncode=124,
+            stdout=stdout,
+            stderr=f"{Path(args[0]).stem.lower()} timed out after {timeout_seconds} seconds",
+        )
     return ExtractorCommandResult(
         returncode=completed.returncode,
         stdout=completed.stdout or "",
@@ -237,7 +252,14 @@ def _run_pdf_tool(
 ) -> ExtractorCommandResult:
     started = time.perf_counter()
     command = [tool_path, *args]
-    result = runner(command, timeout_seconds)
+    try:
+        result = runner(command, timeout_seconds)
+    except subprocess.TimeoutExpired:
+        result = ExtractorCommandResult(
+            returncode=124,
+            stdout="",
+            stderr=f"{Path(tool_path).stem.lower()} timed out after {timeout_seconds} seconds",
+        )
     receipts.append(
         {
             "tool": Path(tool_path).stem.lower(),
@@ -402,9 +424,12 @@ def _visual_evidence_plan(
             "text_status": page.get("text_status"),
             "image_count": int(page.get("image_count") or 0),
         }
-        candidate_id = _stable_id(
+        candidate_id = _readable_stable_id(
             "vis_candidate",
             f"{document.get('document_id')}|{page_number}|{source_artifact_id}|page_crop",
+            document.get("document_id"),
+            f"page_{page_number}",
+            "page_crop",
         )
         candidates.append(
             {
@@ -437,6 +462,7 @@ def _visual_evidence_plan(
         content_hash=str(document.get("content_hash") or source.get("content_hash") or ""),
         media_type=str(document.get("media_type") or source.get("media_type") or PDF_MEDIA_TYPE),
         metadata={
+            "document_id": document.get("document_id"),
             "extractor_id": "engram-local-pdf-disassembly",
             "page_count": document.get("page_count"),
             "page_limit": document.get("page_limit"),
@@ -578,6 +604,11 @@ def _parse_bool(value: str | None) -> bool:
 
 def _tool_failure(tool: str, result: ExtractorCommandResult) -> dict[str, str]:
     detail = result.stderr.strip() or f"exit code {result.returncode}"
+    if result.returncode == 124:
+        return {
+            "code": "tool_timeout",
+            "message": detail or f"{tool} timed out",
+        }
     return {
         "code": "extractor_failed",
         "message": f"{tool} failed: {detail}",
@@ -586,3 +617,17 @@ def _tool_failure(tool: str, result: ExtractorCommandResult) -> dict[str, str]:
 
 def _stable_id(prefix: str, value: str) -> str:
     return f"{prefix}_{hashlib.sha256(value.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _readable_stable_id(prefix: str, seed: str, *readable_parts: Any) -> str:
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+    label = _slugify("_".join(str(part) for part in readable_parts if part not in (None, "")), max_length=96)
+    if not label:
+        return f"{prefix}_{digest}"
+    return f"{prefix}_{label}_{digest}"
+
+
+def _slugify(value: str, *, max_length: int = 80) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(value).strip().lower()).strip("_")
+    slug = re.sub(r"_+", "_", slug)
+    return slug[:max_length].strip("_")

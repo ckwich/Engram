@@ -45,6 +45,7 @@ def test_build_document_artifact_manifest_uses_content_addresses_and_resume_stat
     assert manifest["write_performed"] is False
     assert manifest["active_memory_write_performed"] is False
     assert manifest["document_id"] == "doc_alpha"
+    assert manifest["manifest_id"].startswith("doc_manifest_doc_alpha_")
     assert manifest["artifacts"]["raw_source"]["ref"].startswith("document_artifacts/sources/aa/")
     assert manifest["artifacts"]["raw_source"]["content_hash"] == "sha256:" + "a" * 64
     page_text_refs = [page["text_artifact"]["ref"] for page in manifest["pages"] if page.get("text_artifact")]

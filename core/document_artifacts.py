@@ -63,7 +63,7 @@ def build_document_artifact_manifest(
     return {
         "schema_version": DOCUMENT_ARTIFACT_SCHEMA_VERSION,
         "record_type": "document_artifact_manifest",
-        "manifest_id": _manifest_id(source_hash),
+        "manifest_id": _manifest_id(source_hash, document.get("document_id")),
         "document_id": document.get("document_id"),
         "artifact_root": str((root / DEFAULT_ARTIFACT_ROOT_NAME).resolve()),
         "portable_refs_only": True,
@@ -163,8 +163,17 @@ def _require_hash(value: Any) -> str:
     return text
 
 
-def _manifest_id(content_hash: str) -> str:
-    return "doc_manifest_" + hashlib.sha256(content_hash.encode("utf-8")).hexdigest()[:16]
+def _manifest_id(content_hash: str, document_id: Any) -> str:
+    digest = hashlib.sha256(content_hash.encode("utf-8")).hexdigest()[:8]
+    label = _slugify(str(document_id or "document"), max_length=96)
+    return f"doc_manifest_{label}_{digest}" if label else f"doc_manifest_{digest}"
+
+
+def _slugify(value: str, *, max_length: int = 80) -> str:
+    slug = "".join(char.lower() if char.isalnum() else "_" for char in str(value).strip())
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_")[:max_length].strip("_")
 
 
 def _page_set(value: Any) -> set[int]:

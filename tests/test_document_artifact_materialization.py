@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 from core.memory_os._records import list_records, read_record
 from core.memory_os.runtime import MemoryOSRuntime
 
 
 def _review_packet(tmp_path):
     source = tmp_path / "book.pdf"
-    source.write_bytes(b"%PDF-1.4 synthetic document")
-    content_hash = "sha256:" + "a" * 64
+    source_bytes = b"%PDF-1.4 synthetic document"
+    source.write_bytes(source_bytes)
+    content_hash = "sha256:" + hashlib.sha256(source_bytes).hexdigest()
     return {
         "record_type": "document_intake_review",
         "status": "partial",
@@ -153,7 +157,9 @@ def test_prepare_document_artifact_store_records_reviewable_transaction_without_
     assert prepared["graph_write_performed"] is False
     assert prepared["receipts"]["artifacts_built"] == 1
     assert prepared["receipts"]["artifacts_read"] == 0
+    assert prepared["prepared_transaction_id"].startswith("doc_artifact_txn:doc_book:")
     assert prepared["artifact_preview"]["document_id"] == "doc_book"
+    assert prepared["artifact_preview"]["artifact_id"].startswith("doc_artifact:doc_book:")
     assert prepared["artifact_preview"]["coverage_receipt"]["coverage_missing"] == ["ocr", "table", "visual"]
     assert list_records(runtime.ledger, "knowledge_artifacts") == []
     assert list_records(runtime.ledger, "memories") == []
@@ -163,6 +169,13 @@ def test_prepare_document_artifact_store_records_reviewable_transaction_without_
     assert transaction is not None
     assert transaction["status"] == "prepared"
     assert transaction["operation_kind"] == "document_artifact_store"
+    assert "review_packet" not in transaction
+    assert transaction["review_context"]["document"]["document_id"] == "doc_book"
+    assert transaction["review_context"]["text"]["char_count"] == 20
+    assert transaction["review_packet_sha256"] == prepared["review_packet_sha256"]
+    transaction_json = json.dumps(transaction, sort_keys=True)
+    assert "# Book" not in transaction_json
+    assert "Useful text." not in transaction_json
 
 
 def test_store_document_artifact_requires_accept_and_keeps_memory_and_graph_unchanged(tmp_path):
@@ -176,7 +189,12 @@ def test_store_document_artifact_requires_accept_and_keeps_memory_and_graph_unch
     assert denied["write_performed"] is False
     assert list_records(runtime.ledger, "knowledge_artifacts") == []
 
-    stored = runtime.store_document_artifact(prepared["prepared_transaction_id"], accept=True)
+    review_packet = _review_packet(tmp_path)
+    stored = runtime.store_document_artifact(
+        prepared["prepared_transaction_id"],
+        accept=True,
+        review_packet=review_packet,
+    )
 
     assert stored["status"] == "ok"
     assert stored["write_performed"] is True
@@ -192,10 +210,83 @@ def test_store_document_artifact_requires_accept_and_keeps_memory_and_graph_unch
 
     artifact = list_records(runtime.ledger, "knowledge_artifacts")[0]
     assert artifact["document_id"] == "doc_book"
+    assert artifact["artifact_id"].startswith("doc_artifact:doc_book:")
     assert artifact["artifact_type"] == "document_evidence"
-    assert artifact["source_sha256"] == "sha256:" + "a" * 64
+    assert artifact["source_sha256"] == review_packet["source"]["sha256"]
     assert artifact["review_state"] == "ledgered_evidence"
     assert artifact["coverage_receipt"]["coverage_missing"] == ["ocr", "table", "visual"]
+
+
+def test_store_document_artifact_requires_review_packet_for_compact_transaction(tmp_path):
+    runtime = MemoryOSRuntime(tmp_path / "memory_os")
+    runtime.initialize()
+    prepared = runtime.prepare_document_artifact_store(_review_packet(tmp_path))
+
+    stored = runtime.store_document_artifact(prepared["prepared_transaction_id"], accept=True)
+
+    assert stored["status"] == "schema_failed"
+    assert stored["error"]["code"] == "review_packet_required"
+    assert list_records(runtime.ledger, "knowledge_artifacts") == []
+
+
+def test_store_document_artifact_rejects_changed_source_bytes(tmp_path):
+    runtime = MemoryOSRuntime(tmp_path / "memory_os")
+    runtime.initialize()
+    review = _review_packet(tmp_path)
+    prepared = runtime.prepare_document_artifact_store(review)
+    source_path = review["source"]["source_path"]
+    with open(source_path, "wb") as handle:
+        handle.write(b"%PDF-1.4 edited after review")
+
+    stored = runtime.store_document_artifact(
+        prepared["prepared_transaction_id"],
+        accept=True,
+        review_packet=review,
+    )
+
+    assert stored["status"] == "schema_failed"
+    assert stored["error"]["code"] == "source_hash_mismatch"
+    assert list_records(runtime.ledger, "knowledge_artifacts") == []
+
+
+def test_prepare_document_artifact_store_returns_stable_policy_error_codes(tmp_path):
+    runtime = MemoryOSRuntime(tmp_path / "memory_os")
+    runtime.initialize()
+    review = _review_packet(tmp_path)
+    review["policy"]["write_behavior"] = "write"
+
+    prepared = runtime.prepare_document_artifact_store(review)
+
+    assert prepared["status"] == "schema_failed"
+    assert prepared["error"]["code"] == "policy_write_behavior_not_read_only"
+    assert prepared["error"]["category"] == "validation"
+
+
+def test_store_document_artifact_accept_is_idempotent(tmp_path):
+    runtime = MemoryOSRuntime(tmp_path / "memory_os")
+    runtime.initialize()
+    review = _review_packet(tmp_path)
+    prepared = runtime.prepare_document_artifact_store(review)
+
+    first = runtime.store_document_artifact(
+        prepared["prepared_transaction_id"],
+        accept=True,
+        review_packet=review,
+    )
+    job_count = len(list_records(runtime.ledger, "jobs"))
+    event_count = len(list_records(runtime.ledger, "job_events"))
+    second = runtime.store_document_artifact(
+        prepared["prepared_transaction_id"],
+        accept=True,
+        review_packet=review,
+    )
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok"
+    assert second["idempotent_replay"] is True
+    assert second["artifact"]["artifact_id"] == first["artifact"]["artifact_id"]
+    assert len(list_records(runtime.ledger, "jobs")) == job_count
+    assert len(list_records(runtime.ledger, "job_events")) == event_count
 
 
 def test_prepare_document_artifact_store_rejects_manifest_path_escape(tmp_path):

@@ -627,7 +627,7 @@ def test_document_artifact_tools_use_daemon_when_configured(monkeypatch):
     monkeypatch.setattr(server, "_daemon_client", lambda: client)
 
     prepared = asyncio.run(server.prepare_document_artifact_store({"status": "ok"}))
-    stored = asyncio.run(server.store_document_artifact("txn-doc", accept=True))
+    stored = asyncio.run(server.store_document_artifact("txn-doc", accept=True, review_packet={"status": "ok"}))
 
     assert prepared["prepared_transaction_id"] == "txn-doc"
     assert stored["stored"] is True
@@ -638,7 +638,11 @@ def test_document_artifact_tools_use_daemon_when_configured(monkeypatch):
         ),
         (
             "store_document_artifact",
-            {"prepared_transaction_id": "txn-doc", "accept": True},
+            {
+                "prepared_transaction_id": "txn-doc",
+                "accept": True,
+                "review_packet": {"status": "ok"},
+            },
         ),
     ]
 

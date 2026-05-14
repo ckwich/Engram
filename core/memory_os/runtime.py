@@ -478,11 +478,13 @@ class MemoryOSRuntime:
         prepared_transaction_id: str,
         *,
         accept: bool = False,
+        review_packet: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Store prepared document evidence artifacts only after acceptance."""
         return self.document_artifacts.store_document_artifact(
             prepared_transaction_id,
             accept=accept,
+            review_packet=review_packet,
         )
 
     def _build_project_capsule_artifact(self, normalized: dict[str, Any]) -> dict[str, Any]:

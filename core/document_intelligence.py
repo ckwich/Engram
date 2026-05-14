@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from core.chunker import chunk_content_with_metadata
 from core.graph_manager import normalize_graph_edge_proposal
@@ -182,16 +184,21 @@ def prepare_document_record(
     normalized_source_type = _require_text(source_type, "source_type")
     normalized_content_hash = _require_hash(content_hash, "content_hash")
     normalized_media_type = _require_text(media_type, "media_type")
+    normalized_metadata = dict(metadata or {})
     return {
         "schema_version": DOCUMENT_INTELLIGENCE_SCHEMA_VERSION,
         "record_type": "document",
-        "document_id": _stable_id("doc", f"{normalized_source_uri}|{normalized_content_hash}"),
+        "document_id": _document_id(
+            title=normalized_title,
+            source_uri=normalized_source_uri,
+            metadata=normalized_metadata,
+        ),
         "title": normalized_title,
         "source_uri": normalized_source_uri,
         "source_type": normalized_source_type,
         "content_hash": normalized_content_hash,
         "media_type": normalized_media_type,
-        "metadata": dict(metadata or {}),
+        "metadata": normalized_metadata,
         "review_status": "evidence",
         "write_policy": "draft_only",
         "write_performed": False,
@@ -243,7 +250,13 @@ def prepare_visual_artifact_record(
     return {
         "schema_version": DOCUMENT_INTELLIGENCE_SCHEMA_VERSION,
         "record_type": "visual_artifact",
-        "artifact_id": _stable_id("vis", artifact_seed),
+        "artifact_id": _readable_stable_id(
+            "vis",
+            artifact_seed,
+            normalized_document_id,
+            normalized_artifact_type,
+            normalized_extractor_id,
+        ),
         "document_id": normalized_document_id,
         "artifact_type": normalized_artifact_type,
         "text": normalized_text,
@@ -293,7 +306,7 @@ def prepare_extractor_receipt(
     return {
         "schema_version": DOCUMENT_INTELLIGENCE_SCHEMA_VERSION,
         "record_type": "extractor_receipt",
-        "receipt_id": _stable_id("doc_extract", receipt_seed),
+        "receipt_id": _readable_stable_id("doc_extract", receipt_seed, document_id, normalized_extractor_id),
         "document_id": document_id,
         "extractor": {
             "id": normalized_extractor_id,
@@ -339,7 +352,7 @@ def prepare_visual_extraction_request(
     return {
         "schema_version": VISUAL_REQUEST_SCHEMA_VERSION,
         "record_type": "visual_extraction_request",
-        "request_id": _stable_id("vis_req", request_seed),
+        "request_id": _readable_stable_id("vis_req", request_seed, document_id, normalized_extractor_id),
         "document_id": document_id,
         "image_refs": normalized_images,
         "requested_capabilities": normalized_capabilities,
@@ -396,7 +409,13 @@ def prepare_document_extraction_request(
     return {
         "schema_version": DOCUMENT_EXTRACTION_REQUEST_SCHEMA_VERSION,
         "record_type": "document_extraction_request",
-        "request_id": _stable_id("doc_req", request_seed),
+        "request_id": _readable_stable_id(
+            "doc_req",
+            request_seed,
+            _source_ref_label(normalized_source_ref),
+            normalized_source_type,
+            normalized_extractor_id,
+        ),
         "source_ref": normalized_source_ref,
         "source_type": normalized_source_type,
         "requested_outputs": normalized_outputs,
@@ -487,7 +506,12 @@ def prepare_document_extraction_result(
     return {
         "schema_version": DOCUMENT_EXTRACTION_RESULT_SCHEMA_VERSION,
         "record_type": "document_extraction_result",
-        "result_id": _stable_id("doc_result", result_seed),
+        "result_id": _readable_stable_id(
+            "doc_result",
+            result_seed,
+            document_record["document_id"],
+            _source_ref_label(source_ref),
+        ),
         "request_id": request_id,
         "source_ref": source_ref,
         "source_type": source_type,
@@ -557,7 +581,7 @@ def prepare_document_draft(
             normalized_created_by,
         ]
     )
-    draft_id = _stable_id("doc_draft", draft_seed)
+    draft_id = _readable_stable_id("doc_draft", draft_seed, document_id, normalized_created_by)
     content = _analysis_markdown(title, normalized_analysis)
     metadata = document_record.get("metadata") if isinstance(document_record.get("metadata"), dict) else {}
     source_type = _optional_text(document_record.get("source_type"), "document_record.source_type")
@@ -565,7 +589,7 @@ def prepare_document_draft(
     if source_type:
         tags.append(source_type)
     proposed_memory = {
-        "key": _stable_id("doc_mem", draft_seed),
+        "key": _readable_stable_id("doc_mem", draft_seed, document_id, title),
         "title": f"Document Draft: {title}",
         "content": content,
         "tags": tags,
@@ -678,7 +702,7 @@ def prepare_document_understanding_packet(
     return {
         "schema_version": DOCUMENT_UNDERSTANDING_SCHEMA_VERSION,
         "record_type": "document_understanding_packet",
-        "packet_id": _stable_id("doc_packet", packet_seed),
+        "packet_id": _readable_stable_id("doc_packet", packet_seed, document_id, normalized_created_by),
         "document_id": document_id,
         "created_by": normalized_created_by,
         "review_status": "packet",
@@ -782,7 +806,13 @@ def prepare_document_promotion_transaction(
     return {
         "schema_version": DOCUMENT_PROMOTION_SCHEMA_VERSION,
         "record_type": "document_promotion_transaction",
-        "transaction_id": _stable_id("doc_promote", transaction_seed),
+        "transaction_id": _readable_stable_id(
+            "doc_promote",
+            transaction_seed,
+            document_id,
+            draft_id,
+            normalized_approved_by,
+        ),
         "draft_id": draft_id,
         "document_id": document_id,
         "status": "prepared",
@@ -938,6 +968,69 @@ def _preview_chunk(document_record: dict[str, Any], chunk: dict[str, Any]) -> di
 def _stable_id(prefix: str, value: str) -> str:
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}_{digest}"
+
+
+def _readable_stable_id(prefix: str, seed: str, *readable_parts: Any) -> str:
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+    label = _slugify("_".join(str(part) for part in readable_parts if part not in (None, "")), max_length=96)
+    if not label:
+        return f"{prefix}_{digest}"
+    return f"{prefix}_{label}_{digest}"
+
+
+def _document_id(*, title: str, source_uri: str, metadata: dict[str, Any]) -> str:
+    supplied = _optional_text(metadata.get("document_id"), "metadata.document_id")
+    if supplied:
+        return _normalize_human_id(supplied, prefix="doc")
+
+    title_slug = _slugify(title)
+    if title_slug and title_slug not in {"untitled", "untitled_document", "document"}:
+        return f"doc_{title_slug}"
+
+    source_slug = _source_uri_slug(source_uri)
+    return f"doc_{source_slug or 'document'}"
+
+
+def _normalize_human_id(value: str, *, prefix: str) -> str:
+    text = str(value).strip()
+    if not text:
+        raise ValueError(f"{prefix} id is required")
+    if text.startswith(f"{prefix}_"):
+        suffix = _slugify(text[len(prefix) + 1 :])
+    else:
+        suffix = _slugify(text)
+    if not suffix:
+        raise ValueError(f"{prefix} id must include a readable suffix")
+    return f"{prefix}_{suffix}"
+
+
+def _source_uri_slug(source_uri: str) -> str:
+    parsed = urlparse(source_uri)
+    path = unquote(parsed.path or source_uri)
+    leaf = path.rstrip("/").split("/")[-1] if path else source_uri
+    stem = leaf.rsplit(".", 1)[0] if "." in leaf else leaf
+    return _slugify(stem)
+
+
+def _source_ref_label(source_ref: dict[str, Any]) -> str:
+    source_uri = _optional_text(source_ref.get("source_uri"), "source_ref.source_uri")
+    if source_uri:
+        slug = _source_uri_slug(source_uri)
+        if slug:
+            return slug
+    source_artifact_id = _optional_text(source_ref.get("source_artifact_id"), "source_ref.source_artifact_id")
+    if source_artifact_id:
+        return source_artifact_id
+    content_hash = _optional_text(source_ref.get("content_hash"), "source_ref.content_hash")
+    if content_hash:
+        return content_hash.replace("sha256:", "sha256_")[:24]
+    return "source"
+
+
+def _slugify(value: str, *, max_length: int = 80) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(value).strip().lower()).strip("_")
+    slug = re.sub(r"_+", "_", slug)
+    return slug[:max_length].strip("_")
 
 
 def _stable_repr(value: Any) -> str:
@@ -1241,7 +1334,13 @@ def _normalize_summary_slots(value: Any, document_id: str) -> list[dict[str, Any
         slots.append(
             {
                 "record_type": "summary_slot",
-                "summary_id": _stable_id("summary", f"{document_id}|{index}|{slot}|{text}"),
+                "summary_id": _readable_stable_id(
+                    "summary",
+                    f"{document_id}|{index}|{slot}|{text}",
+                    document_id,
+                    slot,
+                    text,
+                ),
                 "slot": slot,
                 "text": text,
                 "confidence": confidence,
@@ -1267,7 +1366,12 @@ def _normalize_claim_candidates(value: Any, document_id: str) -> list[dict[str, 
         claims.append(
             {
                 "record_type": "claim_candidate",
-                "claim_id": _stable_id("claim", f"{document_id}|{text}|{_stable_repr(evidence_refs)}"),
+                "claim_id": _readable_stable_id(
+                    "claim",
+                    f"{document_id}|{text}|{_stable_repr(evidence_refs)}",
+                    document_id,
+                    text,
+                ),
                 "text": text,
                 "confidence": confidence,
                 "evidence_refs": evidence_refs,
@@ -1294,7 +1398,7 @@ def _normalize_concept_candidates(value: Any, document_id: str) -> list[dict[str
         concepts.append(
             {
                 "record_type": "concept_candidate",
-                "concept_id": _stable_id("concept", f"{document_id}|{name}"),
+                "concept_id": _readable_stable_id("concept", f"{document_id}|{name}", document_id, name),
                 "name": name,
                 "description": description,
                 "confidence": confidence,
@@ -1321,7 +1425,7 @@ def _normalize_entity_candidates(value: Any, document_id: str) -> list[dict[str,
         entities.append(
             {
                 "record_type": "entity_candidate",
-                "entity_id": _stable_id("entity", f"{document_id}|{kind}|{name}"),
+                "entity_id": _readable_stable_id("entity", f"{document_id}|{kind}|{name}", document_id, kind, name),
                 "name": name,
                 "kind": kind,
                 "confidence": confidence,
@@ -1352,7 +1456,13 @@ def _normalize_high_value_sections(value: Any, document_id: str) -> list[dict[st
         sections.append(
             {
                 "record_type": "high_value_section",
-                "section_id": _stable_id("section", f"{document_id}|{title}|{page_number}"),
+                "section_id": _readable_stable_id(
+                    "section",
+                    f"{document_id}|{title}|{page_number}",
+                    document_id,
+                    title,
+                    page_number,
+                ),
                 "title": title,
                 "reason": reason,
                 "page_number": page_number,

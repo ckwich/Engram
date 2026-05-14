@@ -42,8 +42,14 @@ Expected:
   promotion paths.
 - `prepare_document_artifact_store` and `store_document_artifact` are explicit
   ledgered document-evidence artifact tools. They may write Memory OS artifact,
-  document, chunk, coverage, job, and transaction records only after review, and
-  must not promote active memories or graph edges.
+  document, chunk, coverage, job, and transaction records only after review.
+  Prepared artifact-store transactions must not persist the full review packet
+  or extracted text; acceptance must supply the matching reviewed packet again
+  and verify source bytes when available. They must not promote active memories
+  or graph edges.
+- Document-intelligence ids are deterministic and human-readable. Hash-only
+  document, document-workflow, visual-request, and visual-candidate ids are a
+  release blocker; short digest suffixes are allowed only as collision guards.
 - Review-first promotion stays explicit: source/document evidence may become
   durable memory or graph edges only through a later reviewed promotion path.
 - `build_retrieval_backend_gate` and `build_graph_backend_gate` wrap the

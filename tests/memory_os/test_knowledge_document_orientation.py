@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+
 from core.memory_os.knowledge_contract import validate_knowledge_response
 from core.memory_os.runtime import MemoryOSRuntime
 
 
 def _review_packet(tmp_path):
     source = tmp_path / "book.pdf"
-    source.write_bytes(b"%PDF-1.4 synthetic")
-    content_hash = "sha256:" + "a" * 64
+    source_bytes = b"%PDF-1.4 synthetic"
+    source.write_bytes(source_bytes)
+    content_hash = "sha256:" + hashlib.sha256(source_bytes).hexdigest()
     return {
         "record_type": "document_intake_review",
         "status": "partial",
@@ -97,8 +100,9 @@ def _review_packet(tmp_path):
 def test_query_knowledge_document_orientation_reads_ledgered_document_artifacts(tmp_path):
     runtime = MemoryOSRuntime(tmp_path / "memory_os")
     runtime.initialize()
-    prepared = runtime.prepare_document_artifact_store(_review_packet(tmp_path))
-    runtime.store_document_artifact(prepared["prepared_transaction_id"], accept=True)
+    review = _review_packet(tmp_path)
+    prepared = runtime.prepare_document_artifact_store(review)
+    runtime.store_document_artifact(prepared["prepared_transaction_id"], accept=True, review_packet=review)
 
     response = runtime.query_knowledge(
         {

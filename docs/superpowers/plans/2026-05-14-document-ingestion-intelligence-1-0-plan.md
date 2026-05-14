@@ -293,13 +293,17 @@ def prepare_document_artifact_store(
 def store_document_artifact(
     prepared_transaction_id: str,
     accept: bool = False,
+    review_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Store ledgered document evidence only when accept=True."""
+    """Store ledgered document evidence only when accept=True and the reviewed packet matches."""
 ```
 
 **Storage contract:**
 
 - Source bytes are addressed by hash and stored under the data root.
+- Prepared transactions persist only a compact review intent, review digest, and
+  summary. The full review packet is supplied again at acceptance so extracted
+  text is not stored before review.
 - Extracted text, page inventory, image inventory, OCR coverage receipts, table candidates, figure candidates, and quality reports are stored as artifact records.
 - Artifact records include:
   - `artifact_id`

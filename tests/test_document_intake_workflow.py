@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import subprocess
+
+from core.document_extractors import prepare_document_disassembly
 from core.document_intake_workflow import prepare_document_intake_review
+from core.document_intelligence import prepare_document_record, preview_document_extraction
 
 
 def _base_disassembly(*, pages, text="Useful extracted text.", image_pages=None, visual_request=None, error=None):
@@ -64,10 +68,44 @@ def test_prepare_document_intake_review_returns_ok_for_text_complete_pdf():
     }
     assert packet["disassembly"]["document"]["title"] == "Book"
     assert packet["document_preview"]["preview"]["document"]["document_id"] == "doc_book"
+    assert packet["document_preview"]["preview"]["document_record"]["document_id"] == "doc_book"
+    assert packet["document_preview"]["preview"]["extractor_receipt"]["document_id"] == "doc_book"
+    assert {
+        chunk["provenance"]["document_id"]
+        for chunk in packet["document_preview"]["preview"]["chunks"]
+    } == {"doc_book"}
     assert packet["extraction_request"] is None
     assert packet["receipts"]["artifacts_built"] == 1
     assert packet["receipts"]["artifacts_read"] == 0
     assert packet["error"] is None
+
+
+def test_document_record_uses_human_readable_document_id():
+    record = prepare_document_record(
+        title="Architecture Notes",
+        source_uri="file:///docs/architecture-notes.md",
+        source_type="markdown",
+        content_hash="sha256:" + "a" * 64,
+        media_type="text/markdown",
+    )
+
+    assert record["document_id"] == "doc_architecture_notes"
+
+
+def test_preview_document_extraction_uses_human_readable_document_id():
+    preview = preview_document_extraction(
+        title="Architecture Notes",
+        source_uri="file:///docs/architecture-notes.md",
+        source_type="markdown",
+        content="# Architecture\n\nReadable ids help humans review records.",
+        media_type="text/markdown",
+    )
+
+    assert preview["document_record"]["document_id"] == "doc_architecture_notes"
+    assert {
+        chunk["provenance"]["document_id"]
+        for chunk in preview["chunks"]
+    } == {"doc_architecture_notes"}
 
 
 def test_prepare_document_intake_review_returns_partial_when_visual_coverage_is_required():
@@ -141,3 +179,21 @@ def test_prepare_document_intake_review_reports_missing_source_as_schema_failed(
         "message": "source_path does not exist or is not a file: C:/docs/missing.pdf",
     }
     assert packet["policy"]["write_behavior"] == "read_only"
+
+
+def test_prepare_document_disassembly_reports_timeout_as_infrastructure_error(tmp_path):
+    source = tmp_path / "book.pdf"
+    source.write_bytes(b"%PDF-1.4 synthetic")
+
+    def timeout_runner(args, timeout_seconds):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=timeout_seconds)
+
+    packet = prepare_document_disassembly(
+        source_path=source,
+        tool_paths={"pdfinfo": "pdfinfo", "pdftotext": "pdftotext", "pdfimages": "pdfimages"},
+        runner=timeout_runner,
+        timeout_seconds=1,
+    )
+
+    assert packet["error"]["code"] == "tool_timeout"
+    assert "timed out" in packet["error"]["message"]

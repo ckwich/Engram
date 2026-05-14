@@ -79,13 +79,23 @@ Ledgered document evidence is explicit:
 
 ```text
 prepare_document_artifact_store(review_packet=packet)
-store_document_artifact(prepared_transaction_id=txn, accept=True)
+store_document_artifact(prepared_transaction_id=txn, accept=True, review_packet=packet)
 ```
 
-`store_document_artifact` writes document evidence artifacts, document/chunk
-records, and coverage receipts. It does not promote active memories and does
-not promote graph edges. Use `prepare_document_promotion_transaction` for
-reviewed memory/graph promotion decisions.
+`prepare_document_artifact_store` persists only a compact review intent,
+review digest, and reviewer-facing summary. It does not store extracted text or
+the full review packet before acceptance. `store_document_artifact` requires the
+matching reviewed packet again, verifies the packet digest and source bytes when
+the source file is available, then writes document evidence artifacts,
+document/chunk records, and coverage receipts. It does not promote active
+memories and does not promote graph edges. Use
+`prepare_document_promotion_transaction` for reviewed memory/graph promotion
+decisions.
+
+Document-intelligence ids are deterministic and readable for operators and
+developers. Use document/source labels such as `doc_design_book` or
+`doc_req_design_book_pdf_local_pdf_extractor_<digest>`; reserve short digest
+suffixes for collision guards only, not as the whole id.
 
 ## EKC Use
 

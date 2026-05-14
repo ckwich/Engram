@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from core.document_intelligence import (
@@ -16,6 +18,10 @@ from core.document_intelligence import (
     preview_document_extraction,
     preview_visual_extraction,
 )
+
+
+def _assert_readable_id(value: str, prefix: str, label: str) -> None:
+    assert re.fullmatch(rf"{re.escape(prefix)}_{re.escape(label)}_[0-9a-f]{{8}}", value)
 
 
 def test_list_document_extractors_reports_bundled_and_external_boundaries():
@@ -63,8 +69,7 @@ def test_prepare_document_record_is_stable_reviewable_evidence_without_writes():
         metadata={"project": "Engram"},
     )
 
-    assert document["document_id"].startswith("doc_")
-    assert len(document["document_id"]) == len("doc_") + 16
+    assert document["document_id"] == "doc_architecture_notes"
     assert duplicate["document_id"] == document["document_id"]
     assert document == {
         "schema_version": "2026-05-11.document-intelligence.v1",
@@ -104,8 +109,7 @@ def test_prepare_visual_artifact_record_marks_ocr_vision_as_reviewable_evidence(
 
     assert artifact["schema_version"] == "2026-05-11.document-intelligence.v1"
     assert artifact["record_type"] == "visual_artifact"
-    assert artifact["artifact_id"].startswith("vis_")
-    assert len(artifact["artifact_id"]) == len("vis_") + 16
+    _assert_readable_id(artifact["artifact_id"], "vis", "doc_alpha_diagram_local_vision_v1")
     assert artifact["document_id"] == "doc_alpha"
     assert artifact["artifact_type"] == "diagram"
     assert artifact["extractor"] == {
@@ -209,6 +213,7 @@ def test_prepare_extractor_receipt_links_visual_evidence_without_promoting_memor
 
     assert receipt["schema_version"] == "2026-05-11.document-intelligence.v1"
     assert receipt["record_type"] == "extractor_receipt"
+    _assert_readable_id(receipt["receipt_id"], "doc_extract", "doc_architecture_notes_agent")
     assert receipt["document_id"] == document["document_id"]
     assert receipt["visual_artifact_ids"] == [visual_artifact["artifact_id"]]
     assert receipt["artifact_count"] == 1
@@ -260,6 +265,7 @@ def test_prepare_visual_extraction_request_marks_external_framework_work_as_revi
     assert duplicate["request_id"] == request["request_id"]
     assert request["schema_version"] == "2026-05-11.document-intelligence.visual-request.v1"
     assert request["record_type"] == "visual_extraction_request"
+    _assert_readable_id(request["request_id"], "vis_req", "doc_architecture_notes_local_vision_v1")
     assert request["document_id"] == document["document_id"]
     assert request["extractor"] == {
         "id": "local-vision-v1",
@@ -601,6 +607,7 @@ def test_prepare_document_extraction_request_marks_external_parsing_as_reviewabl
     assert duplicate["request_id"] == request["request_id"]
     assert request["schema_version"] == "2026-05-11.document-intelligence.extraction-request.v1"
     assert request["record_type"] == "document_extraction_request"
+    _assert_readable_id(request["request_id"], "doc_req", "architecture_pdf_local_pdf_extractor")
     assert request["source_type"] == "pdf"
     assert request["requested_outputs"] == ["markdown", "metadata", "page_images"]
     assert request["external_framework_required"] is True
@@ -772,6 +779,8 @@ def test_prepare_document_draft_turns_evidence_into_reviewable_proposals_without
     assert duplicate["draft_id"] == draft["draft_id"]
     assert draft["schema_version"] == "2026-05-11.document-intelligence.draft.v1"
     assert draft["record_type"] == "document_draft"
+    _assert_readable_id(draft["draft_id"], "doc_draft", "doc_architecture_note_agent")
+    _assert_readable_id(draft["proposed_memories"][0]["key"], "doc_mem", "doc_architecture_note_architecture_note")
     assert draft["status"] == "draft"
     assert draft["active_memory_write_performed"] is False
     assert draft["review_required"] is True
@@ -917,6 +926,12 @@ def test_prepare_document_understanding_packet_normalizes_agent_synthesis():
     assert duplicate["packet_id"] == packet["packet_id"]
     assert packet["schema_version"] == "2026-05-12.document-intelligence.understanding.v1"
     assert packet["record_type"] == "document_understanding_packet"
+    _assert_readable_id(packet["packet_id"], "doc_packet", "doc_design_book_notes_agent")
+    assert packet["summary_slots"][0]["summary_id"].startswith("summary_doc_design_book_notes_agent_brief_")
+    assert packet["claim_candidates"][0]["claim_id"].startswith("claim_doc_design_book_notes_people_notice_motion_")
+    assert packet["concept_candidates"][0]["concept_id"].startswith("concept_doc_design_book_notes_attention_priority_")
+    assert packet["entity_candidates"][0]["entity_id"].startswith("entity_doc_design_book_notes_design_concept_motion_")
+    assert packet["high_value_sections"][0]["section_id"].startswith("section_doc_design_book_notes_attention_")
     assert packet["active_memory_write_performed"] is False
     assert packet["summary_slots"][0]["slot"] == "agent_brief"
     assert packet["claim_candidates"][0]["record_type"] == "claim_candidate"
@@ -1101,6 +1116,7 @@ def test_prepare_document_promotion_transaction_returns_no_write_operations():
     assert duplicate["transaction_id"] == transaction["transaction_id"]
     assert transaction["schema_version"] == "2026-05-11.document-intelligence.promotion.v1"
     assert transaction["record_type"] == "document_promotion_transaction"
+    assert transaction["transaction_id"].startswith("doc_promote_doc_architecture_note_doc_draft_doc_architecture_note_")
     assert transaction["status"] == "prepared"
     assert transaction["write_performed"] is False
     assert transaction["active_memory_write_performed"] is False

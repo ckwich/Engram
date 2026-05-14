@@ -922,9 +922,14 @@ async def prepare_document_artifact_store(
 async def store_document_artifact(
     prepared_transaction_id: str,
     accept: bool = False,
+    review_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Store ledgered document evidence only after accept=True; never promotes active memory."""
-    payload = {"prepared_transaction_id": prepared_transaction_id, "accept": accept}
+    """Store ledgered document evidence after accept=True and a matching reviewed packet."""
+    payload = {
+        "prepared_transaction_id": prepared_transaction_id,
+        "accept": accept,
+        "review_packet": review_packet,
+    }
     try:
         return await _call_daemon("store_document_artifact", payload)
     except EngramDaemonClientError as exc:

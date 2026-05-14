@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -46,7 +47,10 @@ class DocumentWorkflow:
         return self.document_disassembler(**kwargs)
 
     def prepare_document_intake_review(self, **kwargs: Any) -> dict[str, Any]:
-        return prepare_document_intake_review(**kwargs)
+        return prepare_document_intake_review(
+            document_disassembler=self.document_disassembler,
+            **kwargs,
+        )
 
     def prepare_document_extraction_request(self, **kwargs: Any) -> dict[str, Any]:
         return prepare_document_extraction_request(**kwargs)
@@ -263,6 +267,7 @@ class EngramDaemonAPI:
             self.memory_os_runtime.store_document_artifact(
                 str(request.get("prepared_transaction_id") or ""),
                 accept=bool(request.get("accept", False)),
+                review_packet=request.get("review_packet"),
             )
         )
 
@@ -498,6 +503,15 @@ class EngramDaemonAPI:
                     },
                 }
             )
+        except subprocess.TimeoutExpired as exc:
+            error = {
+                "code": "tool_timeout",
+                "category": "infrastructure",
+                "message": f"{tool_name} timed out after {exc.timeout} seconds",
+            }
+            if result_key is None:
+                return self._ok({"error": error})
+            return self._ok({result_key: None, "error": error})
         if result_key is None:
             return self._ok(result)
         return self._ok({result_key: result, "error": None})
@@ -528,6 +542,17 @@ class EngramDaemonAPI:
                     "error": {
                         "code": "runtime_error",
                         "message": str(exc),
+                    },
+                }
+            )
+        except subprocess.TimeoutExpired as exc:
+            return self._ok(
+                {
+                    "disassembly": None,
+                    "error": {
+                        "code": "tool_timeout",
+                        "category": "infrastructure",
+                        "message": f"document disassembly timed out after {exc.timeout} seconds",
                     },
                 }
             )

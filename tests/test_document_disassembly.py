@@ -95,6 +95,7 @@ def test_prepare_pdf_disassembly_uses_poppler_inventory_without_writes(tmp_path)
     candidates = payload["visual_artifact_candidates"]
     assert [candidate["page_number"] for candidate in candidates] == [2, 3]
     assert {candidate["artifact_type"] for candidate in candidates} == {"page_crop"}
+    assert candidates[0]["candidate_id"].startswith("vis_candidate_doc_sample_book_page_2_page_crop_")
     assert all(candidate["source_artifact_id"] for candidate in candidates)
     assert all(candidate["extractor"]["id"] == "engram-local-pdf-disassembly" for candidate in candidates)
     assert payload["visual_extraction_request"]["record_type"] == "visual_extraction_request"

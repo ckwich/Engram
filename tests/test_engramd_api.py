@@ -328,11 +328,15 @@ class FakeMemoryOSRuntime:
             "error": None,
         }
 
-    def store_document_artifact(self, prepared_transaction_id, *, accept=False):
+    def store_document_artifact(self, prepared_transaction_id, *, accept=False, review_packet=None):
         self.calls.append(
             (
                 "store_document_artifact",
-                {"prepared_transaction_id": prepared_transaction_id, "accept": accept},
+                {
+                    "prepared_transaction_id": prepared_transaction_id,
+                    "accept": accept,
+                    "review_packet": review_packet,
+                },
             )
         )
         return {
@@ -609,6 +613,58 @@ def test_prepare_document_disassembly_routes_to_document_disassembler():
     assert response["body"]["disassembly"]["document"]["page_limit"] == 5
 
 
+def test_prepare_document_intake_review_uses_injected_document_disassembler():
+    calls = []
+
+    def fake_intake_disassembler(**kwargs):
+        calls.append(kwargs)
+        return {
+            "record_type": "document_disassembly_preview",
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "source": {
+                "source_uri": "file:///docs/book.pdf",
+                "path": kwargs["source_path"],
+                "source_type": "pdf",
+                "media_type": "application/pdf",
+                "content_hash": "sha256:" + "a" * 64,
+            },
+            "document": {
+                "document_id": "doc_book",
+                "title": "Book",
+                "source_type": "pdf",
+                "media_type": "application/pdf",
+                "content_hash": "sha256:" + "a" * 64,
+                "page_count": 1,
+                "page_limit": 1,
+            },
+            "pages": [{"page_number": 1, "text_status": "text", "visual_review_needed": False}],
+            "text": {"content": "# Book\n\nDaemon injected disassembler.", "char_count": 36, "page_count": 1},
+            "image_inventory": {"image_count": 0, "pages_with_images": []},
+            "quality_report": {"warnings": []},
+            "artifact_manifest": {"record_type": "document_artifact_manifest"},
+            "visual_extraction_request": None,
+            "promotion_guidance": {"auto_promote": False},
+            "error": None,
+        }
+
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        document_disassembler=fake_intake_disassembler,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/prepare_document_intake_review",
+        {"source_path": "C:/docs/book.pdf", "source_type": "pdf"},
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["status"] == "ok"
+    assert response["body"]["source"]["document_id"] == "doc_book"
+    assert calls and calls[0]["source_path"] == "C:/docs/book.pdf"
+
+
 def test_prepare_document_disassembly_records_daemon_owned_job_when_runtime_available():
     runtime = FakeMemoryOSRuntime()
     api = EngramDaemonAPI(
@@ -705,7 +761,7 @@ def test_document_artifact_routes_delegate_to_memory_os_runtime():
     stored = api.handle(
         "POST",
         "/v1/store_document_artifact",
-        {"prepared_transaction_id": "txn-doc", "accept": True},
+        {"prepared_transaction_id": "txn-doc", "accept": True, "review_packet": {"status": "ok"}},
     )
 
     assert prepared["status"] == 200
@@ -719,7 +775,11 @@ def test_document_artifact_routes_delegate_to_memory_os_runtime():
         ),
         (
             "store_document_artifact",
-            {"prepared_transaction_id": "txn-doc", "accept": True},
+            {
+                "prepared_transaction_id": "txn-doc",
+                "accept": True,
+                "review_packet": {"status": "ok"},
+            },
         ),
     ]
 

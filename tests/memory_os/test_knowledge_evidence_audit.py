@@ -9,8 +9,9 @@ from tests.memory_os.test_knowledge_document_orientation import _review_packet
 def test_evidence_audit_reports_missing_document_coverage_from_ledgered_artifact(tmp_path):
     runtime = MemoryOSRuntime(tmp_path / "memory_os")
     runtime.initialize()
-    prepared = runtime.prepare_document_artifact_store(_review_packet(tmp_path))
-    runtime.store_document_artifact(prepared["prepared_transaction_id"], accept=True)
+    review = _review_packet(tmp_path)
+    prepared = runtime.prepare_document_artifact_store(review)
+    runtime.store_document_artifact(prepared["prepared_transaction_id"], accept=True, review_packet=review)
 
     audit = build_evidence_audit(
         runtime.ledger,
@@ -30,8 +31,9 @@ def test_evidence_audit_reports_missing_document_coverage_from_ledgered_artifact
 def test_query_knowledge_evidence_audit_response_validates(tmp_path):
     runtime = MemoryOSRuntime(tmp_path / "memory_os")
     runtime.initialize()
-    prepared = runtime.prepare_document_artifact_store(_review_packet(tmp_path))
-    runtime.store_document_artifact(prepared["prepared_transaction_id"], accept=True)
+    review = _review_packet(tmp_path)
+    prepared = runtime.prepare_document_artifact_store(review)
+    runtime.store_document_artifact(prepared["prepared_transaction_id"], accept=True, review_packet=review)
 
     response = runtime.query_knowledge(
         {

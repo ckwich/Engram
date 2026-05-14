@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
 from core.document_artifacts import artifact_path_from_ref
-from core.memory_os._records import list_records, now_iso, read_record, stable_id, upsert_record
+from core.memory_os._records import list_records, now_iso, read_record, upsert_record
 from core.memory_os.content_store import ContentAddressedStore
 from core.memory_os.document_pipeline import DocumentPipeline
 from core.memory_os.ledger import MemoryOSLedger
@@ -18,6 +19,15 @@ READ_ONLY_POLICY = {
     "active_memory_promoted": False,
     "graph_edges_promoted": False,
 }
+
+
+class DocumentArtifactValidationError(ValueError):
+    """Validation failure with a stable machine-readable error code."""
+
+    def __init__(self, code: str, message: str, *, category: str = "validation") -> None:
+        super().__init__(message)
+        self.code = code
+        self.category = category
 
 
 class DocumentArtifactMaterializer:
@@ -48,17 +58,22 @@ class DocumentArtifactMaterializer:
         except ValueError as exc:
             return _error_payload(
                 status="schema_failed",
-                code=getattr(exc, "args", ["invalid_request"])[0] if _is_error_code(exc) else "invalid_request",
+                code=_error_code(exc),
                 message=str(exc),
+                category=_error_category(exc),
             )
 
-        prepared_transaction_id = stable_id(
+        review_packet_sha256 = _review_packet_sha256(review_packet)
+        review_context = _review_context(review_packet, artifact_preview=artifact_preview)
+        prepared_transaction_id = _readable_record_id(
             "doc_artifact_txn",
+            artifact_preview["document_id"],
             {
                 "artifact_family": artifact_family,
                 "document_id": artifact_preview["document_id"],
                 "source_sha256": artifact_preview["source_sha256"],
                 "coverage_receipt": artifact_preview["coverage_receipt"],
+                "review_packet_sha256": review_packet_sha256,
             },
         )
         transaction = {
@@ -70,13 +85,19 @@ class DocumentArtifactMaterializer:
             "active_memory_write_performed": False,
             "graph_write_performed": False,
             "artifact_family": artifact_family,
-            "review_packet": review_packet,
+            "review_packet_sha256": review_packet_sha256,
+            "review_context": review_context,
             "proposed_writes": [
                 {"table": "knowledge_artifacts", "id": artifact_preview["artifact_id"]},
                 {"table": "documents", "id": artifact_preview["document_id"]},
                 {"table": "retrieval_receipts", "id": "coverage map"},
             ],
             "artifact_preview": artifact_preview,
+            "acceptance_requirements": {
+                "requires_review_packet": True,
+                "review_packet_sha256": review_packet_sha256,
+                "source_hash_verification": "required_when_source_path_is_available",
+            },
             "created_at": now_iso(),
         }
         upsert_record(self.ledger, "transactions", prepared_transaction_id, transaction)
@@ -85,6 +106,9 @@ class DocumentArtifactMaterializer:
             "status": "prepared",
             "prepared_transaction_id": prepared_transaction_id,
             "artifact_preview": artifact_preview,
+            "review_context": review_context,
+            "review_packet_sha256": review_packet_sha256,
+            "acceptance_requirements": transaction["acceptance_requirements"],
             "policy": dict(READ_ONLY_POLICY),
             "receipts": {
                 "artifacts_built": 1,
@@ -103,6 +127,7 @@ class DocumentArtifactMaterializer:
         prepared_transaction_id: str,
         *,
         accept: bool = False,
+        review_packet: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Store ledgered document evidence only after explicit acceptance."""
         transaction_id = str(prepared_transaction_id or "").strip()
@@ -119,6 +144,8 @@ class DocumentArtifactMaterializer:
                 code="not_found",
                 message=f"prepared document artifact transaction not found: {transaction_id}",
             )
+        if prepared.get("status") == "stored":
+            return _stored_artifact_replay_payload(self.ledger, prepared)
         if not accept:
             return {
                 "schema_version": DOCUMENT_ARTIFACT_STORE_SCHEMA_VERSION,
@@ -137,11 +164,18 @@ class DocumentArtifactMaterializer:
                 },
             }
 
-        review_packet = prepared.get("review_packet")
+        review_packet = review_packet if review_packet is not None else prepared.get("review_packet")
         try:
+            if review_packet is None:
+                raise DocumentArtifactValidationError(
+                    "review_packet_required",
+                    "store_document_artifact requires the reviewed packet used to prepare this compact transaction",
+                )
+            _validate_review_packet_matches_prepared(review_packet, prepared)
             disassembly = _review_disassembly(review_packet)
             _validate_review_policy(review_packet)
             _validate_manifest_refs(review_packet, data_root=self.store.root.parent)
+            _validate_source_bytes_if_available(disassembly)
             evidence_ref = self.store.put_bytes(
                 _json_bytes(
                     {
@@ -165,8 +199,9 @@ class DocumentArtifactMaterializer:
         except ValueError as exc:
             return _error_payload(
                 status="schema_failed",
-                code=getattr(exc, "args", ["invalid_request"])[0] if _is_error_code(exc) else "invalid_request",
+                code=_error_code(exc),
                 message=str(exc),
+                category=_error_category(exc),
             )
 
         upsert_record(self.ledger, "knowledge_artifacts", artifact["artifact_id"], artifact)
@@ -176,6 +211,7 @@ class DocumentArtifactMaterializer:
             "write_performed": True,
             "stored_at": now_iso(),
             "stored_artifact_ids": [artifact["artifact_id"]],
+            "stored_document_id": artifact["document_id"],
             "pipeline_job_id": pipeline_result.get("job_id"),
         }
         upsert_record(self.ledger, "transactions", transaction_id, stored_transaction)
@@ -202,6 +238,49 @@ class DocumentArtifactMaterializer:
         }
 
 
+def _stored_artifact_replay_payload(
+    ledger: MemoryOSLedger,
+    prepared: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_ids = list(prepared.get("stored_artifact_ids") or [])
+    artifact = read_record(ledger, "knowledge_artifacts", str(artifact_ids[0])) if artifact_ids else None
+    document_id = (
+        artifact.get("document_id")
+        if isinstance(artifact, dict)
+        else prepared.get("stored_document_id")
+    )
+    document = read_record(ledger, "documents", str(document_id)) if document_id else None
+    coverage_map = None
+    for receipt in list_records(ledger, "retrieval_receipts"):
+        if str(receipt.get("document_id") or "") == str(document_id or ""):
+            coverage_map = receipt
+            break
+    return {
+        "schema_version": DOCUMENT_ARTIFACT_STORE_SCHEMA_VERSION,
+        "status": "ok",
+        "prepared_transaction_id": prepared.get("transaction_id"),
+        "stored": True,
+        "idempotent_replay": True,
+        "artifact": artifact,
+        "document": document,
+        "coverage_map": coverage_map,
+        "transaction_id": prepared.get("transaction_id"),
+        "policy": dict(READ_ONLY_POLICY),
+        "receipts": {
+            "artifacts_built": 0,
+            "artifacts_read": 1 if artifact else 0,
+            "stored_artifact_count": len(artifact_ids),
+            "coverage_missing": (artifact or {}).get("coverage_receipt", {}).get("coverage_missing", [])
+            if isinstance(artifact, dict)
+            else [],
+        },
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": None,
+    }
+
+
 def _review_disassembly(review_packet: Any) -> dict[str, Any]:
     if not isinstance(review_packet, dict):
         raise ValueError("review_packet must be an object")
@@ -219,13 +298,22 @@ def _review_disassembly(review_packet: Any) -> dict[str, Any]:
 def _validate_review_policy(review_packet: dict[str, Any]) -> None:
     policy = review_packet.get("policy")
     if not isinstance(policy, dict):
-        raise ValueError("review_packet.policy is required")
+        raise DocumentArtifactValidationError("policy_required", "review_packet.policy is required")
     if policy.get("write_behavior") != "read_only":
-        raise ValueError("review_packet.policy.write_behavior must be read_only")
+        raise DocumentArtifactValidationError(
+            "policy_write_behavior_not_read_only",
+            "review_packet.policy.write_behavior must be read_only",
+        )
     if policy.get("active_memory_promoted") is True:
-        raise ValueError("review_packet cannot already promote active memory")
+        raise DocumentArtifactValidationError(
+            "policy_active_memory_already_promoted",
+            "review_packet cannot already promote active memory",
+        )
     if policy.get("graph_edges_promoted") is True:
-        raise ValueError("review_packet cannot already promote graph edges")
+        raise DocumentArtifactValidationError(
+            "policy_graph_edges_already_promoted",
+            "review_packet cannot already promote graph edges",
+        )
 
 
 def _validate_manifest_refs(review_packet: dict[str, Any], *, data_root: Path) -> None:
@@ -246,9 +334,35 @@ def _validate_manifest_refs(review_packet: dict[str, Any], *, data_root: Path) -
         try:
             artifact_path_from_ref(ref, data_root=data_root)
         except ValueError as exc:
-            error = ValueError(f"artifact manifest ref is unsafe: {ref}")
-            error.args = ("invalid_artifact_ref", str(error))
-            raise error from exc
+            raise DocumentArtifactValidationError(
+                "invalid_artifact_ref",
+                f"artifact manifest ref is unsafe: {ref}",
+            ) from exc
+
+
+def _validate_review_packet_matches_prepared(
+    review_packet: dict[str, Any],
+    prepared: dict[str, Any],
+) -> None:
+    expected_hash = str(prepared.get("review_packet_sha256") or "").strip()
+    actual_hash = _review_packet_sha256(review_packet)
+    if expected_hash and actual_hash != expected_hash:
+        raise DocumentArtifactValidationError(
+            "review_packet_mismatch",
+            "review_packet does not match the prepared document artifact transaction",
+        )
+    artifact_preview = prepared.get("artifact_preview") if isinstance(prepared.get("artifact_preview"), dict) else {}
+    current_preview = _artifact_record(
+        review_packet,
+        content_ref=None,
+        artifact_type=str(prepared.get("artifact_family") or "document_evidence"),
+        review_state="prepared",
+    )
+    if artifact_preview.get("artifact_id") and current_preview.get("artifact_id") != artifact_preview.get("artifact_id"):
+        raise DocumentArtifactValidationError(
+            "artifact_preview_mismatch",
+            "review_packet no longer produces the prepared artifact preview",
+        )
 
 
 def _artifact_record(
@@ -270,8 +384,9 @@ def _artifact_record(
     }
     source_sha256 = str(source.get("content_hash") or review_packet.get("source", {}).get("sha256") or "")
     source_uri = str(source.get("source_uri") or review_packet.get("source", {}).get("source_uri") or "")
-    artifact_id = stable_id(
+    artifact_id = _readable_record_id(
         "doc_artifact",
+        document.get("document_id"),
         {
             "document_id": document.get("document_id"),
             "artifact_type": artifact_type,
@@ -308,6 +423,89 @@ def _artifact_record(
     }
 
 
+def _review_packet_sha256(review_packet: dict[str, Any]) -> str:
+    return "sha256:" + hashlib.sha256(_json_bytes(review_packet)).hexdigest()
+
+
+def _readable_record_id(prefix: str, readable_label: Any, payload: Any) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    label = _slugify(str(readable_label or "document"), max_length=96)
+    return f"{prefix}:{label}:{digest}" if label else f"{prefix}:{digest}"
+
+
+def _slugify(value: str, *, max_length: int = 80) -> str:
+    slug = "".join(char.lower() if char.isalnum() else "_" for char in str(value).strip())
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_")[:max_length].strip("_")
+
+
+def _review_context(review_packet: dict[str, Any], *, artifact_preview: dict[str, Any]) -> dict[str, Any]:
+    disassembly = _review_disassembly(review_packet)
+    document = dict(disassembly.get("document") or {})
+    source = dict(disassembly.get("source") or {})
+    text = disassembly.get("text") if isinstance(disassembly.get("text"), dict) else {}
+    pages = [page for page in disassembly.get("pages") or [] if isinstance(page, dict)]
+    image_inventory = disassembly.get("image_inventory") if isinstance(disassembly.get("image_inventory"), dict) else {}
+    quality = review_packet.get("quality") if isinstance(review_packet.get("quality"), dict) else {}
+    extraction_request = (
+        review_packet.get("extraction_request")
+        if isinstance(review_packet.get("extraction_request"), dict)
+        else {}
+    )
+    return {
+        "document": {
+            "document_id": document.get("document_id"),
+            "title": document.get("title"),
+            "page_count": document.get("page_count"),
+            "page_limit": document.get("page_limit"),
+            "content_hash": document.get("content_hash"),
+        },
+        "source": {
+            "source_uri": source.get("source_uri") or (review_packet.get("source") or {}).get("source_uri"),
+            "source_path": source.get("path") or (review_packet.get("source") or {}).get("source_path"),
+            "content_hash": source.get("content_hash") or artifact_preview.get("source_sha256"),
+            "media_type": source.get("media_type"),
+        },
+        "text": {
+            "char_count": text.get("char_count"),
+            "page_count": text.get("page_count"),
+            "content_persisted": False,
+        },
+        "pages": {
+            "count": len(pages),
+            "text_pages": [page.get("page_number") for page in pages if page.get("text_status") == "text"],
+            "low_text_pages": [page.get("page_number") for page in pages if page.get("text_status") == "low_text"],
+            "no_text_pages": [page.get("page_number") for page in pages if page.get("text_status") == "no_text"],
+            "visual_review_needed_pages": [
+                page.get("page_number") for page in pages if page.get("visual_review_needed")
+            ],
+        },
+        "images": {
+            "image_count": image_inventory.get("image_count"),
+            "pages_with_images": list(image_inventory.get("pages_with_images") or []),
+        },
+        "quality": {
+            "warning_count": len(quality.get("warnings") or []),
+            "warning_codes": [
+                warning.get("code")
+                for warning in quality.get("warnings") or []
+                if isinstance(warning, dict)
+            ],
+        },
+        "coverage_missing": list((review_packet.get("receipts") or {}).get("coverage_missing") or []),
+        "extraction_request": {
+            "request_id": extraction_request.get("request_id"),
+            "requested_capabilities": list(extraction_request.get("requested_capabilities") or []),
+        },
+        "artifact_preview": {
+            "artifact_id": artifact_preview.get("artifact_id"),
+            "artifact_type": artifact_preview.get("artifact_type"),
+        },
+    }
+
+
 def _store_source_bytes_if_available(store: ContentAddressedStore, disassembly: dict[str, Any]) -> str | None:
     source = disassembly.get("source") if isinstance(disassembly.get("source"), dict) else {}
     path_text = str(source.get("path") or "").strip()
@@ -320,11 +518,28 @@ def _store_source_bytes_if_available(store: ContentAddressedStore, disassembly: 
     return store.put_bytes(path.read_bytes(), suffix=suffix)
 
 
+def _validate_source_bytes_if_available(disassembly: dict[str, Any]) -> None:
+    source = disassembly.get("source") if isinstance(disassembly.get("source"), dict) else {}
+    path_text = str(source.get("path") or "").strip()
+    expected_hash = str(source.get("content_hash") or "").strip()
+    if not path_text or not expected_hash:
+        return
+    path = Path(path_text)
+    if not path.exists() or not path.is_file():
+        return
+    actual_hash = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual_hash != expected_hash:
+        raise DocumentArtifactValidationError(
+            "source_hash_mismatch",
+            "source bytes no longer match the reviewed document source hash",
+        )
+
+
 def _json_bytes(payload: dict[str, Any]) -> bytes:
     return (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
 
-def _error_payload(*, status: str, code: str, message: str) -> dict[str, Any]:
+def _error_payload(*, status: str, code: str, message: str, category: str = "validation") -> dict[str, Any]:
     return {
         "schema_version": DOCUMENT_ARTIFACT_STORE_SCHEMA_VERSION,
         "status": status,
@@ -333,9 +548,17 @@ def _error_payload(*, status: str, code: str, message: str) -> dict[str, Any]:
         "graph_write_performed": False,
         "policy": dict(READ_ONLY_POLICY),
         "receipts": {"artifacts_built": 0, "artifacts_read": 0},
-        "error": {"code": code, "category": "validation", "message": message},
+        "error": {"code": code, "category": category, "message": message},
     }
 
 
-def _is_error_code(exc: ValueError) -> bool:
-    return bool(exc.args and isinstance(exc.args[0], str) and "_" in exc.args[0])
+def _error_code(exc: ValueError) -> str:
+    if isinstance(exc, DocumentArtifactValidationError):
+        return exc.code
+    return "invalid_request"
+
+
+def _error_category(exc: ValueError) -> str:
+    if isinstance(exc, DocumentArtifactValidationError):
+        return exc.category
+    return "validation"

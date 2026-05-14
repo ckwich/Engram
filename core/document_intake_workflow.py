@@ -1,6 +1,7 @@
 """End-to-end no-write document intake review workflow."""
 from __future__ import annotations
 
+import subprocess
 from typing import Any, Callable
 
 from core.document_extractors import prepare_document_disassembly
@@ -70,6 +71,17 @@ def prepare_document_intake_review(
                 "code": "runtime_error",
                 "category": "infrastructure",
                 "message": str(exc),
+            },
+        )
+    except subprocess.TimeoutExpired as exc:
+        return _failure_packet(
+            status="unavailable",
+            source_path=source_path,
+            input_payload=input_payload,
+            error={
+                "code": "tool_timeout",
+                "category": "infrastructure",
+                "message": f"document disassembly timed out after {exc.timeout} seconds",
             },
         )
 

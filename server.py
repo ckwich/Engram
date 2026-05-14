@@ -1218,7 +1218,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_understanding_packet": "Normalize agent-supplied document understanding into reviewable summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated coverage graph edge proposals.",
             "prepare_document_promotion_transaction": "Prepare a no-write operation plan for reviewed document draft promotion.",
             "prepare_document_artifact_store": "Prepare an explicit reviewed document evidence artifact-store transaction; no active memory or graph edges are promoted.",
-            "store_document_artifact": "Store ledgered document evidence artifacts only when accept=True; active memories and graph edges remain untouched.",
+            "store_document_artifact": "Store ledgered document evidence artifacts only when accept=True and the matching reviewed packet is supplied again; active memories and graph edges remain untouched.",
             "prepare_visual_extraction_request": "Prepare a no-write OCR/vision work request for image-bearing documents; visual interpretation and per-image-ref coverage are required before draft promotion.",
             "preview_visual_extraction": "Preview caller-supplied OCR or vision observations as visual evidence without writing memory; pass visual_request to enforce requested image-ref coverage.",
             "retrieval_eval": "Run deterministic retrieval quality checks and report pass/fail scenarios.",
@@ -1276,7 +1276,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_understanding_packet(document_record=doc, analysis=agent_analysis) before preparing promotion decisions",
             "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
             "prepare_document_promotion_transaction(document_draft=draft, approved_by='agent-review') before executing writes",
-            "prepare_document_artifact_store(review_packet=packet) then store_document_artifact(prepared_transaction_id=txn, accept=True) for explicit ledgered document evidence",
+            "prepare_document_artifact_store(review_packet=packet) then store_document_artifact(prepared_transaction_id=txn, accept=True, review_packet=packet) for explicit ledgered document evidence",
             "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
             "preview_visual_extraction(document_record=doc, observations=vision_notes) before promoting image-derived claims",
             "migration_dry_run(legacy_dir='data/memories') before importing the current memory corpus into a Memory OS store",
@@ -2485,6 +2485,7 @@ async def prepare_document_artifact_store(
 async def store_document_artifact(
     prepared_transaction_id: str,
     accept: bool = False,
+    review_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Store ledgered document evidence only when accept=True.
@@ -2494,7 +2495,11 @@ async def store_document_artifact(
     edges.
     """
     started_at = time.perf_counter()
-    input_payload = {"prepared_transaction_id": prepared_transaction_id, "accept": accept}
+    input_payload = {
+        "prepared_transaction_id": prepared_transaction_id,
+        "accept": accept,
+        "review_packet": review_packet,
+    }
     if _daemon_enabled():
         try:
             payload = await _call_daemon("store_document_artifact", input_payload)
