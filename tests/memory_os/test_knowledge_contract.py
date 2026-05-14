@@ -71,6 +71,22 @@ def test_normalize_knowledge_request_supports_source_and_document_orientation_de
     assert document_request["policy"]["allow_unreviewed_sources"] is False
 
 
+def test_normalize_knowledge_request_supports_review_preparation_defaults():
+    request = normalize_knowledge_request(
+        {
+            "ask": {
+                "goal": "Prepare review packet.",
+                "task_type": "review_preparation",
+                "project": "Engram",
+            }
+        }
+    )
+
+    assert request["shape"]["response_type"] == "review_preparation_packet"
+    assert request["policy"]["write_behavior"] == "read_only"
+    assert request["policy"]["allow_unreviewed_sources"] is False
+
+
 def test_normalize_knowledge_request_rejects_unsafe_policy_overrides():
     for unsafe_policy, expected_code in (
         ({"allow_unreviewed_sources": True}, "unreviewed_sources_not_allowed"),

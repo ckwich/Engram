@@ -1,5 +1,5 @@
 from core.memory_os.runtime import MemoryOSRuntime
-from core.memory_os._records import upsert_record
+from core.memory_os._records import list_records, upsert_record
 from core.vector_index import InMemoryVectorIndex
 
 
@@ -300,6 +300,61 @@ def test_memory_os_runtime_query_knowledge_returns_source_orientation(tmp_path):
     assert response["citations"][0]["level"] == "document"
     assert response["budget_used"]["artifacts_built"] == 0
     assert response["planner"]["strategy"] == "source_orientation"
+
+
+def test_memory_os_runtime_query_knowledge_returns_review_preparation(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    upsert_record(
+        runtime.ledger,
+        "documents",
+        "doc_review",
+        {
+            "document_id": "doc_review",
+            "title": "Review Doc",
+            "project": "Engram",
+            "source_ref": {"source_uri": "file:///docs/review.md"},
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "drafts",
+        "draft:doc_review",
+        {
+            "draft_id": "draft:doc_review",
+            "record_type": "document_draft",
+            "document_id": "doc_review",
+            "project": "Engram",
+            "promotion_required": True,
+            "proposed_memories": [{"key": "review_memory"}],
+        },
+    )
+    before_memory_count = len(list_records(runtime.ledger, "memories"))
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-review-prep",
+            "ask": {
+                "goal": "Prepare review packet.",
+                "task_type": "review_preparation",
+                "project": "Engram",
+                "focus": ["review"],
+            },
+        }
+    )
+
+    after_memory_count = len(list_records(runtime.ledger, "memories"))
+    assert response["status"] == "ok"
+    assert response["answer"]["packet_type"] == "review_preparation"
+    assert response["answer"]["review_items"][0]["draft_id"] == "draft:doc_review"
+    assert response["answer"]["write_performed"] is False
+    assert response["budget_used"]["artifacts_built"] == 0
+    assert response["planner"]["strategy"] == "review_preparation"
+    assert after_memory_count == before_memory_count
 
 
 def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):

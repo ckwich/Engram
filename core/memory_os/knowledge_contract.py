@@ -14,11 +14,17 @@ from core.memory_os.knowledge_planner import (
 
 REQUEST_SCHEMA_VERSION = "engram.knowledge.request.v0"
 RESPONSE_SCHEMA_VERSION = "engram.knowledge.response.v0"
-SUPPORTED_TASK_TYPES = {"project_orientation", "source_orientation", "document_orientation"}
+SUPPORTED_TASK_TYPES = {
+    "project_orientation",
+    "source_orientation",
+    "document_orientation",
+    "review_preparation",
+}
 SUPPORTED_RESPONSE_TYPES = {
     "project_capsule_summary",
     "source_orientation_summary",
     "document_orientation_summary",
+    "review_preparation_packet",
 }
 STATUSES = (
     "ok",
@@ -35,6 +41,7 @@ DEFAULT_SHAPES = {
     "project_orientation": {"response_type": "project_capsule_summary", "format": "json"},
     "source_orientation": {"response_type": "source_orientation_summary", "format": "json"},
     "document_orientation": {"response_type": "document_orientation_summary", "format": "json"},
+    "review_preparation": {"response_type": "review_preparation_packet", "format": "json"},
 }
 DEFAULT_SCOPE = {
     "review_state": ["reviewed", "accepted"],

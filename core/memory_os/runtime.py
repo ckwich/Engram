@@ -31,6 +31,7 @@ from core.memory_os.knowledge_orientations import (
     build_source_orientation,
 )
 from core.memory_os.knowledge_planner import build_planner_receipt
+from core.memory_os.knowledge_review import build_review_preparation
 from core.memory_os.project_capsule_artifact import build_project_capsule_artifact
 from core.memory_os.retrieval import MemoryOSRetrievalIndex
 from core.memory_os.snapshots import SnapshotService
@@ -309,6 +310,17 @@ class MemoryOSRuntime:
                     max_records=int(normalized["budget"].get("max_source_reads", 12)),
                 ),
                 strategy="document_orientation",
+            )
+        if ask["task_type"] == "review_preparation":
+            return _orientation_response(
+                normalized,
+                build_review_preparation(
+                    self.ledger,
+                    project=ask["project"],
+                    focus=ask["focus"],
+                    max_records=int(normalized["budget"].get("max_source_reads", 12)),
+                ),
+                strategy="review_preparation",
             )
         persisted = self.knowledge_artifacts.read_latest_artifact(
             project=ask["project"],
