@@ -135,3 +135,58 @@ def test_implementation_context_treats_missing_audit_as_optional_metadata(tmp_pa
             "chunk_id": 0,
         }
     ]
+
+
+def test_implementation_context_extracts_next_polish_target_from_brief_text(tmp_path):
+    ledger = MemoryOSLedger(tmp_path / "ledger.sqlite3")
+    upsert_record(
+        ledger,
+        "chunks",
+        "old_impl_polish:chunk:0",
+        {
+            "chunk_record_id": "old_impl_polish:chunk:0",
+            "memory_key": "old_impl_polish",
+            "document_id": "old_impl_polish:chunk:0",
+            "chunk_id": 0,
+            "project": "Engram",
+            "domain": "implementation",
+            "updated_at": "2026-05-13T00:00:00+00:00",
+            "text": (
+                "Earlier query_knowledge implementation_context planning note. "
+                "Next recommended slice: build an older stabilization pack that has already been completed."
+            ),
+        },
+    )
+    upsert_record(
+        ledger,
+        "chunks",
+        "impl_polish:chunk:0",
+        {
+            "chunk_record_id": "impl_polish:chunk:0",
+            "memory_key": "impl_polish",
+            "document_id": "impl_polish:chunk:0",
+            "chunk_id": 0,
+            "project": "Engram",
+            "domain": "implementation",
+            "updated_at": "2026-05-14T00:00:00+00:00",
+            "text": (
+                "Validated behavior: query_knowledge implementation_context returns a cited brief. "
+                "Opinion from agent-use test: the payload is useful, but continuation cues are thin. "
+                "Main next polish target is improve implementation_context next_action extraction "
+                "so recent slice next steps surface reliably."
+            ),
+        },
+    )
+
+    packet = build_artifact_family_packet(
+        ledger,
+        artifact_family="implementation_context",
+        project="Engram",
+        focus=["query_knowledge", "implementation_context"],
+        max_records=10,
+    )
+
+    assert packet["status"] == "ok"
+    assert packet["answer"]["brief"]["next_actions"] == [
+        "improve implementation_context next_action extraction so recent slice next steps surface reliably."
+    ]

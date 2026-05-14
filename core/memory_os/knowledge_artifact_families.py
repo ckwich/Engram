@@ -332,25 +332,50 @@ def _first_sentence(text: str) -> str:
 
 
 def _extract_next_actions(texts: list[str]) -> list[str]:
-    actions: list[str] = []
     patterns = (
         "next recommended step:",
+        "next recommended polish:",
+        "next recommended target:",
+        "next recommended slice:",
         "next step:",
         "todo:",
         "action:",
     )
     for text in texts:
+        actions: list[str] = []
         lower = text.lower()
         for pattern in patterns:
             start = lower.find(pattern)
             if start < 0:
                 continue
             action = text[start + len(pattern) :].strip()
-            action = re.split(r"\s+(?:files changed|validation performed):", action, maxsplit=1, flags=re.IGNORECASE)[0]
-            action = action.strip()
+            action = _clean_next_action(action)
             if action and action not in actions:
                 actions.append(action)
-    return actions
+        for match in re.finditer(
+            r"\b(?:main\s+)?next\s+polish\s+target\s+is\s+",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            action = _clean_next_action(text[match.end() :].strip(), first_sentence=True)
+            if action and action not in actions:
+                actions.append(action)
+        if actions:
+            return actions
+    return []
+
+
+def _clean_next_action(text: str, *, first_sentence: bool = False) -> str:
+    action = re.split(
+        r"\s+(?:files changed|validation performed|validation|repo|branch|commit):",
+        str(text or ""),
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    action = " ".join(action.split()).strip(" -")
+    if first_sentence:
+        action = _first_sentence(action)
+    return action.strip()
 
 
 def _extract_file_refs(texts: list[str]) -> list[str]:
