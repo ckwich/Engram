@@ -35,10 +35,15 @@ Expected:
 - No-write surfaces report explicit `write_policy`, `write_performed=False`,
   and `active_memory_write_performed=False`.
 - `preview_memory_chunks`, `preview_source_connector`,
-  `prepare_document_disassembly`, `preview_document_extraction`,
-  `prepare_document_draft`, `prepare_document_promotion_transaction`,
-  `prepare_visual_extraction_request`, and `preview_visual_extraction` remain
-  review surfaces, not active memory promotion paths.
+  `prepare_document_disassembly`, `prepare_document_intake_review`,
+  `preview_document_extraction`, `prepare_document_draft`,
+  `prepare_document_promotion_transaction`, `prepare_visual_extraction_request`,
+  and `preview_visual_extraction` remain review surfaces, not active memory
+  promotion paths.
+- `prepare_document_artifact_store` and `store_document_artifact` are explicit
+  ledgered document-evidence artifact tools. They may write Memory OS artifact,
+  document, chunk, coverage, job, and transaction records only after review, and
+  must not promote active memories or graph edges.
 - Review-first promotion stays explicit: source/document evidence may become
   durable memory or graph edges only through a later reviewed promotion path.
 - `build_retrieval_backend_gate` and `build_graph_backend_gate` wrap the
@@ -61,6 +66,7 @@ $env:ENGRAM_DATA_DIR = Join-Path $env:TEMP ("engram-self-test-" + [guid]::NewGui
 $env:ENGRAM_DATA_DIR = Join-Path $env:TEMP ("engram-agent-eval-" + [guid]::NewGuid())
 .\venv\Scripts\python.exe server.py --agent-eval
 Remove-Item Env:\ENGRAM_DATA_DIR
+.\venv\Scripts\python.exe -m pytest tests\test_document_intelligence.py tests\test_document_disassembly.py tests\test_document_source_connectors.py tests\test_document_intake_workflow.py tests\test_document_intake_jobs.py tests\test_document_artifact_materialization.py tests\memory_os\test_document_pipeline.py tests\memory_os\test_knowledge_document_orientation.py tests\memory_os\test_knowledge_evidence_audit.py tests\mcp\test_no_write_tool_contracts.py -q
 .\venv\Scripts\python.exe -m pytest -q
 git diff --check
 ```
@@ -71,6 +77,9 @@ Expected:
   an isolated `ENGRAM_DATA_DIR`.
 - `server.py --agent-eval` passes retrieval/source/document workflow checks and
   the Book Dismantling Gate.
+- Document ingestion/intelligence proves intake review, resumable page ranges,
+  visual/OCR/table coverage receipts, explicit artifact storage, and EKC
+  document/evidence responses.
 - The full pytest suite passes.
 - `docs/ENGRAM_MEMORY_OS_1_0_RELEASE_CHECKLIST.md`, README, AGENTS, `plan.md`,
   and the rebuild spec still describe the same local-first Memory OS target.

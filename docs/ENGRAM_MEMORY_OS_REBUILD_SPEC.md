@@ -1072,15 +1072,16 @@ artifacts and page-level receipts. A 79 MB image-heavy book must not require a
 single all-or-nothing in-memory parse. Failed or skipped pages must be recorded
 as evidence with recommended next actions.
 
-Implementation status, 2026-05-12: `prepare_document_disassembly` now provides
-a no-write local PDF page/text/image inventory through Poppler-compatible
-`pdfinfo`, `pdftotext`, and `pdfimages` tools when available. It returns source
-hashes, page text status, image-bearing pages, extraction receipts, quality seed
-signals, deterministic document quality warnings, portable artifact refs, and
-page-level resume states without promoting memory. It also returns page-crop
-visual candidates and a prepared OCR/vision request for low-text, no-text, or
-image-bearing pages, keeping visual/table analysis review-first instead of
-automatic. It is not yet the final materialized artifact writer.
+Implementation status, 2026-05-14: the daemon-backed document workflow exposes
+`prepare_document_intake_review`, ranged `prepare_document_disassembly` with
+resume tokens, visual/OCR/table coverage validation, explicit
+`prepare_document_artifact_store` / `store_document_artifact`, and EKC document
+orientation/evidence-audit/graph-evidence serving over ledgered document
+evidence. Poppler-compatible `pdfinfo`, `pdftotext`, and `pdfimages` provide
+local page/text/image inventory when available. The workflow remains
+review-first: document artifacts, drafts, and graph proposals do not promote
+active memories or graph edges unless a separate reviewed promotion path is
+accepted.
 
 ### Coverage Maps
 
