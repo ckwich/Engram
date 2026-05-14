@@ -6,6 +6,7 @@ candidate backend until dependency, corpus, and daemon migration gates pass.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -18,6 +19,12 @@ from core.memory_os_migration import LEDGER_FILENAME, MemoryOSMigrationKernel
 
 
 STATUS_SCHEMA_VERSION = "2026-05-12.graph_backend_status.v1"
+DEFAULT_OPERATOR_DOCS_PATH = Path(__file__).resolve().parents[1] / "docs" / "RELEASE_GATES.md"
+FINAL_STATE_POLICY = (
+    "For local 1.0, the daemon-owned Memory OS path is the product path. "
+    "Direct JSON/Chroma remains compatibility and recovery input. "
+    "No optional backend becomes default until parity, recovery, restart, and operator docs pass."
+)
 
 DependencyProbe = Callable[[str], bool]
 
@@ -27,22 +34,39 @@ def build_graph_backend_status(
     store_root: str | Path | None = None,
     graph_path: str | Path | None = EDGES_PATH,
     dependency_probe: DependencyProbe | None = None,
+    operator_docs_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Return a no-write graph backend readiness report."""
     backend_config = load_backend_config()
     module_available = dependency_probe or _module_available
     kuzu_installed = module_available("kuzu")
+    runtime_mode = _runtime_mode()
     live_probe = _build_live_graph_probe(graph_path)
     store_probe = _build_store_probe(store_root)
     graph_parity_probe = skipped_graph_parity(
         "No Kuzu-vs-JSON graph parity run was requested."
     )
+    corpus_parity_status = _corpus_parity_status(graph_parity_probe)
+    operator_docs_status = _operator_docs_status(
+        operator_docs_path,
+        required_terms=("backend readiness", "skipped parity", "recovery"),
+    )
+    recovery_gate_status = _recovery_gate_status(
+        operator_docs_status=operator_docs_status,
+        corpus_parity_status=corpus_parity_status,
+    )
     readiness_gates = _build_readiness_gates(
         kuzu_installed=kuzu_installed,
+        daemon_owned=runtime_mode["daemon_owned"],
         live_probe=live_probe,
         store_probe=store_probe,
         graph_parity_probe=graph_parity_probe,
+        corpus_parity_status=corpus_parity_status,
+        recovery_gate_status=recovery_gate_status,
+        operator_docs_status=operator_docs_status,
     )
+    direct_legacy_backend = _direct_legacy_backend(live_probe)
+    daemon_memory_os_backend = _daemon_memory_os_backend(runtime_mode)
 
     return {
         "schema_version": STATUS_SCHEMA_VERSION,
@@ -50,15 +74,20 @@ def build_graph_backend_status(
         "write_performed": False,
         "active_memory_write_performed": False,
         "live_graph_backend_changed": False,
-        "current_live_backend": {
-            "backend": "json_graph_store",
-            "role": "legacy_live_graph_store",
-            "graph_path": live_probe["graph_path"],
-            "edge_count": live_probe["edge_count"],
-            "available": live_probe["error"] is None,
-            "source_of_truth": "JSON graph document remains the local-first live graph store.",
-        },
+        "runtime_mode": runtime_mode["runtime_mode"],
+        "daemon_owned": runtime_mode["daemon_owned"],
+        "direct_mode_legacy": runtime_mode["direct_mode_legacy"],
+        "runtime": runtime_mode,
+        "final_state_policy": FINAL_STATE_POLICY,
+        "current_live_backend": (
+            daemon_memory_os_backend
+            if runtime_mode["daemon_owned"]
+            else _current_direct_legacy_backend(direct_legacy_backend)
+        ),
+        "direct_legacy_backend": direct_legacy_backend,
+        "daemon_memory_os_backend": daemon_memory_os_backend,
         "backend_config": backend_config.to_dict(),
+        "candidate_dependency_available": kuzu_installed,
         "candidate_backend": {
             "backend": "kuzu",
             "role": "memory_os_candidate_graph_store",
@@ -81,6 +110,10 @@ def build_graph_backend_status(
         "live_graph_probe": live_probe,
         "store_probe": store_probe,
         "graph_parity_probe": graph_parity_probe,
+        "corpus_parity_status": corpus_parity_status,
+        "recovery_gate_status": recovery_gate_status,
+        "operator_docs_status": operator_docs_status,
+        "live_switch_decision": _live_switch_decision(),
         "readiness_gates": readiness_gates,
         "recommendation": _recommendation(kuzu_installed, readiness_gates),
         "error": None,
@@ -89,6 +122,46 @@ def build_graph_backend_status(
 
 def _module_available(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
+
+
+def _runtime_mode() -> dict[str, Any]:
+    daemon_url = os.environ.get("ENGRAM_DAEMON_URL", "").strip()
+    daemon_owned = bool(daemon_url)
+    return {
+        "runtime_mode": "daemon_owned_memory_os" if daemon_owned else "direct_legacy_compatibility",
+        "daemon_owned": daemon_owned,
+        "direct_mode_legacy": not daemon_owned,
+        "daemon_url_configured": daemon_owned,
+        "daemon_url": daemon_url or None,
+    }
+
+
+def _direct_legacy_backend(live_probe: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "backend": "json_graph_store",
+        "role": "compatibility_and_recovery_input",
+        "legacy_role": "legacy_live_graph_store",
+        "graph_path": live_probe["graph_path"],
+        "edge_count": live_probe["edge_count"],
+        "available": live_probe["error"] is None,
+        "source_of_truth": "JSON graph document remains the local-first compatibility graph store.",
+    }
+
+
+def _current_direct_legacy_backend(backend: dict[str, Any]) -> dict[str, Any]:
+    current = dict(backend)
+    current["role"] = "legacy_live_graph_store"
+    return current
+
+
+def _daemon_memory_os_backend(runtime_mode: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "backend": "memory_os",
+        "role": "product_path",
+        "daemon_owned": runtime_mode["daemon_owned"],
+        "components": ["sqlite_ledger", "kuzu_graph_service", "graph_evidence_packets"],
+        "source_of_truth": "daemon-owned Memory OS graph records",
+    }
 
 
 def _build_live_graph_probe(graph_path: str | Path | None) -> dict[str, Any]:
@@ -172,9 +245,13 @@ def _build_store_probe(store_root: str | Path | None) -> dict[str, Any]:
 def _build_readiness_gates(
     *,
     kuzu_installed: bool,
+    daemon_owned: bool,
     live_probe: dict[str, Any],
     store_probe: dict[str, Any],
     graph_parity_probe: dict[str, Any],
+    corpus_parity_status: dict[str, Any],
+    recovery_gate_status: dict[str, Any],
+    operator_docs_status: dict[str, Any],
 ) -> dict[str, dict[str, str]]:
     store_requested = bool(store_probe.get("requested"))
     ledger_exists = bool(store_probe.get("ledger_exists")) and store_probe.get("error") is None
@@ -201,17 +278,41 @@ def _build_readiness_gates(
             "status": "blocked",
             "evidence": "Real Kuzu persistence, traversal, import parity, and Windows behavior are not yet proven against the migrated corpus.",
         },
+        "metadata_filtering": {
+            "status": "blocked",
+            "evidence": "Real Kuzu graph filters and traversal query shapes have not passed against the migrated corpus.",
+        },
         "graph_parity": {
             "status": str(graph_parity_probe.get("status") or "skipped"),
             "evidence": _graph_parity_evidence(graph_parity_probe),
         },
+        "corpus_parity": {
+            "status": str(corpus_parity_status["status"]),
+            "evidence": str(corpus_parity_status["evidence"]),
+        },
         "multi_session_daemon": {
+            "status": "pass" if daemon_owned else "blocked",
+            "evidence": (
+                "ENGRAM_DAEMON_URL is configured; daemon-owned Memory OS is the product path."
+                if daemon_owned
+                else "Direct compatibility mode is active; daemon-owned Memory OS is not the current entrypoint."
+            ),
+        },
+        "recovery_gate": {
+            "status": str(recovery_gate_status["status"]),
+            "evidence": str(recovery_gate_status["evidence"]),
+        },
+        "operator_docs": {
+            "status": str(operator_docs_status["status"]),
+            "evidence": str(operator_docs_status["evidence"]),
+        },
+        "windows_path_reliability": {
             "status": "blocked",
-            "evidence": "The Memory OS daemon/single-owner graph backend path has not replaced legacy JSON graph storage.",
+            "evidence": "Windows path/restart reliability has not passed for a live graph backend switch.",
         },
         "live_backend_switch": {
             "status": "blocked",
-            "evidence": "Live graph storage must remain JSON-backed until migration, adapter, and daemon gates pass.",
+            "evidence": FINAL_STATE_POLICY,
         },
     }
 
@@ -247,6 +348,82 @@ def _graph_parity_evidence(graph_parity_probe: dict[str, Any]) -> str:
         graph_parity_probe.get("reason")
         or "Graph parity was not requested."
     )
+
+
+def _corpus_parity_status(graph_parity_probe: dict[str, Any]) -> dict[str, Any]:
+    source_status = str(graph_parity_probe.get("status") or "skipped")
+    if source_status == "pass":
+        return {
+            "status": "pass",
+            "source_status": source_status,
+            "blocker": False,
+            "evidence": _graph_parity_evidence(graph_parity_probe),
+        }
+    return {
+        "status": "blocked",
+        "source_status": source_status,
+        "blocker": True,
+        "evidence": "Skipped or failed Kuzu-vs-JSON corpus parity blocks graph promotion.",
+    }
+
+
+def _operator_docs_status(
+    operator_docs_path: str | Path | None,
+    *,
+    required_terms: tuple[str, ...],
+) -> dict[str, Any]:
+    path = Path(operator_docs_path) if operator_docs_path is not None else DEFAULT_OPERATOR_DOCS_PATH
+    if not path.exists():
+        return {
+            "status": "blocked",
+            "path": str(path),
+            "missing_terms": list(required_terms),
+            "evidence": f"Operator recovery documentation not found: {path}",
+        }
+    text = path.read_text(encoding="utf-8").lower()
+    missing_terms = [term for term in required_terms if term.lower() not in text]
+    return {
+        "status": "pass" if not missing_terms else "blocked",
+        "path": str(path),
+        "missing_terms": missing_terms,
+        "evidence": (
+            "Operator backend recovery documentation covers required terms."
+            if not missing_terms
+            else f"Operator backend documentation is missing: {', '.join(missing_terms)}"
+        ),
+    }
+
+
+def _recovery_gate_status(
+    *,
+    operator_docs_status: dict[str, Any],
+    corpus_parity_status: dict[str, Any],
+) -> dict[str, Any]:
+    if operator_docs_status.get("status") != "pass":
+        return {
+            "status": "blocked",
+            "blocker": True,
+            "evidence": "Recovery gate is blocked because operator recovery documentation is incomplete.",
+        }
+    if corpus_parity_status.get("status") != "pass":
+        return {
+            "status": "blocked",
+            "blocker": True,
+            "evidence": "Recovery gate is blocked until corpus parity and rollback drills pass.",
+        }
+    return {
+        "status": "blocked",
+        "blocker": True,
+        "evidence": "Recovery drill is documented but has not been executed for a live graph switch.",
+    }
+
+
+def _live_switch_decision() -> dict[str, Any]:
+    return {
+        "decision": "deferred",
+        "allow_live_switch": False,
+        "policy": FINAL_STATE_POLICY,
+    }
 
 
 def _promotion_blockers(kuzu_installed: bool) -> list[str]:

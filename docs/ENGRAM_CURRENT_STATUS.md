@@ -38,8 +38,11 @@ release gates, see `docs/RELEASE_GATES.md`.
 - Hosted auth, tenant isolation, billing, sync, marketplace, comments,
   assignments, and rich team workflow UI.
 - Any hosted scope beyond local-first daemon operation.
-- Live backend switching unless recovery, parity, and operator documentation
-  gates pass.
+- Live backend switching. For local 1.0, the daemon-owned Memory OS path is the
+  product path; direct JSON/Chroma remains compatibility and recovery input.
+  Optional backend defaults stay deferred until corpus parity, rollback
+  recovery, Windows restart reliability, daemon ownership, and operator
+  documentation gates pass.
 - Autonomous document analysis inside Engram.
 
 ## Operating Rule

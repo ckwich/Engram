@@ -102,3 +102,8 @@ live daemon-owned backend path.
 
 Skipped parity is a blocker. A gate that has not run is not evidence.
 
+For local 1.0, the daemon-owned Memory OS path is the product path. Direct
+JSON/Chroma remains compatibility and recovery input. No optional backend
+becomes default until corpus parity, rollback recovery, Windows restart
+reliability, daemon ownership, and operator documentation all pass.
+

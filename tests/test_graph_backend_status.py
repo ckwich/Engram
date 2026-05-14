@@ -77,6 +77,50 @@ def test_graph_backend_status_reports_json_live_and_optional_kuzu_gate(tmp_path)
     assert status["readiness_gates"]["live_backend_switch"]["status"] == "blocked"
 
 
+def test_graph_backend_status_exposes_runtime_truth_and_missing_operator_docs(tmp_path):
+    missing_docs = tmp_path / "missing_graph_recovery_docs.md"
+
+    status = build_graph_backend_status(
+        graph_path=None,
+        dependency_probe=lambda name: False,
+        operator_docs_path=missing_docs,
+    )
+
+    assert status["runtime_mode"] == "direct_legacy_compatibility"
+    assert status["daemon_owned"] is False
+    assert status["direct_mode_legacy"] is True
+    assert status["candidate_dependency_available"] is False
+    assert status["daemon_memory_os_backend"]["role"] == "product_path"
+    assert status["direct_legacy_backend"]["backend"] == "json_graph_store"
+    assert status["corpus_parity_status"]["status"] == "blocked"
+    assert status["corpus_parity_status"]["source_status"] == "skipped"
+    assert status["corpus_parity_status"]["blocker"] is True
+    assert status["operator_docs_status"]["status"] == "blocked"
+    assert status["recovery_gate_status"]["status"] == "blocked"
+    assert status["live_switch_decision"]["decision"] == "deferred"
+    assert status["live_switch_decision"]["allow_live_switch"] is False
+    assert status["readiness_gates"]["corpus_parity"]["status"] == "blocked"
+    assert status["readiness_gates"]["operator_docs"]["status"] == "blocked"
+
+
+def test_graph_backend_status_exposes_daemon_owned_memory_os_mode(monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+
+    status = build_graph_backend_status(
+        graph_path=tmp_path / "missing" / "edges.json",
+        dependency_probe=lambda name: name == "kuzu",
+    )
+
+    assert status["runtime_mode"] == "daemon_owned_memory_os"
+    assert status["daemon_owned"] is True
+    assert status["direct_mode_legacy"] is False
+    assert status["candidate_dependency_available"] is True
+    assert status["current_live_backend"]["backend"] == "memory_os"
+    assert status["direct_legacy_backend"]["role"] == "compatibility_and_recovery_input"
+    assert status["candidate_backend"]["requested"] is False
+    assert status["live_switch_decision"]["decision"] == "deferred"
+
+
 def test_graph_backend_status_reports_configured_kuzu_without_switching(monkeypatch, tmp_path):
     monkeypatch.setenv("ENGRAM_GRAPH_BACKEND", "kuzu")
 

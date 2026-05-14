@@ -11,6 +11,12 @@ after the daemon-first and process-hygiene slices.
 
 This is an evaluation, not a backend switch.
 
+Current final-state policy: for local 1.0, the daemon-owned Memory OS path is
+the product path. Direct JSON/Chroma remains compatibility and recovery input.
+No optional backend becomes default until corpus parity, rollback recovery,
+Windows restart reliability, daemon ownership, and operator documentation all
+pass.
+
 ## Follow-Up Checkpoint — 2026-05-13
 
 The implementation follow-up completed the safe stack-lightening pieces without
