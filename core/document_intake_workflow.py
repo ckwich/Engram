@@ -265,6 +265,9 @@ def _packet(
         "schema_version": DOCUMENT_INTAKE_REVIEW_SCHEMA_VERSION,
         "record_type": "document_intake_review",
         "status": status,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
         "source": source,
         "disassembly": disassembly,
         "extraction_request": extraction_request,
@@ -274,6 +277,7 @@ def _packet(
         "draft_candidates": [],
         "promotion_guidance": promotion_guidance,
         "policy": dict(READ_ONLY_POLICY),
+        "resume": resume if isinstance(resume, dict) else None,
         "receipts": {
             "artifacts_built": 1 if isinstance(disassembly, dict) else 0,
             "artifacts_read": 0,

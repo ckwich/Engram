@@ -60,6 +60,9 @@ def test_prepare_document_intake_review_returns_ok_for_text_complete_pdf():
     )
 
     assert packet["status"] == "ok"
+    assert packet["write_performed"] is False
+    assert packet["active_memory_write_performed"] is False
+    assert packet["graph_write_performed"] is False
     assert packet["source"]["document_id"] == "doc_book"
     assert packet["policy"] == {
         "write_behavior": "read_only",
@@ -75,6 +78,7 @@ def test_prepare_document_intake_review_returns_ok_for_text_complete_pdf():
         for chunk in packet["document_preview"]["preview"]["chunks"]
     } == {"doc_book"}
     assert packet["extraction_request"] is None
+    assert packet["resume"] is None
     assert packet["receipts"]["artifacts_built"] == 1
     assert packet["receipts"]["artifacts_read"] == 0
     assert packet["error"] is None
@@ -132,6 +136,9 @@ def test_prepare_document_intake_review_returns_partial_when_visual_coverage_is_
     )
 
     assert packet["status"] == "partial"
+    assert packet["write_performed"] is False
+    assert packet["active_memory_write_performed"] is False
+    assert packet["graph_write_performed"] is False
     assert packet["extraction_request"] == visual_request
     assert packet["receipts"]["coverage_missing"] == ["ocr", "table", "visual"]
     assert packet["promotion_guidance"]["auto_promote"] is False
@@ -155,6 +162,9 @@ def test_prepare_document_intake_review_reports_missing_poppler_as_infrastructur
     )
 
     assert packet["status"] == "unavailable"
+    assert packet["write_performed"] is False
+    assert packet["active_memory_write_performed"] is False
+    assert packet["graph_write_performed"] is False
     assert packet["error"] == {
         "code": "missing_extractor",
         "category": "infrastructure",
@@ -173,6 +183,9 @@ def test_prepare_document_intake_review_reports_missing_source_as_schema_failed(
     )
 
     assert packet["status"] == "schema_failed"
+    assert packet["write_performed"] is False
+    assert packet["active_memory_write_performed"] is False
+    assert packet["graph_write_performed"] is False
     assert packet["error"] == {
         "code": "invalid_request",
         "category": "validation",

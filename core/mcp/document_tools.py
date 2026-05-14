@@ -12,6 +12,9 @@ def _document_intake_unavailable_payload(
 ) -> dict[str, Any]:
     return {
         "status": "unavailable",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
         "source": {"source_path": source_path},
         "disassembly": None,
         "extraction_request": None,
@@ -25,6 +28,7 @@ def _document_intake_unavailable_payload(
             "active_memory_promoted": False,
             "graph_edges_promoted": False,
         },
+        "resume": None,
         "receipts": {"artifacts_built": 0, "artifacts_read": 0, "coverage_missing": []},
         "error": error,
     }
@@ -86,4 +90,3 @@ async def prepare_document_artifact_store_payload(
             "prepare_document_artifact_store requires the daemon-owned Memory OS path.",
         ),
     }
-

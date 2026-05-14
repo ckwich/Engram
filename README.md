@@ -1,21 +1,21 @@
 # Engram
 
-### Local-first semantic memory for AI agents
+### Local-first Memory OS for AI agents
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP Compliant](https://img.shields.io/badge/MCP-compliant-green.svg)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
 
-Engram 1.0 is a local Model Context Protocol (MCP) server that gives AI agents a durable, searchable memory across sessions.
+Engram 1.0 is a local Model Context Protocol (MCP) server and Memory OS for AI agents. It gives agents durable memory, cited retrieval, reviewed source intake, document evidence workflows, graph evidence, and local runtime inspection without pushing private project context to a hosted service.
 
-The rebuilt 1.0 runtime uses a daemon-owned SQLite ledger, content-addressed source artifacts, LanceDB retrieval, and Kuzu graph storage. Legacy JSON memories and ChromaDB remain as compatibility and migration inputs until every caller is moved through the rebuilt runtime.
+The rebuilt 1.0 runtime is owned by `engramd`: a SQLite ledger, content-addressed source store, LanceDB retrieval index, Kuzu graph store, jobs, transactions, snapshots, firewall state, and release/inspection receipts. Legacy JSON memories and ChromaDB remain readable, rebuildable compatibility inputs while callers move through the daemon-owned runtime.
 
 Current status by stability tier lives in `docs/ENGRAM_CURRENT_STATUS.md`.
 The current local 1.0 release-candidate checkpoint is
 `docs/ENGRAM_LOCAL_1_0_RELEASE_CANDIDATE.md`.
 
-Engram is built around one simple idea: agents should retrieve the smallest useful context first, then expand only when needed.
+Engram is built around one simple idea: agents should retrieve the smallest useful context first, then expand only when evidence, citations, or review state justify it.
 
 ---
 
@@ -38,9 +38,11 @@ The result is a practical intersession memory layer for coding agents, research 
 
 ## What Engram Provides
 
+Engram is agent-facing first. The normal path is `memory_protocol()` for discovery, `search_memories` or `context_pack` for small context, `query_knowledge` for cited orientation/review/audit packets, and explicit accept-only tools for anything that writes durable state.
+
 ### Memory Server
 
-- **Daemon-owned Memory OS runtime** through `engramd`, with a thin MCP client entrypoint that avoids local storage/index imports.
+- **Daemon-owned Memory OS runtime** through `engramd`, with `server_daemon_client.py` as the thin stable MCP entrypoint for ordinary multi-session agent use.
 - **SQLite ledger** for metadata, jobs, transactions, snapshots, aliases, entities, concepts, receipts, and migration state.
 - **Content-addressed source store** for raw, normalized, and extracted evidence artifacts.
 - **LanceDB retrieval and Kuzu graph storage** inside the rebuilt local runtime.
@@ -60,6 +62,7 @@ The result is a practical intersession memory layer for coding agents, research 
 - **Session pins** that temporarily promote known memories without changing stored metadata.
 - **Token-use estimates** for Engram-attributed calls.
 - **Retrieval eval harness** for checking that the memory ladder still behaves as expected.
+- **Knowledge Contract (EKC) responses** for project, source, document, review, audit, graph, entity, decision, implementation-context, and evidence-bundle orientation on a stable compatibility envelope.
 
 ### Source and Codebase Workflows
 
@@ -71,19 +74,30 @@ The result is a practical intersession memory layer for coding agents, research 
 
 ### Document Intelligence
 
-- **Local PDF disassembly** that inventories pages, text coverage, image-bearing pages, and extraction receipts without writing active memories.
+- **Local PDF disassembly** that inventories pages, text coverage, image-bearing pages, page windows, resume tokens, and extraction receipts without writing active memories.
+- **End-to-end document intake review packets** that combine disassembly, chunk preview, quality warnings, artifact manifests, coverage gaps, policy metadata, and promotion guidance.
 - **Quality reports** that flag no-text pages, image-heavy pages, failed pages, and visual-review needs.
 - **Portable artifact manifests** with page-level resume states and content-addressed source references.
 - **Mandatory OCR/vision work requests** for image-bearing pages or regions, including per-artifact coverage requirements and expected provenance contracts.
 - **Understanding packets** that normalize agent-supplied summaries, claims, concepts, entities, high-value sections, draft memory proposals, and supplied plus auto-generated graph coverage proposals.
-- **Review-first promotion plans** so document evidence becomes durable memory or graph edges only after explicit review.
+- **Explicit artifact-store transactions** for ledgered document evidence. These store reviewed document/chunk/coverage evidence without promoting active memories or graph edges.
+- **Review-first promotion transactions** so selected document evidence becomes durable memory or graph edges only after `accept=True` and a reviewer identity are supplied.
+- **Truncation protection** for large documents: partial page windows report `status: "partial"`, `coverage_missing`, `resume`, and no-write booleans so agents cannot mistake a pre-accept sample for a complete review.
+
+### Graph, Evidence, and Review
+
+- **Typed graph edges** for support, contradiction, refinement, citation, example, visual evidence, and related concepts.
+- **Bounded graph evidence packets** through `query_knowledge` that surface edge IDs, evidence, and contradictions without loading neighbor memory bodies by default.
+- **Evidence audits** over artifacts, citations, coverage receipts, and graph proposals.
+- **Review-preparation packets** that help agents prepare a review without silently promoting source or document drafts.
+- **Entity profiles, decision packets, implementation context, and evidence bundles** only after the lower-level evidence paths are available.
 
 ### Web Dashboard
 
 - Browse, search, create, update, and delete memories.
 - Review stale memories and related memories.
 - Inspect usage estimates and retrieval eval status.
-- Inspect Memory OS runtime state, jobs, transactions, coverage maps, firewall events, graph edges, entities, concepts, snapshots, and skill packs.
+- Inspect Memory OS runtime state, jobs, transactions, review queues, document artifact transactions, promotion transactions, coverage maps, firewall events, graph edges, graph-evidence receipts, entities, concepts, snapshots, skill packs, EKC eval coverage, and release-gate commands.
 - Monitor disk usage and memory-store growth.
 - Run locally by default, with fail-closed token protection when exposed beyond loopback.
 
@@ -129,6 +143,38 @@ beyond the orientation, review, audit, graph, or artifact-family packet.
 The stable task list is advertised through `memory_protocol()` as
 `knowledge_contract.task_types` and must stay backed by
 `core.memory_os.knowledge_eval.DEFAULT_WORKFLOW_SCENARIOS`.
+
+### Agent Workflow In Practice
+
+For ordinary agent work:
+
+```text
+memory_protocol()
+search_memories(query, limit=5)
+retrieve_chunk(key, chunk_id)       # when the snippet is not enough
+context_pack(query, max_chunks=5)   # when a compact working set is better
+query_knowledge(request)            # when orientation, review, audit, or graph evidence should be cited
+```
+
+For large source and document work:
+
+```text
+preview_memory_chunks or prepare_source_memory
+prepare_document_intake_review(source_path, max_pages=...)
+prepare_visual_extraction_request / preview_visual_extraction
+prepare_document_understanding_packet(agent_supplied_analysis)
+prepare_document_artifact_store(review_packet)
+store_document_artifact(prepared_transaction_id, accept=True, review_packet=review_packet)
+prepare_document_promotion_transaction(document_draft, approved_by=...)
+apply_document_promotion_transaction(transaction, accept=True)
+```
+
+The first half of the document workflow is intentionally no-write. Large PDFs
+should be reviewed in bounded page windows, and a partial packet should stay
+partial until the missing OCR, table, visual, and resume coverage is resolved.
+`store_document_artifact` records ledgered document evidence; it does not create
+active memories or graph edges. Those writes stay behind the separate reviewed
+promotion transaction.
 
 ---
 
@@ -212,7 +258,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `list_document_extractors` | List bundled and external document extraction capabilities. |
 | `preview_document_source_connector` | Preview local Markdown/text/HTML and URL/external parser request arguments without writing. |
 | `prepare_document_disassembly` | Prepare a no-write local PDF page/text/image inventory with quality warnings, portable artifact refs, visual candidates, and an OCR/vision follow-up request. |
-| `prepare_document_intake_review` | Prepare a no-write end-to-end document review packet with disassembly, text preview, quality, artifact, and missing OCR/visual/table coverage receipts. |
+| `prepare_document_intake_review` | Prepare a no-write end-to-end document review packet with disassembly, text preview, quality, artifact, missing OCR/visual/table coverage receipts, top-level no-write flags, and resume state for large documents. |
 | `prepare_document_extraction_request` | Prepare a no-write external parser request for PDF/DOCX/image-bearing sources. |
 | `prepare_document_extraction_result` | Normalize external parser output into no-write preview arguments. |
 | `preview_document_extraction` | Preview document evidence and chunks without writing. |
@@ -221,7 +267,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `prepare_document_promotion_transaction` | Prepare no-write document promotion operations. |
 | `apply_document_promotion_transaction` | Apply selected reviewed document promotion memory/graph writes only when `accept=True` and `approved_by` is supplied. |
 | `prepare_document_artifact_store` | Prepare an explicit reviewed document evidence artifact-store transaction without active memory or graph promotion. |
-| `store_document_artifact` | Store ledgered document evidence only when `accept=True` and the matching reviewed packet is supplied again; active memories and graph edges remain untouched. |
+| `store_document_artifact` | Store ledgered document/source/chunk/coverage evidence only when `accept=True` and the matching reviewed packet is supplied again; active memories and graph edges remain untouched. |
 | `prepare_visual_extraction_request` | Prepare a no-write OCR/vision work request with mandatory per-image-ref coverage. |
 | `preview_visual_extraction` | Preview OCR/vision observations without writing; pass the originating visual request to enforce coverage. |
 | `list_ingestion_pipelines` | List available source-intake pipelines. |
@@ -501,13 +547,15 @@ that every discovered Engram MCP adapter routes stable memory operations to the
 same daemon instead of competing for embedded Chroma ownership.
 
 Daemon mode currently routes stable memory search, duplicate checks, chunk/full
-reads, writes, source draft prepare/list/discard/promotion, no-write document
-disassembly preparation, metadata updates, metadata repair, and deletes through
-`engramd`. The rebuilt Memory OS runtime also initializes SQLite, the
-content-addressed source store, LanceDB, Kuzu, jobs, transactions, snapshots,
-firewall state, and the local Memory OS inspector under the daemon owner.
-Direct in-process MCP mode remains supported unless `ENGRAM_DAEMON_URL` is set.
-Hosted tenant authorization is not part of local 1.0.
+reads, writes, source draft prepare/list/discard/promotion, document
+disassembly and intake review, document artifact-store transactions, document
+promotion transactions, `query_knowledge`, metadata updates, metadata repair,
+and deletes through `engramd`. The rebuilt Memory OS runtime also initializes
+SQLite, the content-addressed source store, LanceDB, Kuzu, jobs, transactions,
+snapshots, firewall state, release-gate receipts, and the local Memory OS
+inspector under the daemon owner. Direct in-process MCP mode remains supported
+unless `ENGRAM_DAEMON_URL` is set. Hosted tenant authorization is not part of
+local 1.0.
 
 ---
 
@@ -643,7 +691,18 @@ The review flow is:
 prepare_source_memory -> inspect draft -> store_prepared_memory
 ```
 
-Use `preview_memory_chunks`, `preview_source_connector`, `list_document_extractors`, `preview_document_source_connector`, `prepare_document_disassembly`, `prepare_document_intake_review`, `prepare_document_extraction_request`, `prepare_document_extraction_result`, `preview_document_extraction`, `prepare_document_understanding_packet`, `prepare_document_draft`, `prepare_document_promotion_transaction`, `prepare_visual_extraction_request`, or `preview_visual_extraction` when you want to inspect what Engram would ingest before any active-memory write happens. Document disassembly, extraction requests/results, understanding packets, draft proposals, promotion operation plans, and image/OCR requests or observations are evidence records, not trusted active memory, until a later explicit review path promotes them. Visual extraction requests include a `visual_evidence_contract`, per-image-ref coverage requirements, and `framework_strategy` so an agent can use native vision when available, or hand work to an external OCR/vision framework and return observations through `preview_visual_extraction`. Pass the originating visual request back into `preview_visual_extraction` when coverage matters; incomplete visual observations return `status: "partial"` with coverage warnings instead of letting a draft claim full coverage. `prepare_document_artifact_store` and `store_document_artifact` are the explicit ledgered document-evidence path; `prepare_document_artifact_store` persists only a compact review intent and digest, while `store_document_artifact(..., accept=True, review_packet=packet)` verifies the reviewed packet and source bytes before storing artifact/document/chunk/coverage records. Neither tool promotes active memories or graph edges. Visual/table evidence records preserve page number, source artifact id, coordinates/bounding boxes when available, confidence, and extractor id. Understanding packets keep synthesis provider-neutral: the connected agent supplies analysis, and Engram normalizes it into summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated graph proposals.
+Use no-write preview tools whenever source shape matters before storage:
+
+- `preview_memory_chunks` and `preview_source_connector` show what ordinary source intake would produce.
+- `prepare_source_memory` creates reviewable source drafts; `store_prepared_memory` is the explicit promotion step.
+- `list_document_extractors`, `preview_document_source_connector`, `prepare_document_disassembly`, and `prepare_document_intake_review` are the document intake front door.
+- `prepare_document_extraction_request`, `prepare_document_extraction_result`, `preview_document_extraction`, `prepare_visual_extraction_request`, and `preview_visual_extraction` handle external parser, OCR, table, and vision evidence.
+- `prepare_document_understanding_packet`, `prepare_document_draft`, `prepare_document_promotion_transaction`, and `apply_document_promotion_transaction` keep agent-authored synthesis reviewable before selected memory or graph writes are accepted.
+- `prepare_document_artifact_store` and `store_document_artifact` are the explicit ledgered document-evidence path. They store artifact, document, chunk, and coverage records only after `accept=True` and a matching reviewed packet are supplied again.
+
+Document disassembly, extraction requests/results, understanding packets, draft proposals, promotion operation plans, and image/OCR observations are evidence records, not trusted active memory. Visual extraction requests include a `visual_evidence_contract`, per-image-ref coverage requirements, and `framework_strategy` so an agent can use native vision when available or hand work to an external OCR/vision framework and return observations through `preview_visual_extraction`. Pass the originating visual request back into `preview_visual_extraction` when coverage matters; incomplete visual observations return `status: "partial"` with coverage warnings instead of letting a draft claim full coverage.
+
+Neither document artifact storage nor document intake review promotes active memories or graph edges. Visual/table evidence records preserve page number, source artifact id, coordinates/bounding boxes when available, confidence, and extractor id. Understanding packets stay provider-neutral: the connected agent supplies analysis, and Engram normalizes it into summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated graph proposals.
 
 Source intake never auto-promotes active memories. Drafts are review records with
 `status: "draft"`, `active_memory_write_performed: false`, and promotion guidance
@@ -722,15 +781,19 @@ Engram
 |   |-- chunker.py         # Markdown-aware chunking
 |   |-- source_intake.py   # Reviewable source drafts
 |   |-- codebase_mapper.py # Agent-native codebase mapping jobs
+|   |-- document_intake_workflow.py # End-to-end no-write document review packets
 |   |-- document_extractors.py # Local no-write document disassembly
 |   |-- document_quality.py # Document quality warnings and next-tool guidance
 |   |-- document_artifacts.py # Portable artifact manifests
+|   |-- document_intelligence.py # Document evidence, understanding, and promotion drafts
 |   |-- graph_manager.py   # Graph policy and traversal
 |   |-- graph_store.py     # Swappable graph persistence seam
 |   |-- graph_backend_status.py # No-write graph backend readiness report
 |   |-- graph_backend_eval.py # No-write graph parity/cross-document readiness
 |   |-- retrieval_backend_status.py # No-write backend readiness report
 |   |-- retrieval_backend_eval.py # No-write vector backend comparison gates
+|   |-- context_compiler.py # No-write agent context packets
+|   |-- project_capsule.py # No-write project capsule drafts
 |   |-- usage_meter.py     # Privacy-safe token estimates
 |   |-- operation_log.py   # Job and event receipts
 |   `-- reliability_harness.py
