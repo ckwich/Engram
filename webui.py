@@ -487,8 +487,21 @@ def get_memory_os_inspector_payload(*, limit: int = 20) -> dict:
     """Return read-only Memory OS inspector data without performing promotions."""
     daemon_url = os.environ.get("ENGRAM_DAEMON_URL", "").strip().rstrip("/")
     if daemon_url:
-        return EngramDaemonClient(daemon_url).memory_os_inspector()
+        return EngramDaemonClient(daemon_url).memory_os_inspector(limit=limit)
     return _webui_memory_os_runtime().inspector(limit=limit)
+
+
+def apply_document_promotion_from_webui(payload: dict) -> dict:
+    """Apply a reviewed document promotion through the configured Memory OS owner."""
+    daemon_url = os.environ.get("ENGRAM_DAEMON_URL", "").strip().rstrip("/")
+    if daemon_url:
+        return EngramDaemonClient(daemon_url).apply_document_promotion_transaction(payload)
+    return _webui_memory_os_runtime().apply_document_promotion_transaction(
+        payload["document_promotion_transaction"],
+        accept=payload.get("accept") is True,
+        approved_by=payload.get("approved_by"),
+        selected_operation_indexes=payload.get("selected_operation_indexes"),
+    )
 
 
 def _webui_memory_os_runtime() -> MemoryOSRuntime:
@@ -788,6 +801,125 @@ def api_inspector_memory_os():
         return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
     except RuntimeError as e:
         return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
+
+
+@app.route("/api/inspector/review-queue")
+def api_inspector_review_queue():
+    limit = _bounded_query_int("limit", 20, 1, 100)
+    try:
+        payload = get_memory_os_inspector_payload(limit=limit)
+    except EngramDaemonClientError as e:
+        return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
+    except RuntimeError as e:
+        return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
+    return jsonify(
+        {
+            "schema_version": payload.get("schema_version"),
+            "write_performed": False,
+            "limit": payload.get("limit", limit),
+            "review_preparation_queue": payload.get("review_preparation_queue", {}),
+            "document_artifact_transactions": payload.get("document_artifact_transactions", {}),
+            "promotion_transactions": payload.get("promotion_transactions", {}),
+        }
+    )
+
+
+@app.route("/api/inspector/release-gates")
+def api_inspector_release_gates():
+    try:
+        payload = get_memory_os_inspector_payload(limit=20)
+    except EngramDaemonClientError as e:
+        return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
+    except RuntimeError as e:
+        return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
+    return jsonify(
+        {
+            "schema_version": payload.get("schema_version"),
+            "write_performed": False,
+            "release_gate_commands": payload.get("release_gate_commands", {}),
+            "ekc_eval_summary": payload.get("ekc_eval_summary", {}),
+        }
+    )
+
+
+@app.route("/api/inspector/document-promotions/apply", methods=["POST"])
+def api_inspector_apply_document_promotion():
+    body, error_response = require_json_object_body()
+    if error_response:
+        return error_response
+
+    if body.get("accept") is not True:
+        return jsonify(
+            {
+                "error": {
+                    "code": "accept_required",
+                    "message": "document promotion apply requires accept=true",
+                }
+            }
+        ), 400
+
+    approved_by = body.get("approved_by")
+    if not isinstance(approved_by, str) or not approved_by.strip():
+        return jsonify(
+            {
+                "error": {
+                    "code": "approved_by_required",
+                    "message": "document promotion apply requires non-empty approved_by",
+                }
+            }
+        ), 400
+
+    transaction = body.get("document_promotion_transaction")
+    if not isinstance(transaction, dict):
+        return jsonify(
+            {
+                "error": {
+                    "code": "transaction_required",
+                    "message": "document_promotion_transaction must be an object",
+                }
+            }
+        ), 400
+    if not str(transaction.get("transaction_id") or "").strip():
+        return jsonify(
+            {
+                "error": {
+                    "code": "transaction_id_required",
+                    "message": "document_promotion_transaction.transaction_id is required",
+                }
+            }
+        ), 400
+
+    selected_indexes = body.get("selected_operation_indexes")
+    if selected_indexes is not None and (
+        not isinstance(selected_indexes, list)
+        or any(not isinstance(index, int) for index in selected_indexes)
+    ):
+        return jsonify(
+            {
+                "error": {
+                    "code": "selected_operation_indexes_invalid",
+                    "message": "selected_operation_indexes must be a list of integers",
+                }
+            }
+        ), 400
+
+    payload = {
+        "document_promotion_transaction": transaction,
+        "accept": True,
+        "approved_by": approved_by.strip(),
+    }
+    if selected_indexes is not None:
+        payload["selected_operation_indexes"] = selected_indexes
+
+    try:
+        result = apply_document_promotion_from_webui(payload)
+    except EngramDaemonClientError as e:
+        return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
+    except RuntimeError as e:
+        return jsonify({"error": {"code": "runtime_error", "message": str(e)}}), 503
+
+    status_code = 400 if isinstance(result.get("error"), dict) else 200
+    return jsonify(result), status_code
 
 
 @app.route("/api/related/<path:key>")

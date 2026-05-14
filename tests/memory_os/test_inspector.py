@@ -96,3 +96,69 @@ def test_memory_os_inspector_summarizes_read_only_runtime_state(tmp_path):
     assert payload["skill_packs"]["items"][0]["compilation_id"] == "skill:one"
     assert payload["graph"]["edges"][0]["edge_id"] == "edge:one"
     assert payload["summary"]["coverage_map_count"] == 1
+
+
+def test_memory_os_inspector_surfaces_review_promotion_and_release_state(tmp_path):
+    ledger = MemoryOSLedger(tmp_path / "engram.sqlite")
+    upsert_record(
+        ledger,
+        "drafts",
+        "draft:book",
+        {
+            "draft_id": "draft:book",
+            "record_type": "document_draft",
+            "review_state": "pending_review",
+            "status": "draft",
+        },
+    )
+    upsert_record(
+        ledger,
+        "transactions",
+        "txn:artifact",
+        {
+            "transaction_id": "txn:artifact",
+            "operation_kind": "document_artifact_store",
+            "status": "dry_run",
+            "write_performed": False,
+        },
+    )
+    upsert_record(
+        ledger,
+        "transactions",
+        "txn:promote",
+        {
+            "transaction_id": "txn:promote",
+            "record_type": "document_promotion_transaction",
+            "operation_kind": "prepare_document_promotion_transaction",
+            "status": "dry_run",
+            "write_performed": False,
+        },
+    )
+    upsert_record(
+        ledger,
+        "graph_edges",
+        "edge:contradicts",
+        {
+            "edge_id": "edge:contradicts",
+            "from_ref": {"kind": "document", "key": "book"},
+            "to_ref": {"kind": "memory", "key": "older_claim"},
+            "edge_type": "contradicts",
+            "confidence": 0.83,
+        },
+    )
+
+    payload = build_memory_os_inspector(FakeRuntime(ledger), limit=5)
+
+    assert payload["daemon_status"]["status"] == "ok"
+    assert payload["review_preparation_queue"]["items"][0]["draft_id"] == "draft:book"
+    assert payload["document_artifact_transactions"]["items"][0]["transaction_id"] == "txn:artifact"
+    assert payload["promotion_transactions"]["items"][0]["transaction_id"] == "txn:promote"
+    assert payload["graph_evidence"]["edge_count"] == 1
+    assert payload["graph_evidence"]["contradiction_count"] == 1
+    assert payload["ekc_eval_summary"]["scenario_count"] >= 1
+    assert any(
+        "server.py --agent-eval" in command["command"]
+        for command in payload["release_gate_commands"]["items"]
+    )
+    assert payload["summary"]["review_queue_count"] == 1
+    assert payload["summary"]["promotion_transaction_count"] == 1

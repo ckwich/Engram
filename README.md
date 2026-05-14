@@ -524,6 +524,13 @@ http://127.0.0.1:5000
 ```
 
 The dashboard is loopback-first. Local use is intentionally low-friction.
+The Memory Inspector is read-only for normal review work: it surfaces daemon
+status, Memory OS jobs, review-preparation drafts, document artifact store
+transactions, promotion transactions, graph evidence counts, EKC eval workflow
+coverage, and release-gate commands from the daemon-owned ledger. Applying a
+document promotion is the only inspector write path; it requires an accepted
+document promotion transaction, `accept=true`, non-empty `approved_by`, and the
+normal WebUI write-token boundary when exposed beyond loopback.
 
 If you expose the dashboard beyond loopback, Engram requires:
 

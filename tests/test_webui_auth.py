@@ -74,6 +74,43 @@ def test_public_host_rejects_wrong_write_token(monkeypatch):
     assert response.get_json()["error"] == "invalid write token"
 
 
+def test_public_host_blocks_document_promotion_apply_without_configured_write_token(monkeypatch):
+    import webui
+
+    calls = []
+
+    def fake_apply_document_promotion_from_webui(payload):
+        calls.append(payload)
+        return {"status": "ok", "write_performed": True}
+
+    monkeypatch.setenv("ENGRAM_WEBUI_HOST", "0.0.0.0")
+    monkeypatch.setenv("ENGRAM_WEBUI_ACCESS_TOKEN", ACCESS_TOKEN)
+    monkeypatch.delenv("ENGRAM_WEBUI_WRITE_TOKEN", raising=False)
+    monkeypatch.setattr(
+        webui,
+        "apply_document_promotion_from_webui",
+        fake_apply_document_promotion_from_webui,
+    )
+
+    response = webui.app.test_client().post(
+        "/api/inspector/document-promotions/apply",
+        headers={"X-Engram-Access-Token": ACCESS_TOKEN},
+        json={
+            "document_promotion_transaction": {
+                "transaction_id": "txn:promote",
+                "record_type": "document_promotion_transaction",
+                "operations": [],
+            },
+            "accept": True,
+            "approved_by": "Reviewer",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "ENGRAM_WEBUI_WRITE_TOKEN" in response.get_json()["error"]
+    assert calls == []
+
+
 def test_public_host_accepts_matching_write_token(monkeypatch):
     import webui
 

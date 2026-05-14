@@ -132,8 +132,11 @@ class EngramDaemonClient:
     def memory_os_status(self) -> dict[str, Any]:
         return self._request("GET", "/v1/memory_os/status")
 
-    def memory_os_inspector(self) -> dict[str, Any]:
-        return self._request("GET", "/v1/memory_os/inspector")
+    def memory_os_inspector(self, *, limit: int | None = None) -> dict[str, Any]:
+        path = "/v1/memory_os/inspector"
+        if limit is not None:
+            path = f"{path}?limit={max(1, min(int(limit), 100))}"
+        return self._request("GET", path)
 
     def memory_os_source_import_job(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/memory_os/source_import_job", payload)

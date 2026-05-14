@@ -10,7 +10,7 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from core.document_intelligence import (
     list_document_extractors,
@@ -104,7 +104,9 @@ class EngramDaemonAPI:
         path: str,
         payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        route = urlparse(path).path.rstrip("/") or "/"
+        parsed_path = urlparse(path)
+        route = parsed_path.path.rstrip("/") or "/"
+        query = parse_qs(parsed_path.query)
         request = payload if isinstance(payload, dict) else {}
         method = method.upper()
 
@@ -121,7 +123,8 @@ class EngramDaemonAPI:
             if method == "GET" and route == "/v1/memory_os/status":
                 return self._ok(self._runtime().status())
             if method == "GET" and route == "/v1/memory_os/inspector":
-                return self._ok(self._runtime().inspector())
+                limit = _bounded_query_int(query, "limit", default=20, minimum=1, maximum=100)
+                return self._ok(self._runtime().inspector(limit=limit))
             if method != "POST":
                 return self._error(405, "method_not_allowed", f"{method} is not allowed for {route}")
             if route == "/v1/memory_os/source_import_job":
@@ -883,6 +886,22 @@ def _memory_os_root() -> Path:
     if data_root:
         return Path(data_root) / "memory_os"
     return Path(__file__).resolve().parents[1] / "data" / "memory_os"
+
+
+def _bounded_query_int(
+    query: dict[str, list[str]],
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw_value = (query.get(name) or [default])[0]
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        value = default
+    return min(max(value, minimum), maximum)
 
 
 def _chunk_payload(result: dict[str, Any] | None, key: str, chunk_id: int) -> dict[str, Any]:

@@ -18,8 +18,13 @@ def test_inspector_tab_is_wired_in_static_assets():
     assert "/api/inspector/operations/jobs" in js
     assert "/api/inspector/operations/events" in js
     assert "/api/inspector/memory-os" in js
+    assert "/api/inspector/review-queue" in js
+    assert "/api/inspector/release-gates" in js
     assert 'id="inspector-memory-os-list"' in html
     assert 'id="inspector-draft-list"' in html
+    assert 'id="inspector-review-list"' in html
+    assert 'id="inspector-promotion-list"' in html
+    assert 'id="inspector-release-gates-list"' in html
 
 
 def test_memory_quality_inspector_api_returns_metadata_only_report(monkeypatch):
@@ -190,3 +195,133 @@ def test_memory_os_inspector_api_returns_read_only_report(monkeypatch):
     assert payload["limit"] == 9
     assert payload["coverage_maps"]["items"][0]["coverage_map_id"] == "coverage:book"
     assert payload["firewall_queue"]["items"][0]["decision"] == "quarantine"
+
+
+def test_review_queue_inspector_api_returns_read_only_memory_os_state(monkeypatch):
+    import webui
+
+    def fake_memory_os_inspector_payload(*, limit=20):
+        return {
+            "schema_version": "2026-05-13.memory-os-inspector.v1",
+            "limit": limit,
+            "write_performed": False,
+            "review_preparation_queue": {
+                "count": 1,
+                "items": [{"record_type": "document_draft", "draft_id": "draft:book"}],
+            },
+            "document_artifact_transactions": {
+                "count": 1,
+                "items": [{"transaction_id": "txn:artifact", "operation_kind": "document_artifact_store"}],
+            },
+            "promotion_transactions": {
+                "count": 1,
+                "items": [
+                    {
+                        "transaction_id": "txn:promote",
+                        "record_type": "document_promotion_transaction",
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr(webui, "get_memory_os_inspector_payload", fake_memory_os_inspector_payload)
+
+    response = webui.app.test_client().get("/api/inspector/review-queue?limit=4")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["write_performed"] is False
+    assert payload["limit"] == 4
+    assert payload["review_preparation_queue"]["items"][0]["draft_id"] == "draft:book"
+    assert payload["document_artifact_transactions"]["items"][0]["transaction_id"] == "txn:artifact"
+    assert payload["promotion_transactions"]["items"][0]["transaction_id"] == "txn:promote"
+
+
+def test_release_gates_inspector_api_exposes_command_list(monkeypatch):
+    import webui
+
+    def fake_memory_os_inspector_payload(*, limit=20):
+        return {
+            "schema_version": "2026-05-13.memory-os-inspector.v1",
+            "limit": limit,
+            "write_performed": False,
+            "release_gate_commands": {
+                "count": 1,
+                "items": [
+                    {
+                        "command": "python server.py --agent-eval",
+                        "purpose": "agent-facing retrieval/source/document workflow gates",
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr(webui, "get_memory_os_inspector_payload", fake_memory_os_inspector_payload)
+
+    response = webui.app.test_client().get("/api/inspector/release-gates")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["write_performed"] is False
+    assert payload["release_gate_commands"]["items"][0]["command"] == "python server.py --agent-eval"
+
+
+def test_document_promotion_apply_route_requires_acceptance_and_reviewer(monkeypatch):
+    import webui
+
+    calls = []
+
+    def fake_apply_document_promotion_from_webui(payload):
+        calls.append(payload)
+        return {
+            "status": "ok",
+            "write_performed": True,
+            "source_transaction_id": payload["document_promotion_transaction"]["transaction_id"],
+        }
+
+    monkeypatch.setenv("ENGRAM_WEBUI_HOST", "127.0.0.1")
+    monkeypatch.setattr(
+        webui,
+        "apply_document_promotion_from_webui",
+        fake_apply_document_promotion_from_webui,
+    )
+
+    client = webui.app.test_client()
+    transaction = {
+        "transaction_id": "txn:promote",
+        "record_type": "document_promotion_transaction",
+        "operations": [],
+    }
+
+    missing_accept = client.post(
+        "/api/inspector/document-promotions/apply",
+        json={"document_promotion_transaction": transaction, "approved_by": "Reviewer"},
+    )
+    missing_reviewer = client.post(
+        "/api/inspector/document-promotions/apply",
+        json={"document_promotion_transaction": transaction, "accept": True},
+    )
+    ok = client.post(
+        "/api/inspector/document-promotions/apply",
+        json={
+            "document_promotion_transaction": transaction,
+            "accept": True,
+            "approved_by": "Reviewer",
+            "selected_operation_indexes": [0],
+        },
+    )
+
+    assert missing_accept.status_code == 400
+    assert missing_accept.get_json()["error"]["code"] == "accept_required"
+    assert missing_reviewer.status_code == 400
+    assert missing_reviewer.get_json()["error"]["code"] == "approved_by_required"
+    assert ok.status_code == 200
+    assert ok.get_json()["source_transaction_id"] == "txn:promote"
+    assert calls == [
+        {
+            "document_promotion_transaction": transaction,
+            "accept": True,
+            "approved_by": "Reviewer",
+            "selected_operation_indexes": [0],
+        }
+    ]

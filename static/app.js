@@ -378,28 +378,44 @@
     document.getElementById('inspector-quality-list').innerHTML = '';
     document.getElementById('inspector-graph-list').innerHTML = '';
     document.getElementById('inspector-draft-list').innerHTML = '';
+    document.getElementById('inspector-review-list').innerHTML = '';
+    document.getElementById('inspector-promotion-list').innerHTML = '';
     document.getElementById('inspector-job-list').innerHTML = '';
     document.getElementById('inspector-event-list').innerHTML = '';
     document.getElementById('inspector-memory-os-list').innerHTML = '';
+    document.getElementById('inspector-release-gates-list').innerHTML = '';
     try {
-      const [qualityResponse, graphResponse, draftsResponse, jobsResponse, eventsResponse, memoryOSResponse] = await Promise.all([
+      const [
+        qualityResponse,
+        graphResponse,
+        draftsResponse,
+        reviewQueueResponse,
+        jobsResponse,
+        eventsResponse,
+        memoryOSResponse,
+        releaseGatesResponse,
+      ] = await Promise.all([
         fetch('/api/inspector/memory-quality?limit=5'),
         fetch('/api/inspector/graph/audit'),
         fetch('/api/inspector/source-drafts?status=draft&limit=5'),
+        fetch('/api/inspector/review-queue?limit=5'),
         fetch('/api/inspector/operations/jobs?limit=5'),
         fetch('/api/inspector/operations/events?limit=5'),
         fetch('/api/inspector/memory-os?limit=5'),
+        fetch('/api/inspector/release-gates'),
       ]);
-      if (!qualityResponse.ok || !graphResponse.ok || !draftsResponse.ok || !jobsResponse.ok || !eventsResponse.ok || !memoryOSResponse.ok) {
+      if (!qualityResponse.ok || !graphResponse.ok || !draftsResponse.ok || !reviewQueueResponse.ok || !jobsResponse.ok || !eventsResponse.ok || !memoryOSResponse.ok || !releaseGatesResponse.ok) {
         throw new Error('Inspector API unavailable');
       }
       renderInspector({
         quality: await qualityResponse.json(),
         graph: await graphResponse.json(),
         drafts: await draftsResponse.json(),
+        reviewQueue: await reviewQueueResponse.json(),
         jobs: await jobsResponse.json(),
         events: await eventsResponse.json(),
         memoryOS: await memoryOSResponse.json(),
+        releaseGates: await releaseGatesResponse.json(),
       });
     } catch (error) {
       document.getElementById('inspector-summary-cards').innerHTML =
@@ -411,17 +427,23 @@
     const quality = data.quality || {};
     const graph = data.graph || {};
     const drafts = data.drafts || {};
+    const reviewQueue = data.reviewQueue || {};
     const jobs = data.jobs || {};
     const events = data.events || {};
     const memoryOS = data.memoryOS || {};
+    const releaseGates = data.releaseGates || {};
     const memoryOSSummary = memoryOS.summary || {};
+    const reviewSection = reviewQueue.review_preparation_queue || {};
+    const artifactTransactions = reviewQueue.document_artifact_transactions || {};
+    const promotionTransactions = reviewQueue.promotion_transactions || {};
+    const releaseGateCommands = (releaseGates.release_gate_commands || {}).items || [];
     document.getElementById('inspector-summary-cards').innerHTML = `
       <div class="usage-card"><span>${safeInteger(quality.issue_count)}</span><label>quality issues</label></div>
       <div class="usage-card"><span>${safeInteger((quality.summary || {}).high_risk_count)}</span><label>high risk</label></div>
       <div class="usage-card"><span>${safeInteger(graph.issue_count)}</span><label>graph issues</label></div>
-      <div class="usage-card"><span>${safeInteger(drafts.total)}</span><label>drafts</label></div>
+      <div class="usage-card"><span>${safeInteger(reviewSection.count || drafts.total)}</span><label>review queue</label></div>
       <div class="usage-card"><span>${safeInteger(memoryOSSummary.document_count)}</span><label>documents</label></div>
-      <div class="usage-card"><span>${safeInteger(memoryOSSummary.coverage_map_count)}</span><label>coverage maps</label></div>
+      <div class="usage-card"><span>${safeInteger(promotionTransactions.count)}</span><label>promotions</label></div>
     `;
     document.getElementById('inspector-quality-list').innerHTML = (quality.memories || []).map(memory => `
       <div class="usage-call-row">
@@ -443,6 +465,23 @@
         <span>${esc(draft.status || '')}</span>
       </div>
     `).join('') || '<div class="loading-row">No draft source memories awaiting review.</div>';
+    document.getElementById('inspector-review-list').innerHTML = (reviewSection.items || []).map(record => `
+      <div class="usage-call-row">
+        <strong>${esc(record.draft_id || record.transaction_id || record.record_type || 'review item')}</strong>
+        <span>${esc(record.record_type || record.operation_kind || '')}</span>
+        <span>${esc(record.review_status || record.review_state || record.status || '')}</span>
+      </div>
+    `).join('') || '<div class="loading-row">No Memory OS review items queued.</div>';
+    document.getElementById('inspector-promotion-list').innerHTML = [
+      ...(artifactTransactions.items || []),
+      ...(promotionTransactions.items || []),
+    ].map(transaction => `
+      <div class="usage-call-row">
+        <strong>${esc(transaction.transaction_id || 'transaction')}</strong>
+        <span>${esc(transaction.operation_kind || transaction.record_type || '')}</span>
+        <span>${esc(transaction.status || '')}</span>
+      </div>
+    `).join('') || '<div class="loading-row">No document artifact or promotion transactions.</div>';
     document.getElementById('inspector-job-list').innerHTML = (jobs.jobs || []).map(job => `
       <div class="usage-call-row">
         <strong>${esc(job.operation_type || 'operation')}</strong>
@@ -463,6 +502,12 @@
         <span>${esc(row.detail)}</span>
       </div>
     `).join('') || '<div class="loading-row">No Memory OS inspector records yet.</div>';
+    document.getElementById('inspector-release-gates-list').innerHTML = releaseGateCommands.map(command => `
+      <div class="usage-call-row">
+        <strong>${esc(command.command || 'gate')}</strong>
+        <span>${esc(command.purpose || '')}</span>
+      </div>
+    `).join('') || '<div class="loading-row">No release gates advertised.</div>';
   }
 
   function memoryOSRows(memoryOS) {
@@ -482,9 +527,14 @@
       },
       { label: 'Jobs', value: safeInteger(summary.job_count), detail: 'daemon queue' },
       { label: 'Transactions', value: safeInteger(summary.transaction_count), detail: 'promotion receipts' },
+      { label: 'Review queue', value: safeInteger(summary.review_queue_count), detail: 'Memory OS drafts' },
+      { label: 'Document artifacts', value: safeInteger(summary.document_artifact_transaction_count), detail: 'reviewed stores' },
+      { label: 'Promotion transactions', value: safeInteger(summary.promotion_transaction_count), detail: 'accepted writes' },
       { label: 'Coverage', value: safeInteger(summary.coverage_map_count), detail: 'document imports' },
       { label: 'Graph edges', value: safeInteger(summary.graph_edge_count), detail: 'relationship ledger' },
+      { label: 'Contradictions', value: safeInteger(summary.graph_contradiction_count), detail: 'bounded graph evidence' },
       { label: 'Entities', value: safeInteger(summary.entity_count), detail: `${safeInteger(summary.concept_count)} concepts` },
+      { label: 'EKC eval', value: safeInteger(summary.ekc_eval_scenario_count), detail: 'stable workflows' },
       { label: 'Firewall', value: safeInteger(summary.firewall_event_count), detail: 'quarantine events' },
       { label: 'Snapshots', value: safeInteger(summary.snapshot_count), detail: 'rollback manifests' },
       { label: 'Skill packs', value: safeInteger(summary.skill_pack_count), detail: 'export previews' },
