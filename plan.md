@@ -237,10 +237,9 @@ and commercial packaging.
 
 ## Engram Knowledge Contract v0 - Local Agent Contract Hardening
 
-EKC v0 is a planned local product enhancement, not a Pinecone/Nexus dependency
-and not a local KnowQL clone. It hardens Engram's agent-facing contract around
-one typed MCP request/response path, one deterministic `project_capsule`
-artifact, and one project-orientation eval.
+EKC v0 is a planned local product enhancement, not a hosted feature and not a
+Pinecone/Nexus dependency. It adds one MCP-facing `query_knowledge` contract,
+one deterministic `project_capsule` artifact, and one project-orientation eval.
 
 Tracked docs:
 
@@ -249,8 +248,8 @@ Tracked docs:
 
 Key constraints:
 
+- no local KnowQL clone
 - no Pinecone dependency
-- no KnowQL compatibility layer
 - no autonomous compiler in v0
 - no automatic durable memory writes
 - unsupported inference defaults to forbidden

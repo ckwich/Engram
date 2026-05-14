@@ -115,6 +115,10 @@ context_pack(
 
 `context_pack` returns selected chunks, citations, omitted-result counts, and budget receipts so agents can see what context they spent.
 
+For repeated project orientation, start with `query_knowledge` when available.
+It returns a typed EKC v0 project capsule response. Use `search_memories` and
+`retrieve_chunk` when you need lower-level evidence beyond the capsule.
+
 ---
 
 ## MCP Tool Surface

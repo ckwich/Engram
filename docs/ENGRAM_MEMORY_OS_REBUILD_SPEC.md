@@ -655,10 +655,16 @@ Project workflow:
 
 - `read_project_capsule`
 - `prepare_project_capsule`
+- `query_knowledge`
 - `refresh_project_capsule`
 - `make_handoff`
 - `resume_project`
 - `export_skill_pack`
+
+`query_knowledge` accepts EKC v0 project-orientation requests and returns a
+typed project capsule response with citations, freshness, policy, budget,
+planner, and explicit errors. It is read-only and does not replace
+`prepare_project_capsule`, which remains a draft/review helper.
 
 Operations:
 
