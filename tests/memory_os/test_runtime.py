@@ -126,3 +126,63 @@ def test_memory_os_runtime_records_metadata_updates_as_distinct_transactions(tmp
     assert updated["updated"] is True
     assert updated["memory"]["transaction_id"] != stored["transaction_id"]
     assert after == before + 1
+
+
+def test_memory_os_runtime_query_knowledge_returns_project_capsule_response(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    runtime.store_memory(
+        key="engram_runtime_direction",
+        content="# Summary\n\nEngram uses a daemon-owned Memory OS runtime.",
+        title="Runtime Direction",
+        project="Engram",
+        tags=["reviewed", "decision"],
+    )
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-runtime",
+            "ask": {
+                "goal": "Get current project context.",
+                "task_type": "project_orientation",
+                "project": "Engram",
+                "focus": ["runtime"],
+            },
+        }
+    )
+
+    assert response["contract_version"] == "engram.knowledge.response.v0"
+    assert response["request_id"] == "req-runtime"
+    assert response["status"] == "ok"
+    assert response["answer"]["project"] == "Engram"
+    assert "daemon-owned Memory OS runtime" in response["answer"]["summary"]
+    assert response["citations"]
+    assert response["budget_used"]["artifacts_built"] == 1
+    assert response["budget_used"]["artifacts_read"] == 0
+    assert response["policy"]["unsupported_inferences_used"] is False
+    assert response["policy"]["review_state_available"] is False
+    assert response["policy"]["review_filter_enforced"] is False
+    assert response["policy"]["review_state_basis"] == "not_available_in_current_memory_os_records"
+
+
+def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-bad",
+            "ask": {"task_type": "project_orientation"},
+        }
+    )
+
+    assert response["status"] == "schema_failed"
+    assert response["errors"][0]["code"] == "missing_project"

@@ -18,6 +18,13 @@ from core.memory_os.graph import MemoryOSGraph
 from core.memory_os.inspector import build_memory_os_inspector
 from core.memory_os.jobs import JobQueue
 from core.memory_os.ledger import MemoryOSLedger
+from core.memory_os.knowledge_contract import (
+    RESPONSE_SCHEMA_VERSION,
+    no_answer_response,
+    normalize_knowledge_request,
+    ok_response,
+)
+from core.memory_os.project_capsule_artifact import build_project_capsule_artifact
 from core.memory_os.retrieval import MemoryOSRetrievalIndex
 from core.memory_os.snapshots import SnapshotService
 from core.memory_os.transactions import MemoryTransactionService
@@ -266,6 +273,94 @@ class MemoryOSRuntime:
             "error": None,
         }
 
+    def query_knowledge(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Return an EKC v0 typed project capsule response without writing memory."""
+        normalized = normalize_knowledge_request(request)
+        if normalized.get("contract_version") == RESPONSE_SCHEMA_VERSION:
+            return normalized
+
+        budget = normalized["budget"]
+        ask = normalized["ask"]
+        query = _knowledge_search_query(ask)
+        search = self.search_memories(
+            query,
+            limit=max(int(budget.get("max_source_reads", 12)), 1),
+            project=ask["project"],
+            include_stale=False,
+            retrieval_mode="hybrid",
+        )
+        results = list(search.get("results") or [])
+        planner = {
+            "strategy": "project_capsule",
+            "methods_used": ["artifact", "hybrid_search"],
+            "omissions": [],
+        }
+        if not results:
+            return no_answer_response(
+                request_id=normalized["request_id"],
+                code="no_project_sources",
+                message=f"No eligible project sources found for {ask['project']}.",
+                planner=planner,
+            )
+
+        context_packet = {
+            "profile": {"id": "project_capsule"},
+            "context": {
+                "chunks": results,
+                "citations": [
+                    result.get("citation")
+                    for result in results
+                    if result.get("citation")
+                ],
+            },
+            "warnings": [],
+        }
+        artifact = build_project_capsule_artifact(
+            project=ask["project"],
+            goal=ask["goal"],
+            focus=ask["focus"],
+            context_packet=context_packet,
+            quality_payload={"summary": {}, "issue_count": 0},
+            source_snapshot_id="memory_os:latest",
+        )
+        answer = {
+            "project": artifact["project"],
+            "summary": artifact["summary"],
+            "current_goals": artifact["current_goals"],
+            "active_decisions": artifact["active_decisions"],
+            "constraints": artifact["constraints"],
+            "open_questions": artifact["open_questions"],
+            "important_entities": artifact["important_entities"],
+            "recent_changes": artifact["recent_changes"],
+        }
+        partial = artifact["staleness"]["state"] != "fresh" or not artifact["summary"]
+        return ok_response(
+            request_id=normalized["request_id"],
+            answer=answer,
+            citations=artifact["citations"],
+            freshness={
+                "state": artifact["staleness"]["state"],
+                "artifact_generated_at": artifact["generated_at"],
+                "source_snapshot_id": artifact["source_snapshot_id"],
+            },
+            budget_used={
+                "artifacts_built": 1,
+                "artifacts_read": 0,
+                "source_reads": len(results),
+                "tokens_out_estimate": len(str(answer)) // 4,
+            },
+            planner=planner,
+            partial=partial,
+            errors=[]
+            if not partial
+            else [
+                {
+                    "code": "partial_capsule",
+                    "message": "Capsule is missing one or more optional orientation fields.",
+                }
+            ],
+        )
+
     def retrieve_chunk(self, key: str, chunk_id: int) -> dict[str, Any]:
         """Retrieve one Memory OS chunk by memory key and chunk id."""
         normalized_key = _required_text(key, "key")
@@ -365,6 +460,12 @@ class MemoryOSRuntime:
         with self.ledger.connect() as conn:
             conn.execute(f"DELETE FROM {table} WHERE id = ?", (record_id,))
             conn.commit()
+
+
+def _knowledge_search_query(ask: dict[str, Any]) -> str:
+    parts = [ask.get("goal") or "project orientation", ask.get("project") or ""]
+    parts.extend(ask.get("focus") or [])
+    return " ".join(str(part).strip() for part in parts if str(part).strip())
 
 
 def _default_embed_text(text: str) -> list[float]:
