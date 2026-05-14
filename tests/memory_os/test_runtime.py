@@ -543,10 +543,18 @@ def test_memory_os_runtime_query_knowledge_returns_implementation_context_artifa
         }
     )
 
-    assert response["status"] == "partial"
+    assert response["status"] == "ok"
     assert response["answer"]["artifact_family"] == "implementation_context"
+    assert response["answer"]["evidence_audit"]["required"] is False
     assert response["answer"]["items"][0]["key"] == "impl_context"
     assert response["citations"][0]["level"] == "chunk"
+    assert response["planner"]["omissions"] == [
+        {
+            "code": "evidence_audit_unavailable",
+            "message": "No artifact, coverage, or draft audit records matched this implementation_context request.",
+        }
+    ]
+    assert response["errors"] == []
     assert response["planner"]["strategy"] == "implementation_context"
 
 
@@ -606,7 +614,7 @@ def test_memory_os_runtime_implementation_context_adds_ranked_brief(tmp_path):
         }
     )
 
-    assert response["status"] == "partial"
+    assert response["status"] == "ok"
     assert response["answer"]["items"][0]["key"] == "current_impl"
     assert response["answer"]["brief"]["summary"].startswith("Current implementation context")
     assert response["answer"]["brief"]["next_actions"] == [

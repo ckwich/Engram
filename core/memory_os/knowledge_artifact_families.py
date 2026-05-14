@@ -51,13 +51,15 @@ def build_artifact_family_packet(
         max_records=max_records,
     )
     audit_status = str(audit.get("status") or "unknown")
-    status = "ok" if audit_status == "ok" else "partial"
+    audit_optional_unavailable = family == "implementation_context" and audit_status == "no_answer"
+    status = "ok" if audit_status == "ok" or audit_optional_unavailable else "partial"
     answer = {
         "artifact_family": family,
         "project": project,
         "items": items,
         "evidence_audit": {
             "status": audit_status,
+            "required": not audit_optional_unavailable,
             "finding_count": len(((audit.get("answer") or {}).get("findings") or []))
             if isinstance(audit.get("answer"), dict)
             else 0,
@@ -69,21 +71,27 @@ def build_artifact_family_packet(
         answer["brief"] = _implementation_context_brief(items)
         for item in items:
             item.pop("_brief_text", None)
-    errors = (
-        [
+    omissions = []
+    errors = []
+    if audit_optional_unavailable:
+        omissions.append(
+            {
+                "code": "evidence_audit_unavailable",
+                "message": "No artifact, coverage, or draft audit records matched this implementation_context request.",
+            }
+        )
+    elif status == "partial":
+        errors.append(
             {
                 "code": "evidence_audit_not_clear",
                 "message": f"{family} has cited evidence, but the evidence audit status is {audit_status}.",
             }
-        ]
-        if status == "partial"
-        else []
-    )
+        )
     return {
         "status": status,
         "answer": answer,
         "citations": normalize_knowledge_citations(citations, default_source="memory_os"),
-        "omissions": [],
+        "omissions": omissions,
         "errors": errors,
         "source_reads": len(items),
         "write_performed": False,

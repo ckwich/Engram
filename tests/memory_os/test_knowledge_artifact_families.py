@@ -90,7 +90,7 @@ def test_entity_profile_returns_no_answer_when_entities_lack_evidence(tmp_path):
     assert packet["errors"][0]["code"] == "missing_cited_evidence"
 
 
-def test_implementation_context_uses_chunk_citations_and_audit_status(tmp_path):
+def test_implementation_context_treats_missing_audit_as_optional_metadata(tmp_path):
     ledger = MemoryOSLedger(tmp_path / "ledger.sqlite3")
     upsert_record(
         ledger,
@@ -115,9 +115,17 @@ def test_implementation_context_uses_chunk_citations_and_audit_status(tmp_path):
         max_records=10,
     )
 
-    assert packet["status"] == "partial"
+    assert packet["status"] == "ok"
     assert packet["answer"]["artifact_family"] == "implementation_context"
     assert packet["answer"]["evidence_audit"]["status"] == "no_answer"
+    assert packet["answer"]["evidence_audit"]["required"] is False
+    assert packet["omissions"] == [
+        {
+            "code": "evidence_audit_unavailable",
+            "message": "No artifact, coverage, or draft audit records matched this implementation_context request.",
+        }
+    ]
+    assert packet["errors"] == []
     assert packet["citations"] == [
         {
             "citation_id": "cit_001",
