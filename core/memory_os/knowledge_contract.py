@@ -5,6 +5,8 @@ from copy import deepcopy
 from typing import Any
 from uuid import uuid4
 
+from core.memory_os.knowledge_citations import validate_knowledge_citation
+
 
 REQUEST_SCHEMA_VERSION = "engram.knowledge.request.v0"
 RESPONSE_SCHEMA_VERSION = "engram.knowledge.response.v0"
@@ -247,6 +249,9 @@ def validate_knowledge_response(response: dict[str, Any]) -> dict[str, Any]:
         errors.append("unsupported_status")
     if response.get("status") in {"ok", "partial"} and not response.get("citations"):
         errors.append("missing_success_citations")
+    for index, citation in enumerate(response.get("citations") or []):
+        for citation_error in validate_knowledge_citation(citation):
+            errors.append(f"invalid_citation_{index}_{citation_error}")
     for field in ("artifacts_built", "artifacts_read", "source_reads", "tokens_out_estimate"):
         if field not in (response.get("budget_used") or {}):
             errors.append(f"missing_budget_{field}")

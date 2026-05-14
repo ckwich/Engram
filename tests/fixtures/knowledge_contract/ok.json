@@ -10,6 +10,8 @@
   "citations": [
     {
       "citation_id": "cit_001",
+      "level": "artifact",
+      "source": "memory_os",
       "artifact_id": "artifact:engram:project_capsule:v0",
       "source_ref": "memory:engram_architecture_hardening_closeout_2026_05_13"
     }

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.memory_os._records import now_iso
+from core.memory_os.knowledge_citations import normalize_knowledge_citations
 from core.project_capsule import build_project_capsule_draft
 
 
@@ -84,7 +85,7 @@ def build_project_capsule_artifact(
         "open_questions": fields["open_questions"],
         "important_entities": fields["important_entities"],
         "recent_changes": fields["recent_changes"],
-        "citations": citations,
+        "citations": normalize_knowledge_citations(citations, default_source="memory_os"),
         "draft": draft,
         "staleness": {
             "state": "fresh" if source_refs else "partial",

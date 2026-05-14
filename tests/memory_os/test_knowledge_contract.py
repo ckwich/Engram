@@ -106,7 +106,15 @@ def test_validate_knowledge_response_accepts_required_success_and_failure_envelo
         "request_id": "req-ok",
         "status": "ok",
         "answer": {"project": "Engram"},
-        "citations": [{"citation_id": "cit_001"}],
+        "citations": [
+            {
+                "citation_id": "cit_001",
+                "level": "chunk",
+                "source": "memory_os",
+                "key": "engram_direction",
+                "chunk_id": 0,
+            }
+        ],
         "freshness": {"state": "fresh"},
         "policy": {
             "unreviewed_sources_used": False,
@@ -132,6 +140,38 @@ def test_validate_knowledge_response_accepts_required_success_and_failure_envelo
 
     assert validate_knowledge_response(ok)["valid"] is True
     assert validate_knowledge_response(unavailable)["valid"] is True
+
+
+def test_validate_knowledge_response_rejects_malformed_success_citations():
+    invalid = {
+        "contract_version": RESPONSE_SCHEMA_VERSION,
+        "request_id": "req-bad-citation",
+        "status": "ok",
+        "answer": {"project": "Engram"},
+        "citations": [{"citation_id": "cit_001"}],
+        "freshness": {"state": "fresh"},
+        "policy": {
+            "unreviewed_sources_used": False,
+            "unsupported_inferences_used": False,
+            "review_state_available": False,
+            "review_filter_enforced": False,
+            "review_state_basis": "not_available_in_current_memory_os_records",
+        },
+        "budget_used": {
+            "artifacts_built": 1,
+            "artifacts_read": 0,
+            "source_reads": 1,
+            "tokens_out_estimate": 10,
+        },
+        "planner": {"strategy": "project_capsule", "methods_used": ["artifact"], "omissions": []},
+        "errors": [],
+    }
+
+    result = validate_knowledge_response(invalid)
+
+    assert result["valid"] is False
+    assert "invalid_citation_0_missing_level" in result["errors"]
+    assert "invalid_citation_0_missing_source" in result["errors"]
 
 
 def test_validate_knowledge_response_rejects_missing_envelope_fields():

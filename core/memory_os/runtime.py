@@ -19,6 +19,7 @@ from core.memory_os.inspector import build_memory_os_inspector
 from core.memory_os.jobs import JobQueue
 from core.memory_os.knowledge_artifacts import KnowledgeArtifactStore
 from core.memory_os.ledger import MemoryOSLedger
+from core.memory_os.knowledge_citations import normalize_knowledge_citations
 from core.memory_os.knowledge_contract import (
     RESPONSE_SCHEMA_VERSION,
     no_answer_response,
@@ -583,7 +584,7 @@ def _artifact_response_citations(artifact_record: dict[str, Any]) -> list[dict[s
         for citation in list(artifact.get("citations") or [])
         if isinstance(citation, dict)
     )
-    return citations
+    return normalize_knowledge_citations(citations, default_source="memory_os")
 
 
 def _default_embed_text(text: str) -> list[float]:
