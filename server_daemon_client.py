@@ -27,6 +27,19 @@ PRODUCT_STABILITY = "stable"
 PROTOCOL_VERSION = 2
 PROTOCOL_SCHEMA_VERSION = "2026-04-27"
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
+STABLE_DOCUMENT_WORKFLOW = [
+    "list_document_extractors",
+    "preview_document_source_connector",
+    "prepare_document_disassembly",
+    "prepare_document_extraction_request",
+    "prepare_document_extraction_result",
+    "preview_document_extraction",
+    "prepare_visual_extraction_request",
+    "preview_visual_extraction",
+    "prepare_document_understanding_packet",
+    "prepare_document_draft",
+    "prepare_document_promotion_transaction",
+]
 
 
 def _daemon_url() -> str:
@@ -131,6 +144,27 @@ def memory_protocol() -> dict[str, Any]:
             "read_memory": "retrieve_memory",
             "write_memory": "store_memory",
         },
+        "document_workflow": STABLE_DOCUMENT_WORKFLOW,
+        "tool_groups": {
+            "document_intelligence": {
+                "stability": "stable",
+                "cost_class": "low-to-medium",
+                "tools": STABLE_DOCUMENT_WORKFLOW,
+            },
+        },
+        "canonical_tools": [
+            "memory_protocol",
+            "daemon_status",
+            "memory_os_status",
+            "query_knowledge",
+            "search_memories",
+            "retrieve_chunk",
+            "retrieve_chunks",
+            "retrieve_memory",
+            "store_memory",
+            "prepare_source_memory",
+            *STABLE_DOCUMENT_WORKFLOW,
+        ],
         "warnings": [
             "Start or autostart engramd before using this entrypoint.",
             "Use daemon_status() to prove daemon reachability before blaming missing memory.",
@@ -521,12 +555,53 @@ async def store_prepared_memory(
 
 
 @mcp.tool()
+async def list_document_extractors() -> dict[str, Any]:
+    """Return the no-write document extractor catalog through the daemon before promotion planning."""
+    try:
+        return await _call_daemon("list_document_extractors", {})
+    except EngramDaemonClientError as exc:
+        return {
+            "catalog": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def preview_document_source_connector(
+    connector_type: str,
+    target: str,
+    include_globs: list[str] | None = None,
+    max_files: int = 20,
+    max_file_size_kb: int = 256,
+    max_source_text_chars: int = 12000,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Preview document source arguments through the daemon as a no-write step before promotion."""
+    payload = {
+        "connector_type": connector_type,
+        "target": target,
+        "include_globs": include_globs,
+        "max_files": max_files,
+        "max_file_size_kb": max_file_size_kb,
+        "max_source_text_chars": max_source_text_chars,
+        "metadata": metadata,
+    }
+    try:
+        return await _call_daemon("preview_document_source_connector", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "preview": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
 async def prepare_document_disassembly(
     source_path: str,
     source_type: str = "pdf",
     max_pages: int | None = None,
 ) -> dict[str, Any]:
-    """Prepare a no-write document disassembly through the daemon."""
+    """Prepare a no-write document disassembly through the daemon before any promotion."""
     try:
         return await _call_daemon(
             "prepare_document_disassembly",
@@ -535,6 +610,224 @@ async def prepare_document_disassembly(
     except EngramDaemonClientError as exc:
         return {
             "disassembly": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_document_extraction_request(
+    source_ref: dict[str, Any],
+    source_type: str,
+    requested_outputs: list[str],
+    extractor_id: str = "engram-document-request",
+    extractor_kind: str = "external_document",
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    """Prepare a no-write document extraction request through the daemon before promotion."""
+    payload = {
+        "source_ref": source_ref,
+        "source_type": source_type,
+        "requested_outputs": requested_outputs,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+        "instructions": instructions,
+    }
+    try:
+        return await _call_daemon("prepare_document_extraction_request", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "request": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_document_extraction_result(
+    extraction_request: dict[str, Any],
+    title: str,
+    content: str,
+    media_type: str,
+    metadata: dict[str, Any] | None = None,
+    image_refs: list[dict[str, Any]] | None = None,
+    requested_visual_capabilities: list[str] | None = None,
+) -> dict[str, Any]:
+    """Normalize parser output as a no-write daemon result before document promotion."""
+    payload = {
+        "extraction_request": extraction_request,
+        "title": title,
+        "content": content,
+        "media_type": media_type,
+        "metadata": metadata,
+        "image_refs": image_refs,
+        "requested_visual_capabilities": requested_visual_capabilities,
+    }
+    try:
+        return await _call_daemon("prepare_document_extraction_result", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "result": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def preview_document_extraction(
+    title: str,
+    source_uri: str,
+    source_type: str,
+    content: str,
+    media_type: str,
+    metadata: dict[str, Any] | None = None,
+    extractor_id: str = "engram-text-preview",
+    extractor_kind: str = "agent_native",
+) -> dict[str, Any]:
+    """Preview document evidence and chunks as a no-write daemon step before promotion."""
+    payload = {
+        "title": title,
+        "source_uri": source_uri,
+        "source_type": source_type,
+        "content": content,
+        "media_type": media_type,
+        "metadata": metadata,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+    }
+    try:
+        return await _call_daemon("preview_document_extraction", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "preview": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_visual_extraction_request(
+    document_record: dict[str, Any],
+    image_refs: list[dict[str, Any]],
+    requested_capabilities: list[str],
+    extractor_id: str = "engram-visual-request",
+    extractor_kind: str = "ocr_vision",
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    """Prepare a no-write OCR/vision coverage request through the daemon before promotion."""
+    payload = {
+        "document_record": document_record,
+        "image_refs": image_refs,
+        "requested_capabilities": requested_capabilities,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+        "instructions": instructions,
+    }
+    try:
+        return await _call_daemon("prepare_visual_extraction_request", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "request": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def preview_visual_extraction(
+    document_record: dict[str, Any],
+    observations: list[dict[str, Any]],
+    extractor_id: str = "engram-visual-preview",
+    extractor_kind: str = "agent_native",
+    visual_request: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Preview caller-supplied visual evidence as no-write daemon evidence before promotion."""
+    payload = {
+        "document_record": document_record,
+        "observations": observations,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+        "visual_request": visual_request,
+    }
+    try:
+        return await _call_daemon("preview_visual_extraction", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "preview": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_document_understanding_packet(
+    document_record: dict[str, Any],
+    analysis: dict[str, Any],
+    chunk_refs: list[dict[str, Any]] | None = None,
+    visual_artifacts: list[dict[str, Any]] | None = None,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+    created_by: str = "agent",
+) -> dict[str, Any]:
+    """Prepare a no-write document understanding packet through the daemon before promotion."""
+    payload = {
+        "document_record": document_record,
+        "analysis": analysis,
+        "chunk_refs": chunk_refs,
+        "visual_artifacts": visual_artifacts,
+        "candidate_graph_edges": candidate_graph_edges,
+        "created_by": created_by,
+    }
+    try:
+        return await _call_daemon("prepare_document_understanding_packet", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "packet": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_document_draft(
+    document_record: dict[str, Any],
+    analysis: dict[str, Any],
+    chunk_refs: list[dict[str, Any]] | None = None,
+    visual_artifacts: list[dict[str, Any]] | None = None,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+    created_by: str = "agent",
+) -> dict[str, Any]:
+    """Prepare a no-write document draft through the daemon before any memory promotion."""
+    payload = {
+        "document_record": document_record,
+        "analysis": analysis,
+        "chunk_refs": chunk_refs,
+        "visual_artifacts": visual_artifacts,
+        "candidate_graph_edges": candidate_graph_edges,
+        "created_by": created_by,
+    }
+    try:
+        return await _call_daemon("prepare_document_draft", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "draft": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def prepare_document_promotion_transaction(
+    document_draft: dict[str, Any],
+    approved_by: str,
+    selected_memory_indexes: list[int] | None = None,
+    selected_edge_indexes: list[int] | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Prepare a no-write reviewed document promotion transaction without executing promotion."""
+    payload = {
+        "document_draft": document_draft,
+        "approved_by": approved_by,
+        "selected_memory_indexes": selected_memory_indexes,
+        "selected_edge_indexes": selected_edge_indexes,
+        "notes": notes,
+    }
+    try:
+        return await _call_daemon("prepare_document_promotion_transaction", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "transaction": None,
             "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
         }
 

@@ -172,6 +172,55 @@ def fake_document_disassembler(**kwargs):
     }
 
 
+class FakeDocumentWorkflow:
+    def __init__(self):
+        self.calls = []
+
+    def list_document_extractors(self):
+        self.calls.append(("list_document_extractors", {}))
+        return {"extractors": [{"extractor_id": "fake"}], "error": None}
+
+    def preview_document_source_connector(self, **kwargs):
+        self.calls.append(("preview_document_source_connector", kwargs))
+        return {"preview": kwargs, "error": None}
+
+    def prepare_document_disassembly(self, **kwargs):
+        self.calls.append(("prepare_document_disassembly", kwargs))
+        return {"disassembly": {"source": {"path": kwargs["source_path"]}}, "error": None}
+
+    def prepare_document_extraction_request(self, **kwargs):
+        self.calls.append(("prepare_document_extraction_request", kwargs))
+        return {"extraction_request": kwargs, "error": None}
+
+    def prepare_document_extraction_result(self, **kwargs):
+        self.calls.append(("prepare_document_extraction_result", kwargs))
+        return {"extraction_result": kwargs, "error": None}
+
+    def preview_document_extraction(self, **kwargs):
+        self.calls.append(("preview_document_extraction", kwargs))
+        return {"document": {"title": kwargs["title"]}, "error": None}
+
+    def prepare_visual_extraction_request(self, **kwargs):
+        self.calls.append(("prepare_visual_extraction_request", kwargs))
+        return {"visual_request": kwargs, "error": None}
+
+    def preview_visual_extraction(self, **kwargs):
+        self.calls.append(("preview_visual_extraction", kwargs))
+        return {"visual_preview": kwargs, "error": None}
+
+    def prepare_document_understanding_packet(self, **kwargs):
+        self.calls.append(("prepare_document_understanding_packet", kwargs))
+        return {"understanding_packet": kwargs, "error": None}
+
+    def prepare_document_draft(self, **kwargs):
+        self.calls.append(("prepare_document_draft", kwargs))
+        return {"document_draft": kwargs, "error": None}
+
+    def prepare_document_promotion_transaction(self, **kwargs):
+        self.calls.append(("prepare_document_promotion_transaction", kwargs))
+        return {"transaction": kwargs, "error": None}
+
+
 class FakeMemoryOSRuntime:
     def __init__(self):
         self.source_jobs = []
@@ -514,6 +563,45 @@ def test_prepare_document_disassembly_routes_to_document_disassembler():
     assert response["body"]["disassembly"]["record_type"] == "document_disassembly_preview"
     assert response["body"]["disassembly"]["source"]["path"] == "C:/docs/book.pdf"
     assert response["body"]["disassembly"]["document"]["page_limit"] == 5
+
+
+def test_document_workflow_routes_delegate_to_document_toolset():
+    document_tools = FakeDocumentWorkflow()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        document_tools=document_tools,
+    )
+
+    cases = [
+        ("/v1/list_document_extractors", {}),
+        ("/v1/preview_document_source_connector", {"connector_type": "local_path", "target": "docs"}),
+        ("/v1/prepare_document_disassembly", {"source_path": "C:/docs/book.pdf"}),
+        ("/v1/prepare_document_extraction_request", {"source_ref": {"source_uri": "file:///book.pdf"}}),
+        ("/v1/prepare_document_extraction_result", {"title": "Book", "content": "body"}),
+        ("/v1/preview_document_extraction", {"title": "Book", "content": "body"}),
+        ("/v1/prepare_visual_extraction_request", {"document_record": {}, "image_refs": []}),
+        ("/v1/preview_visual_extraction", {"document_record": {}, "observations": []}),
+        ("/v1/prepare_document_understanding_packet", {"document_record": {}, "analysis": {}}),
+        ("/v1/prepare_document_draft", {"document_record": {}, "analysis": {}}),
+        ("/v1/prepare_document_promotion_transaction", {"document_draft": {}, "approved_by": "reviewer"}),
+    ]
+
+    responses = [api.handle("POST", route, payload) for route, payload in cases]
+
+    assert all(response["status"] == 200 for response in responses)
+    assert [call[0] for call in document_tools.calls] == [
+        "list_document_extractors",
+        "preview_document_source_connector",
+        "prepare_document_disassembly",
+        "prepare_document_extraction_request",
+        "prepare_document_extraction_result",
+        "preview_document_extraction",
+        "prepare_visual_extraction_request",
+        "preview_visual_extraction",
+        "prepare_document_understanding_packet",
+        "prepare_document_draft",
+        "prepare_document_promotion_transaction",
+    ]
 
 
 def test_memory_os_status_routes_to_runtime_container():

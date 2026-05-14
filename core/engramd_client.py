@@ -84,8 +84,38 @@ class EngramDaemonClient:
     def prepare_source_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/prepare_source_memory", payload)
 
+    def list_document_extractors(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/list_document_extractors", payload)
+
+    def preview_document_source_connector(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/preview_document_source_connector", payload)
+
     def prepare_document_disassembly(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/prepare_document_disassembly", payload)
+
+    def prepare_document_extraction_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_document_extraction_request", payload)
+
+    def prepare_document_extraction_result(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_document_extraction_result", payload)
+
+    def preview_document_extraction(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/preview_document_extraction", payload)
+
+    def prepare_visual_extraction_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_visual_extraction_request", payload)
+
+    def preview_visual_extraction(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/preview_visual_extraction", payload)
+
+    def prepare_document_understanding_packet(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_document_understanding_packet", payload)
+
+    def prepare_document_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_document_draft", payload)
+
+    def prepare_document_promotion_transaction(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/prepare_document_promotion_transaction", payload)
 
     def memory_os_status(self) -> dict[str, Any]:
         return self._request("GET", "/v1/memory_os/status")

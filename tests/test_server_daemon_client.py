@@ -1,8 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 import server
+import server_daemon_client
+
+
+STABLE_DOCUMENT_WORKFLOW = [
+    "list_document_extractors",
+    "preview_document_source_connector",
+    "prepare_document_disassembly",
+    "prepare_document_extraction_request",
+    "prepare_document_extraction_result",
+    "preview_document_extraction",
+    "prepare_visual_extraction_request",
+    "preview_visual_extraction",
+    "prepare_document_understanding_packet",
+    "prepare_document_draft",
+    "prepare_document_promotion_transaction",
+]
 
 
 class FakeDaemonClient:
@@ -128,6 +145,46 @@ class FakeDaemonClient:
             },
             "error": None,
         }
+
+    def list_document_extractors(self, payload):
+        self.calls.append(("list_document_extractors", payload))
+        return {"catalog": {"extractors": [{"id": "fake"}]}, "error": None}
+
+    def preview_document_source_connector(self, payload):
+        self.calls.append(("preview_document_source_connector", payload))
+        return {"preview": {"items": []}, "error": None}
+
+    def prepare_document_extraction_request(self, payload):
+        self.calls.append(("prepare_document_extraction_request", payload))
+        return {"request": {"source_ref": payload["source_ref"]}, "error": None}
+
+    def prepare_document_extraction_result(self, payload):
+        self.calls.append(("prepare_document_extraction_result", payload))
+        return {"result": {"title": payload["title"]}, "error": None}
+
+    def preview_document_extraction(self, payload):
+        self.calls.append(("preview_document_extraction", payload))
+        return {"preview": {"document": {"title": payload["title"]}}, "error": None}
+
+    def prepare_visual_extraction_request(self, payload):
+        self.calls.append(("prepare_visual_extraction_request", payload))
+        return {"request": {"document_id": payload["document_record"]["document_id"]}, "error": None}
+
+    def preview_visual_extraction(self, payload):
+        self.calls.append(("preview_visual_extraction", payload))
+        return {"preview": {"visual_artifacts": payload["observations"]}, "error": None}
+
+    def prepare_document_understanding_packet(self, payload):
+        self.calls.append(("prepare_document_understanding_packet", payload))
+        return {"packet": {"document_id": payload["document_record"]["document_id"]}, "error": None}
+
+    def prepare_document_draft(self, payload):
+        self.calls.append(("prepare_document_draft", payload))
+        return {"draft": {"document_id": payload["document_record"]["document_id"]}, "error": None}
+
+    def prepare_document_promotion_transaction(self, payload):
+        self.calls.append(("prepare_document_promotion_transaction", payload))
+        return {"transaction": {"approved_by": payload["approved_by"]}, "error": None}
 
     def list_source_drafts(self, payload):
         self.calls.append(("list_source_drafts", payload))
@@ -431,3 +488,104 @@ def test_prepare_document_disassembly_uses_daemon_when_configured(monkeypatch):
             {"source_path": "C:/docs/book.pdf", "source_type": "pdf", "max_pages": 5},
         )
     ]
+
+
+def test_document_intelligence_tools_use_daemon_when_configured(monkeypatch):
+    client = FakeDaemonClient()
+    document_record = {"document_id": "doc_1", "title": "Daemon Doc"}
+    monkeypatch.setenv("ENGRAM_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(server, "_daemon_client", lambda: client)
+
+    asyncio.run(server.list_document_extractors())
+    asyncio.run(server.preview_document_source_connector("local_path", "docs"))
+    asyncio.run(
+        server.prepare_document_extraction_request(
+            source_ref={"source_uri": "file:///book.pdf"},
+            source_type="pdf",
+            requested_outputs=["markdown"],
+        )
+    )
+    asyncio.run(
+        server.prepare_document_extraction_result(
+            extraction_request={
+                "request_id": "doc_req_1",
+                "source_ref": {"source_uri": "file:///book.pdf"},
+                "source_type": "pdf",
+            },
+            title="Daemon Book",
+            content="Body",
+            media_type="text/markdown",
+        )
+    )
+    asyncio.run(
+        server.preview_document_extraction(
+            title="Daemon Book",
+            source_uri="file:///book.pdf",
+            source_type="pdf",
+            content="Body",
+            media_type="text/markdown",
+        )
+    )
+    asyncio.run(
+        server.prepare_visual_extraction_request(
+            document_record=document_record,
+            image_refs=[{"image_ref": "page:1"}],
+            requested_capabilities=["ocr_text"],
+        )
+    )
+    asyncio.run(
+        server.preview_visual_extraction(
+            document_record=document_record,
+            observations=[
+                {
+                    "artifact_type": "ocr_block",
+                    "source_ref": {"image_ref": "page:1"},
+                    "text": "OCR",
+                }
+            ],
+        )
+    )
+    asyncio.run(server.prepare_document_understanding_packet(document_record, {"summary": ["Summary"]}))
+    asyncio.run(server.prepare_document_draft(document_record, {"summary": ["Summary"]}))
+    asyncio.run(
+        server.prepare_document_promotion_transaction(
+            {"draft_id": "draft_1", "proposed_memories": [{"key": "doc"}], "proposed_edges": []},
+            approved_by="reviewer",
+            selected_memory_indexes=[0],
+        )
+    )
+
+    assert [call[0] for call in client.calls] == [
+        "list_document_extractors",
+        "preview_document_source_connector",
+        "prepare_document_extraction_request",
+        "prepare_document_extraction_result",
+        "preview_document_extraction",
+        "prepare_visual_extraction_request",
+        "preview_visual_extraction",
+        "prepare_document_understanding_packet",
+        "prepare_document_draft",
+        "prepare_document_promotion_transaction",
+    ]
+
+
+def test_daemon_client_protocol_advertises_stable_document_workflow():
+    protocol = server_daemon_client.memory_protocol()
+
+    assert protocol["document_workflow"] == STABLE_DOCUMENT_WORKFLOW
+    assert protocol["tool_groups"]["document_intelligence"] == {
+        "stability": "stable",
+        "cost_class": "low-to-medium",
+        "tools": STABLE_DOCUMENT_WORKFLOW,
+    }
+    assert set(STABLE_DOCUMENT_WORKFLOW).issubset(set(protocol["canonical_tools"]))
+
+
+def test_daemon_client_document_tool_docstrings_preserve_no_write_contract():
+    for tool_name in STABLE_DOCUMENT_WORKFLOW:
+        doc = inspect.getdoc(getattr(server_daemon_client, tool_name))
+
+        assert doc is not None
+        normalized = doc.lower()
+        assert "no-write" in normalized or "does not write" in normalized
+        assert "promot" in normalized

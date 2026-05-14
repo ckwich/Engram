@@ -87,6 +87,37 @@ def test_client_methods_map_to_daemon_routes():
     ]
 
 
+def test_client_document_methods_map_to_stable_daemon_routes():
+    transport = FakeTransport()
+    client = EngramDaemonClient("http://127.0.0.1:8765", transport=transport)
+
+    client.list_document_extractors({})
+    client.preview_document_source_connector({"connector_type": "local_path", "target": "docs"})
+    client.prepare_document_disassembly({"source_path": "C:/docs/book.pdf"})
+    client.prepare_document_extraction_request({"source_ref": {"source_uri": "file:///book.pdf"}})
+    client.prepare_document_extraction_result({"title": "Book", "content": "body"})
+    client.preview_document_extraction({"title": "Book", "content": "body"})
+    client.prepare_visual_extraction_request({"document_record": {}, "image_refs": []})
+    client.preview_visual_extraction({"document_record": {}, "observations": []})
+    client.prepare_document_understanding_packet({"document_record": {}, "analysis": {}})
+    client.prepare_document_draft({"document_record": {}, "analysis": {}})
+    client.prepare_document_promotion_transaction({"document_draft": {}, "approved_by": "reviewer"})
+
+    assert [call[1].rsplit("/", 1)[-1] for call in transport.calls] == [
+        "list_document_extractors",
+        "preview_document_source_connector",
+        "prepare_document_disassembly",
+        "prepare_document_extraction_request",
+        "prepare_document_extraction_result",
+        "preview_document_extraction",
+        "prepare_visual_extraction_request",
+        "preview_visual_extraction",
+        "prepare_document_understanding_packet",
+        "prepare_document_draft",
+        "prepare_document_promotion_transaction",
+    ]
+
+
 def test_engramd_help_exposes_daemon_options():
     result = subprocess.run(
         [sys.executable, "engramd.py", "--help"],

@@ -11,10 +11,62 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from core.document_intelligence import (
+    list_document_extractors,
+    prepare_document_draft,
+    prepare_document_extraction_request,
+    prepare_document_extraction_result,
+    prepare_document_promotion_transaction,
+    prepare_document_understanding_packet,
+    prepare_visual_extraction_request,
+    preview_document_extraction,
+    preview_visual_extraction,
+)
 from core.document_extractors import prepare_document_disassembly
 from core.memory_manager import DuplicateMemoryError, memory_manager
 from core.memory_os.runtime import MemoryOSRuntime
+from core.source_connectors import preview_document_source_connector
 from core.source_intake import source_intake_manager
+
+
+class DocumentWorkflow:
+    """Daemon-owned wrapper around existing no-write document helpers."""
+
+    def __init__(self, document_disassembler=prepare_document_disassembly):
+        self.document_disassembler = document_disassembler
+
+    def list_document_extractors(self) -> dict[str, Any]:
+        return list_document_extractors()
+
+    def preview_document_source_connector(self, **kwargs: Any) -> dict[str, Any]:
+        return preview_document_source_connector(**kwargs)
+
+    def prepare_document_disassembly(self, **kwargs: Any) -> dict[str, Any]:
+        return self.document_disassembler(**kwargs)
+
+    def prepare_document_extraction_request(self, **kwargs: Any) -> dict[str, Any]:
+        return prepare_document_extraction_request(**kwargs)
+
+    def prepare_document_extraction_result(self, **kwargs: Any) -> dict[str, Any]:
+        return prepare_document_extraction_result(**kwargs)
+
+    def preview_document_extraction(self, **kwargs: Any) -> dict[str, Any]:
+        return preview_document_extraction(**kwargs)
+
+    def prepare_visual_extraction_request(self, **kwargs: Any) -> dict[str, Any]:
+        return prepare_visual_extraction_request(**kwargs)
+
+    def preview_visual_extraction(self, **kwargs: Any) -> dict[str, Any]:
+        return preview_visual_extraction(**kwargs)
+
+    def prepare_document_understanding_packet(self, **kwargs: Any) -> dict[str, Any]:
+        return prepare_document_understanding_packet(**kwargs)
+
+    def prepare_document_draft(self, **kwargs: Any) -> dict[str, Any]:
+        return prepare_document_draft(**kwargs)
+
+    def prepare_document_promotion_transaction(self, **kwargs: Any) -> dict[str, Any]:
+        return prepare_document_promotion_transaction(**kwargs)
 
 
 class EngramDaemonAPI:
@@ -25,11 +77,13 @@ class EngramDaemonAPI:
         memory_manager=memory_manager,
         source_intake_manager=source_intake_manager,
         document_disassembler=prepare_document_disassembly,
+        document_tools: Any | None = None,
         memory_os_runtime: MemoryOSRuntime | None = None,
     ):
         self.memory_manager = memory_manager
         self.source_intake_manager = source_intake_manager
         self.document_disassembler = document_disassembler
+        self.document_tools = document_tools or DocumentWorkflow(document_disassembler)
         self.memory_os_runtime = memory_os_runtime
 
     def handle(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -78,8 +132,69 @@ class EngramDaemonAPI:
                 return await self._store_memory(request)
             if route == "/v1/prepare_source_memory":
                 return await self._prepare_source_memory(request)
+            if route == "/v1/list_document_extractors":
+                return await self._document_tool(
+                    "list_document_extractors",
+                    request,
+                    result_key="catalog",
+                    include_payload=False,
+                )
+            if route == "/v1/preview_document_source_connector":
+                return await self._document_tool(
+                    "preview_document_source_connector",
+                    request,
+                    result_key=None,
+                )
             if route == "/v1/prepare_document_disassembly":
                 return await self._prepare_document_disassembly(request)
+            if route == "/v1/prepare_document_extraction_request":
+                return await self._document_tool(
+                    "prepare_document_extraction_request",
+                    request,
+                    result_key="request",
+                )
+            if route == "/v1/prepare_document_extraction_result":
+                return await self._document_tool(
+                    "prepare_document_extraction_result",
+                    request,
+                    result_key="result",
+                )
+            if route == "/v1/preview_document_extraction":
+                return await self._document_tool(
+                    "preview_document_extraction",
+                    request,
+                    result_key="preview",
+                )
+            if route == "/v1/prepare_visual_extraction_request":
+                return await self._document_tool(
+                    "prepare_visual_extraction_request",
+                    request,
+                    result_key="request",
+                )
+            if route == "/v1/preview_visual_extraction":
+                return await self._document_tool(
+                    "preview_visual_extraction",
+                    request,
+                    result_key="preview",
+                )
+            if route == "/v1/prepare_document_understanding_packet":
+                return await self._document_tool(
+                    "prepare_document_understanding_packet",
+                    request,
+                    result_key="packet",
+                )
+            if route == "/v1/prepare_document_draft":
+                return await self._document_tool(
+                    "prepare_document_draft",
+                    request,
+                    result_key="draft",
+                )
+            if route == "/v1/prepare_document_promotion_transaction":
+                return await self._document_tool(
+                    "prepare_document_promotion_transaction",
+                    request,
+                    result_key="transaction",
+                )
             if route == "/v1/list_source_drafts":
                 return await self._list_source_drafts(request)
             if route == "/v1/discard_source_draft":
@@ -290,9 +405,62 @@ class EngramDaemonAPI:
             )
         return self._ok({"draft": draft, "error": None})
 
+    async def _document_tool(
+        self,
+        tool_name: str,
+        request: dict[str, Any],
+        *,
+        result_key: str | None,
+        include_payload: bool = True,
+    ) -> dict[str, Any]:
+        try:
+            tool = getattr(self.document_tools, tool_name)
+            result = tool(**request) if include_payload else tool()
+        except ValueError as exc:
+            if result_key is None:
+                return self._ok(
+                    {
+                        "error": {
+                            "code": "invalid_request",
+                            "message": str(exc),
+                        },
+                    }
+                )
+            return self._ok(
+                {
+                    result_key: None,
+                    "error": {
+                        "code": "invalid_request",
+                        "message": str(exc),
+                    },
+                }
+            )
+        except RuntimeError as exc:
+            if result_key is None:
+                return self._ok(
+                    {
+                        "error": {
+                            "code": "runtime_error",
+                            "message": str(exc),
+                        },
+                    }
+                )
+            return self._ok(
+                {
+                    result_key: None,
+                    "error": {
+                        "code": "runtime_error",
+                        "message": str(exc),
+                    },
+                }
+            )
+        if result_key is None:
+            return self._ok(result)
+        return self._ok({result_key: result, "error": None})
+
     async def _prepare_document_disassembly(self, request: dict[str, Any]) -> dict[str, Any]:
         try:
-            disassembly = self.document_disassembler(
+            disassembly = self.document_tools.prepare_document_disassembly(
                 source_path=request.get("source_path"),
                 source_type=request.get("source_type", "pdf"),
                 max_pages=request.get("max_pages"),

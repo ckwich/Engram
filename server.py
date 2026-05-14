@@ -1843,6 +1843,21 @@ async def preview_document_source_connector(
         "max_source_text_chars": max_source_text_chars,
         "metadata": metadata,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("preview_document_source_connector", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "connector_type": connector_type,
+                "target": target,
+                "count": 0,
+                "items": [],
+                "omitted": [],
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("preview_document_source_connector", input_payload, payload, started_at)
+        return payload
     try:
         payload = build_document_source_connector_preview(
             connector_type=connector_type,
@@ -1877,6 +1892,16 @@ async def list_document_extractors() -> dict[str, Any]:
     connector, parser, or visual extraction route.
     """
     started_at = time.perf_counter()
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("list_document_extractors", {})
+        except EngramDaemonClientError as e:
+            payload = {
+                "catalog": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("list_document_extractors", {}, payload, started_at)
+        return payload
     try:
         payload = {"catalog": build_document_extractor_catalog(), "error": None}
     except Exception as e:
@@ -1966,6 +1991,16 @@ async def prepare_document_extraction_request(
         "extractor_kind": extractor_kind,
         "instructions": instructions,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_extraction_request", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "request": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_extraction_request", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "request": build_document_extraction_request(
@@ -2018,6 +2053,16 @@ async def prepare_document_extraction_result(
         "image_refs": image_refs,
         "requested_visual_capabilities": requested_visual_capabilities,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_extraction_result", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "result": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_extraction_result", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "result": build_document_extraction_result(
@@ -2070,6 +2115,16 @@ async def preview_document_extraction(
         "extractor_id": extractor_id,
         "extractor_kind": extractor_kind,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("preview_document_extraction", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "preview": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("preview_document_extraction", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "preview": build_document_extraction_preview(
@@ -2120,6 +2175,16 @@ async def prepare_document_draft(
         "candidate_graph_edges": candidate_graph_edges,
         "created_by": created_by,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_draft", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "draft": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_draft", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "draft": build_document_draft(
@@ -2169,6 +2234,16 @@ async def prepare_document_understanding_packet(
         "candidate_graph_edges": candidate_graph_edges,
         "created_by": created_by,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_understanding_packet", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "packet": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_understanding_packet", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "packet": build_document_understanding_packet(
@@ -2214,6 +2289,16 @@ async def prepare_document_promotion_transaction(
         "approved_by": approved_by,
         "notes": notes,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_promotion_transaction", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "transaction": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_promotion_transaction", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "transaction": build_document_promotion_transaction(
@@ -2262,6 +2347,16 @@ async def prepare_visual_extraction_request(
         "extractor_kind": extractor_kind,
         "instructions": instructions,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_visual_extraction_request", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "request": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_visual_extraction_request", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "request": build_visual_extraction_request(
@@ -2310,6 +2405,16 @@ async def preview_visual_extraction(
         "extractor_kind": extractor_kind,
         "visual_request": visual_request,
     }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("preview_visual_extraction", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "preview": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("preview_visual_extraction", input_payload, payload, started_at)
+        return payload
     try:
         payload = {
             "preview": build_visual_extraction_preview(
