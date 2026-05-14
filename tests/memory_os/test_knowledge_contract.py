@@ -117,6 +117,29 @@ def test_normalize_knowledge_request_supports_graph_evidence_defaults():
     assert request["policy"]["write_behavior"] == "read_only"
 
 
+def test_normalize_knowledge_request_supports_higher_level_artifact_family_defaults():
+    expected = {
+        "entity_profile": "entity_profile_artifact",
+        "decision_packet": "decision_packet_artifact",
+        "implementation_context": "implementation_context_artifact",
+        "evidence_bundle": "evidence_bundle_artifact",
+    }
+
+    for task_type, response_type in expected.items():
+        request = normalize_knowledge_request(
+            {
+                "ask": {
+                    "goal": f"Build {task_type}.",
+                    "task_type": task_type,
+                    "project": "Engram",
+                }
+            }
+        )
+
+        assert request["shape"]["response_type"] == response_type
+        assert request["policy"]["write_behavior"] == "read_only"
+
+
 def test_normalize_knowledge_request_rejects_unsafe_policy_overrides():
     for unsafe_policy, expected_code in (
         ({"allow_unreviewed_sources": True}, "unreviewed_sources_not_allowed"),

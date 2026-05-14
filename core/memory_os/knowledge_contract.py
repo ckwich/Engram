@@ -21,6 +21,10 @@ SUPPORTED_TASK_TYPES = {
     "review_preparation",
     "evidence_audit",
     "graph_evidence",
+    "entity_profile",
+    "decision_packet",
+    "implementation_context",
+    "evidence_bundle",
 }
 SUPPORTED_RESPONSE_TYPES = {
     "project_capsule_summary",
@@ -29,6 +33,10 @@ SUPPORTED_RESPONSE_TYPES = {
     "review_preparation_packet",
     "evidence_audit_report",
     "graph_evidence_summary",
+    "entity_profile_artifact",
+    "decision_packet_artifact",
+    "implementation_context_artifact",
+    "evidence_bundle_artifact",
 }
 STATUSES = (
     "ok",
@@ -48,6 +56,13 @@ DEFAULT_SHAPES = {
     "review_preparation": {"response_type": "review_preparation_packet", "format": "json"},
     "evidence_audit": {"response_type": "evidence_audit_report", "format": "json"},
     "graph_evidence": {"response_type": "graph_evidence_summary", "format": "json"},
+    "entity_profile": {"response_type": "entity_profile_artifact", "format": "json"},
+    "decision_packet": {"response_type": "decision_packet_artifact", "format": "json"},
+    "implementation_context": {
+        "response_type": "implementation_context_artifact",
+        "format": "json",
+    },
+    "evidence_bundle": {"response_type": "evidence_bundle_artifact", "format": "json"},
 }
 DEFAULT_SCOPE = {
     "review_state": ["reviewed", "accepted"],

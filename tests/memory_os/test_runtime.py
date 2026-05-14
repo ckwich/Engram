@@ -444,6 +444,47 @@ def test_memory_os_runtime_query_knowledge_returns_graph_evidence(tmp_path):
     assert response["planner"]["strategy"] == "graph_evidence"
 
 
+def test_memory_os_runtime_query_knowledge_returns_implementation_context_artifact(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    upsert_record(
+        runtime.ledger,
+        "chunks",
+        "impl:chunk:0",
+        {
+            "chunk_record_id": "impl:chunk:0",
+            "memory_key": "impl_context",
+            "document_id": "impl_context:chunk:0",
+            "chunk_id": 0,
+            "project": "Engram",
+            "domain": "code",
+            "text": "Use query_knowledge before implementation.",
+        },
+    )
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-implementation-context",
+            "ask": {
+                "goal": "Build implementation context.",
+                "task_type": "implementation_context",
+                "project": "Engram",
+                "focus": ["query_knowledge"],
+            },
+        }
+    )
+
+    assert response["status"] == "partial"
+    assert response["answer"]["artifact_family"] == "implementation_context"
+    assert response["answer"]["items"][0]["key"] == "impl_context"
+    assert response["citations"][0]["level"] == "chunk"
+    assert response["planner"]["strategy"] == "implementation_context"
+
+
 def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):
     runtime = MemoryOSRuntime(
         tmp_path,

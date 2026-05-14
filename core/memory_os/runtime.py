@@ -17,6 +17,10 @@ from core.memory_os.firewall import MemoryFirewall
 from core.memory_os.graph import MemoryOSGraph
 from core.memory_os.inspector import build_memory_os_inspector
 from core.memory_os.jobs import JobQueue
+from core.memory_os.knowledge_artifact_families import (
+    SUPPORTED_ARTIFACT_FAMILIES,
+    build_artifact_family_packet,
+)
 from core.memory_os.knowledge_artifacts import KnowledgeArtifactStore
 from core.memory_os.ledger import MemoryOSLedger
 from core.memory_os.knowledge_audit import build_evidence_audit
@@ -345,6 +349,18 @@ class MemoryOSRuntime:
                     max_records=int(normalized["budget"].get("max_source_reads", 12)),
                 ),
                 strategy="graph_evidence",
+            )
+        if ask["task_type"] in SUPPORTED_ARTIFACT_FAMILIES:
+            return _orientation_response(
+                normalized,
+                build_artifact_family_packet(
+                    self.ledger,
+                    artifact_family=ask["task_type"],
+                    project=ask["project"],
+                    focus=ask["focus"],
+                    max_records=int(normalized["budget"].get("max_source_reads", 12)),
+                ),
+                strategy=ask["task_type"],
             )
         persisted = self.knowledge_artifacts.read_latest_artifact(
             project=ask["project"],

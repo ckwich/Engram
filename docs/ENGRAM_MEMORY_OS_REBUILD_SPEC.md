@@ -662,9 +662,11 @@ Project workflow:
 - `export_skill_pack`
 
 `query_knowledge` accepts EKC v0 project, source, document orientation,
-review-preparation, evidence-audit, and bounded graph-evidence requests and
-returns typed responses with citations, freshness, policy, budget, planner, and
-explicit errors. It is read-only and does not replace
+review-preparation, evidence-audit, bounded graph-evidence, and higher-level
+artifact-family requests for entity profiles, decision packets, implementation
+context, and evidence bundles. It returns typed responses with citations,
+freshness, policy, budget, planner, and explicit errors. It is read-only and
+does not replace
 `prepare_project_capsule`, which remains a draft/review helper.
 Persisted EKC artifacts are ledgered in `knowledge_artifacts` with immutable
 content-addressed JSON payloads. `query_knowledge` may read a fresh persisted
@@ -683,6 +685,11 @@ Evidence audits report stale artifacts, malformed citations, weak claim
 support, coverage risk, and graph proposals that still need evidence review.
 Bounded graph evidence surfaces edge IDs, refs, evidence strings, and
 contradiction/supersession warnings without loading neighboring memory bodies.
+Higher-level artifact families are intentionally downstream of source/document
+orientation, review-preparation, evidence audit, and bounded graph evidence:
+they only return `ok` or `partial` when cited evidence exists, and they return
+`no_answer` rather than fabricating profiles, decisions, implementation context,
+or evidence bundles from unsupported records.
 
 Operations:
 
