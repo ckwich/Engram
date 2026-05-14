@@ -1,4 +1,9 @@
-"""
+"""Legacy JSON/Chroma memory manager.
+
+Do not add new Memory OS functionality here. New daemon-owned behavior belongs
+in core.memory_os services, and direct-mode compatibility should enter through
+core.legacy.memory_manager_adapter.
+
 core/memory_manager.py — Storage engine for Engram.
 
 Maintains two parallel stores:

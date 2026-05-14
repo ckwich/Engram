@@ -6,11 +6,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 ALLOWED_MEMORY_MANAGER_IMPORTERS = {
-    "server.py",
-    "webui.py",
+    "server.py",  # Direct-mode compatibility entrypoint and self-test harness.
     "engramd.py",
     "engram_index.py",
-    "core/engramd_api.py",
+    "core/engramd_api.py",  # Daemon bridge around legacy compatibility tools.
     "hooks/engram_evaluator.py",
 }
 

@@ -1,7 +1,7 @@
 """
 webui.py — Flask web dashboard for Engram.
 
-All business logic goes through memory_manager only.
+Legacy memory business logic goes through the lazy memory manager adapter.
 No direct file or ChromaDB access here.
 """
 from flask import (
@@ -25,9 +25,12 @@ from urllib.parse import urlsplit
 from core.chunk_preview import preview_memory_chunks
 from core.engramd_client import EngramDaemonClient, EngramDaemonClientError
 from core.graph_manager import graph_manager
+from core.legacy.memory_manager_adapter import (
+    is_duplicate_memory_error,
+    memory_manager,
+)
 from core.memory_os.runtime import MemoryOSRuntime
 from core.memory_quality import audit_memory_quality as build_memory_quality_audit
-from core.memory_manager import memory_manager, DuplicateMemoryError
 from core.operation_log import operation_log
 from core.retrieval_eval import run_retrieval_eval
 from core.source_connectors import preview_source_connector
@@ -636,12 +639,14 @@ def api_create():
             related_to=related_to,
             force=force,
         )
-    except DuplicateMemoryError as e:
-        return jsonify({"status": "duplicate", **e.duplicate}), 409
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        if is_duplicate_memory_error(e):
+            return jsonify({"status": "duplicate", **e.duplicate}), 409
+        raise
     return jsonify(result), 201
 
 
@@ -668,12 +673,14 @@ def api_update(key):
             related_to=related_to,
             force=force,
         )
-    except DuplicateMemoryError as e:
-        return jsonify({"status": "duplicate", **e.duplicate}), 409
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        if is_duplicate_memory_error(e):
+            return jsonify({"status": "duplicate", **e.duplicate}), 409
+        raise
     return jsonify(result)
 
 
