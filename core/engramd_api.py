@@ -64,6 +64,8 @@ class EngramDaemonAPI:
                 return self._error(405, "method_not_allowed", f"{method} is not allowed for {route}")
             if route == "/v1/memory_os/source_import_job":
                 return self._memory_os_source_import_job(request)
+            if route == "/v1/query_knowledge":
+                return await self._query_knowledge(request)
             if route == "/v1/search_memories":
                 return await self._search_memories(request)
             if route == "/v1/retrieve_chunk":
@@ -95,6 +97,15 @@ class EngramDaemonAPI:
             return self._error(404, "not_found", f"Unknown daemon route: {route}")
         except Exception as exc:
             return self._error(500, "runtime_error", f"Engram daemon error: {exc}")
+
+    async def _query_knowledge(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.memory_os_runtime is None:
+            return self._error(
+                503,
+                "memory_os_unavailable",
+                "query_knowledge requires daemon-owned Memory OS runtime.",
+            )
+        return self._ok(self.memory_os_runtime.query_knowledge(request))
 
     async def _search_memories(self, request: dict[str, Any]) -> dict[str, Any]:
         query = str(request.get("query") or "").strip()

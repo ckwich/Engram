@@ -676,3 +676,53 @@ def test_unknown_route_returns_structured_not_found_error():
 
     assert response["status"] == 404
     assert response["body"]["error"]["code"] == "not_found"
+
+
+def test_query_knowledge_routes_to_memory_os_runtime():
+    class FakeRuntime:
+        def query_knowledge(self, request):
+            return {
+                "contract_version": "engram.knowledge.response.v0",
+                "request_id": request["request_id"],
+                "status": "ok",
+                "answer": {"project": request["ask"]["project"]},
+                "citations": [{"citation_id": "cit_001", "level": "chunk"}],
+                "freshness": {"state": "fresh"},
+                "policy": {
+                    "unreviewed_sources_used": False,
+                    "unsupported_inferences_used": False,
+                    "review_state_available": False,
+                    "review_filter_enforced": False,
+                    "review_state_basis": "not_available_in_current_memory_os_records",
+                },
+                "budget_used": {
+                    "artifacts_built": 1,
+                    "artifacts_read": 0,
+                    "source_reads": 0,
+                    "tokens_out_estimate": 0,
+                },
+                "planner": {
+                    "strategy": "project_capsule",
+                    "methods_used": ["artifact"],
+                    "omissions": [],
+                },
+                "errors": [],
+            }
+
+    api = EngramDaemonAPI(memory_manager=FakeMemoryManager(), memory_os_runtime=FakeRuntime())
+    response = api.handle(
+        "POST",
+        "/v1/query_knowledge",
+        {
+            "request_id": "req-api",
+            "ask": {
+                "goal": "Get context.",
+                "task_type": "project_orientation",
+                "project": "Engram",
+            },
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["request_id"] == "req-api"
+    assert response["body"]["answer"]["project"] == "Engram"

@@ -102,3 +102,37 @@ def test_engramd_help_exposes_daemon_options():
     assert "--smoke-test" in result.stdout
     assert "--doctor" in result.stdout
     assert "--stop-server-pid" in result.stdout
+
+
+def test_engramd_client_query_knowledge_posts_contract_request():
+    calls = []
+
+    class FakeTransport:
+        def request_json(self, method, url, payload=None, timeout=10.0):
+            calls.append((method, url, payload, timeout))
+            return {"status": "ok", "request_id": payload["request_id"]}
+
+    client = EngramDaemonClient(
+        "http://127.0.0.1:8765",
+        transport=FakeTransport(),
+    )
+
+    response = client.query_knowledge(
+        {
+            "request_id": "req-client",
+            "ask": {"project": "Engram", "task_type": "project_orientation"},
+        }
+    )
+
+    assert response["request_id"] == "req-client"
+    assert calls == [
+        (
+            "POST",
+            "http://127.0.0.1:8765/v1/query_knowledge",
+            {
+                "request_id": "req-client",
+                "ask": {"project": "Engram", "task_type": "project_orientation"},
+            },
+            10.0,
+        )
+    ]

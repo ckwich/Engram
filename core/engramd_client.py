@@ -66,6 +66,9 @@ class EngramDaemonClient:
     def search_memories(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/search_memories", payload)
 
+    def query_knowledge(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/query_knowledge", payload)
+
     def retrieve_chunk(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/retrieve_chunk", payload)
 
