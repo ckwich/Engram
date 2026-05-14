@@ -256,6 +256,109 @@ def test_graph_backend_status_tool_reports_no_write_backend_gate(tmp_path):
     assert payload["error"] is None
 
 
+def test_prepare_document_intake_review_tool_shape_is_stable(monkeypatch):
+    server = load_server_module()
+    monkeypatch.delenv("ENGRAM_DAEMON_URL", raising=False)
+
+    expected = {
+        "status": "ok",
+        "source": {"source_path": "C:/docs/book.pdf"},
+        "disassembly": {"record_type": "document_disassembly_preview"},
+        "extraction_request": None,
+        "document_preview": {"preview": {"document": {"document_id": "doc_1"}}},
+        "quality": {"warnings": []},
+        "artifact_manifest": {"artifacts": []},
+        "draft_candidates": [],
+        "promotion_guidance": {"auto_promote": False},
+        "policy": {
+            "write_behavior": "read_only",
+            "active_memory_promoted": False,
+            "graph_edges_promoted": False,
+        },
+        "receipts": {"artifacts_built": 1, "artifacts_read": 0, "coverage_missing": []},
+        "error": None,
+    }
+    observed: dict[str, object] = {}
+
+    def fake_review(**kwargs):
+        observed.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(server, "build_document_intake_review", fake_review)
+
+    payload = asyncio.run(
+        server.prepare_document_intake_review(
+            "C:/docs/book.pdf",
+            extractor_id="local",
+            max_pages=2,
+            source_type="pdf",
+            page_range="1-2",
+            resume_token="resume_1",
+        )
+    )
+
+    assert payload == expected
+    assert observed == {
+        "source_path": "C:/docs/book.pdf",
+        "extractor_id": "local",
+        "max_pages": 2,
+        "require_visual_coverage": True,
+        "require_table_coverage": True,
+        "require_ocr_coverage": True,
+        "source_type": "pdf",
+        "page_range": "1-2",
+        "resume_token": "resume_1",
+    }
+
+
+def test_prepare_document_artifact_store_direct_shape_is_stable(monkeypatch):
+    server = load_server_module()
+    monkeypatch.delenv("ENGRAM_DAEMON_URL", raising=False)
+
+    payload = asyncio.run(server.prepare_document_artifact_store({"status": "ok"}))
+
+    assert payload == {
+        "status": "unavailable",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": {
+            "code": "daemon_required",
+            "message": "prepare_document_artifact_store requires the daemon-owned Memory OS path.",
+        },
+    }
+
+
+def test_query_knowledge_direct_error_shape_is_stable(monkeypatch):
+    server = load_server_module()
+    monkeypatch.delenv("ENGRAM_DAEMON_URL", raising=False)
+
+    payload = asyncio.run(
+        server.query_knowledge(
+            {
+                "request_id": "req-direct",
+                "ask": {
+                    "goal": "Orient me.",
+                    "task_type": "project_orientation",
+                    "project": "Engram",
+                },
+            }
+        )
+    )
+
+    assert payload["request_id"] == "req-direct"
+    assert payload["status"] == "unavailable"
+    assert payload["answer"] is None
+    assert payload["planner"]["response_status"] == "unavailable"
+    assert payload["errors"] == [
+        {
+            "code": "daemon_required",
+            "category": "infrastructure",
+            "message": "query_knowledge requires the daemon-owned Memory OS path.",
+        }
+    ]
+
+
 def test_prepare_codebase_mapping_tool_returns_manager_payload(monkeypatch):
     server = load_server_module()
     observed = {}

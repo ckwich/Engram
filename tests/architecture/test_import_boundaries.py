@@ -141,3 +141,25 @@ def test_graph_services_do_not_import_mcp_server_modules():
             offenders[_relative(path)] = bad
 
     assert offenders == {}
+
+
+def test_focused_mcp_handler_modules_are_plain_helpers():
+    candidates = [
+        "core/mcp/document_tools.py",
+        "core/mcp/knowledge_tools.py",
+        "core/mcp/backend_tools.py",
+    ]
+    banned = {"server", "server_daemon_client", "fastmcp", "mcp"}
+    offenders: dict[str, list[str]] = {}
+    missing: list[str] = []
+    for candidate in candidates:
+        path = ROOT / candidate
+        if not path.exists():
+            missing.append(candidate)
+            continue
+        bad = _banned_imports(_imports(path), banned)
+        if bad:
+            offenders[candidate] = bad
+
+    assert missing == []
+    assert offenders == {}

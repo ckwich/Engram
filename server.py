@@ -64,6 +64,15 @@ from core.memory_manager import (
 )
 from core.memory_os_migration import MemoryOSMigrationKernel, run_round_trip_check
 from core.memory_quality import audit_memory_quality as build_memory_quality_audit
+from core.mcp.backend_tools import (
+    graph_backend_status_payload as build_graph_backend_status_payload,
+    retrieval_backend_status_payload as build_retrieval_backend_status_payload,
+)
+from core.mcp.document_tools import (
+    prepare_document_artifact_store_payload as build_document_artifact_store_payload,
+    prepare_document_intake_review_payload as build_document_intake_review_payload,
+)
+from core.mcp.knowledge_tools import query_knowledge_payload
 from core.mcp.tool_registry import (
     STABLE_EKC_TASK_TYPES,
     build_memory_protocol_sections,
@@ -866,59 +875,6 @@ def _render_retrieve_memory_payload(payload: dict[str, Any]) -> str:
     )
 
 
-def _query_knowledge_runtime_error(
-    request: dict[str, Any] | None,
-    message: str,
-    *,
-    code: str = "runtime_error",
-) -> dict[str, Any]:
-    return {
-        "contract_version": "engram.knowledge.response.v0",
-        "request_id": str((request or {}).get("request_id") or ""),
-        "status": "unavailable",
-        "answer": None,
-        "citations": [],
-        "freshness": {"state": "unknown"},
-        "policy": {
-            "unreviewed_sources_used": False,
-            "unsupported_inferences_used": False,
-            "review_state_available": False,
-            "review_filter_enforced": False,
-            "review_state_basis": "not_available_in_current_memory_os_records",
-        },
-        "budget_used": {
-            "artifacts_built": 0,
-            "artifacts_read": 0,
-            "source_reads": 0,
-            "tokens_out_estimate": 0,
-        },
-        "planner": {
-            "strategy": "none",
-            "methods_used": [],
-            "omissions": [],
-            "budget": {
-                "requested": {},
-                "used": {
-                    "artifacts_built": 0,
-                    "artifacts_read": 0,
-                    "source_reads": 0,
-                    "tokens_out_estimate": 0,
-                },
-            },
-            "failure_receipts": [
-                {
-                    "code": code,
-                    "category": "infrastructure",
-                    "message": message,
-                    "recoverable": True,
-                }
-            ],
-            "response_status": "unavailable",
-        },
-        "errors": [{"code": code, "category": "infrastructure", "message": message}],
-    }
-
-
 @mcp.tool()
 async def memory_protocol() -> MemoryProtocolPayload:
     """
@@ -1078,15 +1034,11 @@ async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
     EKC v0 is a serving contract over compiled local context and ledgered
     source/document/review/audit/graph/artifact-family evidence, not a legacy direct-mode memory write path.
     """
-    if _daemon_enabled():
-        try:
-            return await asyncio.to_thread(_daemon_client().query_knowledge, request)
-        except EngramDaemonClientError as exc:
-            return _query_knowledge_runtime_error(request, str(exc))
-    return _query_knowledge_runtime_error(
+    return await query_knowledge_payload(
         request,
-        "query_knowledge requires the daemon-owned Memory OS path.",
-        code="daemon_required",
+        daemon_enabled=_daemon_enabled(),
+        query_daemon=lambda payload: asyncio.to_thread(_daemon_client().query_knowledge, payload),
+        daemon_error_type=EngramDaemonClientError,
     )
 
 
@@ -1224,36 +1176,13 @@ async def retrieval_backend_status(
         "include_rebuild_probe": include_rebuild_probe,
         "rebuild_batch_size": rebuild_batch_size,
     }
-    try:
-        resolved_store_root = None
-        if store_root is not None:
-            resolved_store_root = _repo_path(store_root, store_root)
-        payload = await asyncio.to_thread(
-            build_retrieval_backend_status,
-            store_root=resolved_store_root,
-            include_rebuild_probe=include_rebuild_probe,
-            rebuild_batch_size=rebuild_batch_size,
-        )
-    except ValueError as e:
-        payload = {
-            "schema_version": None,
-            "operation": "retrieval_backend_status",
-            "store_root": store_root,
-            "write_performed": False,
-            "active_memory_write_performed": False,
-            "live_retrieval_changed": False,
-            "error": _tool_error("invalid_request", str(e)),
-        }
-    except Exception as e:
-        payload = {
-            "schema_version": None,
-            "operation": "retrieval_backend_status",
-            "store_root": store_root,
-            "write_performed": False,
-            "active_memory_write_performed": False,
-            "live_retrieval_changed": False,
-            "error": _tool_error("runtime_error", f"Unexpected retrieval backend status failure: {e}"),
-        }
+    payload = await build_retrieval_backend_status_payload(
+        input_payload,
+        repo_path=_repo_path,
+        run_in_thread=asyncio.to_thread,
+        build_status=build_retrieval_backend_status,
+        tool_error=_tool_error,
+    )
     _record_usage_for_payload("retrieval_backend_status", input_payload, payload, started_at)
     return payload
 
@@ -1427,29 +1356,13 @@ async def graph_backend_status(
     """
     started_at = time.perf_counter()
     input_payload = {"store_root": store_root, "graph_path": graph_path}
-    try:
-        resolved_store_root = None
-        resolved_graph_path = None
-        if store_root is not None:
-            resolved_store_root = _repo_path(store_root, store_root)
-        if graph_path is not None:
-            resolved_graph_path = _repo_path(graph_path, graph_path)
-        payload = await asyncio.to_thread(
-            build_graph_backend_status,
-            store_root=resolved_store_root,
-            graph_path=resolved_graph_path,
-        )
-    except Exception as e:
-        payload = {
-            "schema_version": None,
-            "operation": "graph_backend_status",
-            "store_root": store_root,
-            "graph_path": graph_path,
-            "write_performed": False,
-            "active_memory_write_performed": False,
-            "live_graph_backend_changed": False,
-            "error": _tool_error("runtime_error", f"Unexpected graph backend status failure: {e}"),
-        }
+    payload = await build_graph_backend_status_payload(
+        input_payload,
+        repo_path=_repo_path,
+        run_in_thread=asyncio.to_thread,
+        build_status=build_graph_backend_status,
+        tool_error=_tool_error,
+    )
     _record_usage_for_payload("graph_backend_status", input_payload, payload, started_at)
     return payload
 
@@ -1730,65 +1643,14 @@ async def prepare_document_intake_review(
         "page_range": page_range,
         "resume_token": resume_token,
     }
-    if _daemon_enabled():
-        try:
-            payload = await _call_daemon("prepare_document_intake_review", input_payload)
-        except EngramDaemonClientError as e:
-            payload = {
-                "status": "unavailable",
-                "source": {"source_path": source_path},
-                "disassembly": None,
-                "extraction_request": None,
-                "document_preview": None,
-                "quality": None,
-                "artifact_manifest": None,
-                "draft_candidates": [],
-                "promotion_guidance": {"auto_promote": False},
-                "policy": {
-                    "write_behavior": "read_only",
-                    "active_memory_promoted": False,
-                    "graph_edges_promoted": False,
-                },
-                "receipts": {
-                    "artifacts_built": 0,
-                    "artifacts_read": 0,
-                    "coverage_missing": [],
-                },
-                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
-            }
-        _record_usage_for_payload("prepare_document_intake_review", input_payload, payload, started_at)
-        return payload
-    try:
-        payload = build_document_intake_review(
-            source_path=source_path,
-            extractor_id=extractor_id,
-            max_pages=max_pages,
-            require_visual_coverage=require_visual_coverage,
-            require_table_coverage=require_table_coverage,
-            require_ocr_coverage=require_ocr_coverage,
-            source_type=source_type,
-            page_range=page_range,
-            resume_token=resume_token,
-        )
-    except Exception as e:
-        payload = {
-            "status": "unavailable",
-            "source": {"source_path": source_path},
-            "disassembly": None,
-            "extraction_request": None,
-            "document_preview": None,
-            "quality": None,
-            "artifact_manifest": None,
-            "draft_candidates": [],
-            "promotion_guidance": {"auto_promote": False},
-            "policy": {
-                "write_behavior": "read_only",
-                "active_memory_promoted": False,
-                "graph_edges_promoted": False,
-            },
-            "receipts": {"artifacts_built": 0, "artifacts_read": 0, "coverage_missing": []},
-            "error": _tool_error("runtime_error", f"Unexpected document intake review failure: {e}"),
-        }
+    payload = await build_document_intake_review_payload(
+        input_payload,
+        daemon_enabled=_daemon_enabled(),
+        call_daemon=_call_daemon,
+        build_document_intake_review=build_document_intake_review,
+        daemon_error_type=EngramDaemonClientError,
+        tool_error=_tool_error,
+    )
     _record_usage_for_payload("prepare_document_intake_review", input_payload, payload, started_at)
     return payload
 
@@ -2211,26 +2073,13 @@ async def prepare_document_artifact_store(
     """
     started_at = time.perf_counter()
     input_payload = {"review_packet": review_packet, "artifact_family": artifact_family}
-    if _daemon_enabled():
-        try:
-            payload = await _call_daemon("prepare_document_artifact_store", input_payload)
-        except EngramDaemonClientError as e:
-            payload = {
-                "status": "unavailable",
-                "write_performed": False,
-                "active_memory_write_performed": False,
-                "graph_write_performed": False,
-                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
-            }
-        _record_usage_for_payload("prepare_document_artifact_store", input_payload, payload, started_at)
-        return payload
-    payload = {
-        "status": "unavailable",
-        "write_performed": False,
-        "active_memory_write_performed": False,
-        "graph_write_performed": False,
-        "error": _tool_error("daemon_required", "prepare_document_artifact_store requires the daemon-owned Memory OS path."),
-    }
+    payload = await build_document_artifact_store_payload(
+        input_payload,
+        daemon_enabled=_daemon_enabled(),
+        call_daemon=_call_daemon,
+        daemon_error_type=EngramDaemonClientError,
+        tool_error=_tool_error,
+    )
     _record_usage_for_payload("prepare_document_artifact_store", input_payload, payload, started_at)
     return payload
 
