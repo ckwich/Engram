@@ -1,0 +1,46 @@
+{
+  "contract_version": "engram.knowledge.response.v0",
+  "request_id": "req-partial",
+  "status": "partial",
+  "answer": {
+    "project": "Engram",
+    "summary": "A bounded project capsule was built, but some requested focus areas were omitted.",
+    "artifact_type": "project_capsule_summary"
+  },
+  "citations": [
+    {
+      "citation_id": "cit_001",
+      "artifact_id": "artifact:engram:project_capsule:v0",
+      "source_ref": "memory:engram_architecture_hardening_closeout_2026_05_13"
+    }
+  ],
+  "freshness": {
+    "state": "fresh",
+    "basis": "current_session"
+  },
+  "policy": {
+    "unreviewed_sources_used": false,
+    "unsupported_inferences_used": false,
+    "review_state_available": false,
+    "review_filter_enforced": false,
+    "review_state_basis": "not_available_in_current_memory_os_records",
+    "review_filter_requested": ["reviewed", "accepted"]
+  },
+  "budget_used": {
+    "artifacts_built": 1,
+    "artifacts_read": 0,
+    "source_reads": 4,
+    "tokens_out_estimate": 180
+  },
+  "planner": {
+    "strategy": "project_capsule",
+    "methods_used": ["artifact"],
+    "omissions": ["focus:runtime edge cases"]
+  },
+  "errors": [
+    {
+      "code": "focus_partially_unanswered",
+      "message": "One requested focus area had insufficient cited support."
+    }
+  ]
+}
