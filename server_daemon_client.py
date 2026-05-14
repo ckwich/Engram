@@ -117,6 +117,12 @@ def memory_protocol() -> dict[str, Any]:
             "retrieve_memory(key) reads a full memory only when chunks are insufficient.",
         ],
         "preferred_shortcut": "context_pack is available on the full server; this thin entrypoint keeps stable daemon-owned CRUD/search tools only.",
+        "knowledge_contract": {
+            "tool": "query_knowledge",
+            "contract_version": "engram.knowledge.request.v0",
+            "response_version": "engram.knowledge.response.v0",
+            "scope": "project_orientation via project_capsule_summary",
+        },
         "aliases": {
             "find_memories": "search_memories",
             "read_chunk": "retrieve_chunk",
@@ -165,6 +171,49 @@ async def memory_os_status() -> dict[str, Any]:
             "status": "degraded",
             "components": {},
             "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return an Engram Knowledge Contract v0 response for task-shaped project context.
+
+    EKC v0 supports project_orientation requests and returns a typed project
+    capsule summary with citations, freshness, policy, budget, planner, and
+    explicit errors. This tool is read-only.
+    """
+    try:
+        return await _call_daemon("query_knowledge", request)
+    except EngramDaemonClientError as exc:
+        return {
+            "contract_version": "engram.knowledge.response.v0",
+            "request_id": str((request or {}).get("request_id") or ""),
+            "status": "unavailable",
+            "answer": None,
+            "citations": [],
+            "freshness": {"state": "unknown"},
+            "policy": {
+                "unreviewed_sources_used": False,
+                "unsupported_inferences_used": False,
+                "review_state_available": False,
+                "review_filter_enforced": False,
+                "review_state_basis": "not_available_in_current_memory_os_records",
+            },
+            "budget_used": {
+                "artifacts_built": 0,
+                "artifacts_read": 0,
+                "source_reads": 0,
+                "tokens_out_estimate": 0,
+            },
+            "planner": {"strategy": "none", "methods_used": [], "omissions": []},
+            "errors": [
+                {
+                    "code": "runtime_error",
+                    "category": "infrastructure",
+                    "message": f"Engram daemon error: {exc}",
+                }
+            ],
         }
 
 

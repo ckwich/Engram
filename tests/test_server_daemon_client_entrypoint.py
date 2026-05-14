@@ -133,3 +133,55 @@ def test_thin_daemon_client_memory_os_status_delegates_to_daemon(monkeypatch):
 
     assert payload["status"] == "ok"
     assert payload["components"]["retrieval"]["backend"] == "LanceDBVectorIndex"
+
+
+def test_thin_daemon_client_query_knowledge_delegates_to_daemon(monkeypatch):
+    import server_daemon_client
+
+    class FakeClient:
+        def query_knowledge(self, payload):
+            return {
+                "contract_version": "engram.knowledge.response.v0",
+                "request_id": payload["request_id"],
+                "status": "ok",
+                "answer": {"project": payload["ask"]["project"]},
+                "citations": [{"citation_id": "cit_001", "level": "chunk"}],
+                "freshness": {"state": "fresh"},
+                "policy": {
+                    "unreviewed_sources_used": False,
+                    "unsupported_inferences_used": False,
+                    "review_state_available": False,
+                    "review_filter_enforced": False,
+                    "review_state_basis": "not_available_in_current_memory_os_records",
+                },
+                "budget_used": {
+                    "artifacts_built": 1,
+                    "artifacts_read": 0,
+                    "source_reads": 0,
+                    "tokens_out_estimate": 0,
+                },
+                "planner": {
+                    "strategy": "project_capsule",
+                    "methods_used": ["artifact"],
+                    "omissions": [],
+                },
+                "errors": [],
+            }
+
+    monkeypatch.setattr(server_daemon_client, "_daemon_client", lambda: FakeClient())
+
+    payload = asyncio.run(
+        server_daemon_client.query_knowledge(
+            {
+                "request_id": "req-thin",
+                "ask": {
+                    "goal": "Get context.",
+                    "task_type": "project_orientation",
+                    "project": "Engram",
+                },
+            }
+        )
+    )
+
+    assert payload["request_id"] == "req-thin"
+    assert payload["answer"]["project"] == "Engram"
