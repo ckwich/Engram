@@ -87,6 +87,21 @@ def test_normalize_knowledge_request_supports_review_preparation_defaults():
     assert request["policy"]["allow_unreviewed_sources"] is False
 
 
+def test_normalize_knowledge_request_supports_evidence_audit_defaults():
+    request = normalize_knowledge_request(
+        {
+            "ask": {
+                "goal": "Audit evidence.",
+                "task_type": "evidence_audit",
+                "project": "Engram",
+            }
+        }
+    )
+
+    assert request["shape"]["response_type"] == "evidence_audit_report"
+    assert request["policy"]["write_behavior"] == "read_only"
+
+
 def test_normalize_knowledge_request_rejects_unsafe_policy_overrides():
     for unsafe_policy, expected_code in (
         ({"allow_unreviewed_sources": True}, "unreviewed_sources_not_allowed"),

@@ -19,6 +19,7 @@ from core.memory_os.inspector import build_memory_os_inspector
 from core.memory_os.jobs import JobQueue
 from core.memory_os.knowledge_artifacts import KnowledgeArtifactStore
 from core.memory_os.ledger import MemoryOSLedger
+from core.memory_os.knowledge_audit import build_evidence_audit
 from core.memory_os.knowledge_citations import normalize_knowledge_citations
 from core.memory_os.knowledge_contract import (
     RESPONSE_SCHEMA_VERSION,
@@ -321,6 +322,17 @@ class MemoryOSRuntime:
                     max_records=int(normalized["budget"].get("max_source_reads", 12)),
                 ),
                 strategy="review_preparation",
+            )
+        if ask["task_type"] == "evidence_audit":
+            return _orientation_response(
+                normalized,
+                build_evidence_audit(
+                    self.ledger,
+                    project=ask["project"],
+                    focus=ask["focus"],
+                    max_records=int(normalized["budget"].get("max_source_reads", 12)),
+                ),
+                strategy="evidence_audit",
             )
         persisted = self.knowledge_artifacts.read_latest_artifact(
             project=ask["project"],

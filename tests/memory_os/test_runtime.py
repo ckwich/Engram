@@ -357,6 +357,45 @@ def test_memory_os_runtime_query_knowledge_returns_review_preparation(tmp_path):
     assert after_memory_count == before_memory_count
 
 
+def test_memory_os_runtime_query_knowledge_returns_evidence_audit(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    upsert_record(
+        runtime.ledger,
+        "knowledge_artifacts",
+        "artifact:stale",
+        {
+            "artifact_id": "artifact:stale",
+            "artifact_type": "project_capsule",
+            "artifact_version": "v0",
+            "project": "Engram",
+            "citations": [{"citation_id": "cit_bad"}],
+            "staleness": {"state": "stale", "invalidated_by": ["newer_context"]},
+        },
+    )
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-evidence-audit",
+            "ask": {
+                "goal": "Audit evidence.",
+                "task_type": "evidence_audit",
+                "project": "Engram",
+            },
+        }
+    )
+
+    assert response["status"] == "partial"
+    assert response["answer"]["audit_type"] == "evidence_audit"
+    assert response["answer"]["findings"][0]["code"] == "stale_artifact"
+    assert response["planner"]["strategy"] == "evidence_audit"
+    assert response["citations"][0]["level"] == "artifact"
+
+
 def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):
     runtime = MemoryOSRuntime(
         tmp_path,
