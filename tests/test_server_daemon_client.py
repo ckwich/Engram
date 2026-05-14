@@ -529,7 +529,13 @@ def test_prepare_document_disassembly_uses_daemon_when_configured(monkeypatch):
     assert client.calls == [
         (
             "prepare_document_disassembly",
-            {"source_path": "C:/docs/book.pdf", "source_type": "pdf", "max_pages": 5},
+            {
+                "source_path": "C:/docs/book.pdf",
+                "source_type": "pdf",
+                "max_pages": 5,
+                "page_range": None,
+                "resume_token": None,
+            },
         )
     ]
 

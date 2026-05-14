@@ -612,12 +612,20 @@ async def prepare_document_disassembly(
     source_path: str,
     source_type: str = "pdf",
     max_pages: int | None = None,
+    page_range: str | None = None,
+    resume_token: str | None = None,
 ) -> dict[str, Any]:
     """Prepare a no-write document disassembly through the daemon before any promotion."""
     try:
         return await _call_daemon(
             "prepare_document_disassembly",
-            {"source_path": source_path, "source_type": source_type, "max_pages": max_pages},
+            {
+                "source_path": source_path,
+                "source_type": source_type,
+                "max_pages": max_pages,
+                "page_range": page_range,
+                "resume_token": resume_token,
+            },
         )
     except EngramDaemonClientError as exc:
         return {
@@ -635,6 +643,8 @@ async def prepare_document_intake_review(
     require_table_coverage: bool = True,
     require_ocr_coverage: bool = True,
     source_type: str = "pdf",
+    page_range: str | None = None,
+    resume_token: str | None = None,
 ) -> dict[str, Any]:
     """Prepare an end-to-end no-write document review packet without promoting memory."""
     payload = {
@@ -645,6 +655,8 @@ async def prepare_document_intake_review(
         "require_table_coverage": require_table_coverage,
         "require_ocr_coverage": require_ocr_coverage,
         "source_type": source_type,
+        "page_range": page_range,
+        "resume_token": resume_token,
     }
     try:
         return await _call_daemon("prepare_document_intake_review", payload)

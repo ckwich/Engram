@@ -508,6 +508,8 @@ class EngramDaemonAPI:
                 source_path=request.get("source_path"),
                 source_type=request.get("source_type", "pdf"),
                 max_pages=request.get("max_pages"),
+                page_range=request.get("page_range"),
+                resume_token=request.get("resume_token"),
             )
         except ValueError as exc:
             return self._ok(
@@ -532,6 +534,11 @@ class EngramDaemonAPI:
         payload = {"disassembly": disassembly, "error": None}
         if isinstance(disassembly, dict) and disassembly.get("error") is not None:
             payload["error"] = disassembly["error"]
+        if self.memory_os_runtime is not None and isinstance(disassembly, dict):
+            payload["job"] = self.memory_os_runtime.record_document_disassembly_job(
+                disassembly,
+                request=request,
+            )
         return self._ok(payload)
 
     def _memory_os_source_import_job(self, request: dict[str, Any]) -> dict[str, Any]:

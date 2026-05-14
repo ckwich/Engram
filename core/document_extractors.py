@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+import json
 import re
 import shutil
 import subprocess
@@ -36,6 +38,8 @@ def prepare_document_disassembly(
     source_path: str | Path,
     source_type: str | None = None,
     max_pages: int | None = None,
+    page_range: str | None = None,
+    resume_token: str | None = None,
     tool_paths: dict[str, str | None] | None = None,
     runner: CommandRunner | None = None,
     timeout_seconds: int = 60,
@@ -52,6 +56,9 @@ def prepare_document_disassembly(
     normalized_timeout = max(1, min(int(timeout_seconds), 600))
     normalized_max_pages = _normalize_max_pages(max_pages)
     source = _source_record(path, normalized_source_type)
+    resume_state = _decode_resume_token(resume_token)
+    if resume_state and resume_state.get("source_hash") != source["content_hash"]:
+        raise ValueError("resume_token source hash does not match source_path")
     capabilities = _resolve_pdf_tools(tool_paths)
     missing = [tool for tool in PDF_TOOLS if not capabilities[tool]["available"]]
     if missing:
@@ -77,11 +84,18 @@ def prepare_document_disassembly(
 
     info = _parse_pdfinfo(pdfinfo.stdout)
     page_count = _parse_int(info.get("pages")) or 0
-    page_limit = min(page_count, normalized_max_pages) if normalized_max_pages else page_count
+    page_start, page_end = _page_window(
+        page_count=page_count,
+        max_pages=normalized_max_pages,
+        page_range=page_range,
+        resume_state=resume_state,
+    )
+    page_limit = page_end
+    page_batch_count = max(page_end - page_start + 1, 0) if page_count else 0
 
     text_args = ["-layout", "-enc", "UTF-8"]
-    if page_limit:
-        text_args.extend(["-f", "1", "-l", str(page_limit)])
+    if page_batch_count:
+        text_args.extend(["-f", str(page_start), "-l", str(page_end)])
     text_args.extend([str(path), "-"])
     text_result = _run_pdf_tool(command_runner, capabilities["pdftotext"]["path"], text_args, normalized_timeout, receipts)
     if text_result.returncode != 0:
@@ -93,8 +107,8 @@ def prepare_document_disassembly(
         )
 
     image_args: list[str] = []
-    if page_limit:
-        image_args.extend(["-f", "1", "-l", str(page_limit)])
+    if page_batch_count:
+        image_args.extend(["-f", str(page_start), "-l", str(page_end)])
     image_args.extend(["-list", str(path)])
     image_result = _run_pdf_tool(command_runner, capabilities["pdfimages"]["path"], image_args, normalized_timeout, receipts)
     if image_result.returncode != 0:
@@ -107,16 +121,27 @@ def prepare_document_disassembly(
 
     page_texts = _split_pdf_text_pages(text_result.stdout)
     image_counts = _parse_pdfimages_pages(image_result.stdout)
-    pages = _page_records(page_count, page_limit, page_texts, image_counts)
-    image_pages = [page for page, count in sorted(image_counts.items()) if count > 0 and (not page_limit or page <= page_limit)]
+    pages = _page_records(page_count, page_start, page_end, page_texts, image_counts)
+    image_pages = [
+        page
+        for page, count in sorted(image_counts.items())
+        if count > 0 and page_start <= page <= page_end
+    ]
     no_text_pages = [page["page_number"] for page in pages if page["text_status"] == "no_text"]
     low_text_pages = [page["page_number"] for page in pages if page["text_status"] == "low_text"]
-    text_content = "\f".join(page_texts[:page_limit or len(page_texts)])
+    text_content = "\f".join(page_texts[:page_batch_count or len(page_texts)])
     title = info.get("title") or path.stem
+    resume = _resume_payload(
+        source_hash=source["content_hash"],
+        page_count=page_count,
+        page_start=page_start,
+        page_end=page_end,
+    )
 
     payload = {
         "schema_version": DOCUMENT_DISASSEMBLY_SCHEMA_VERSION,
         "record_type": "document_disassembly_preview",
+        "status": "partial" if resume["has_more"] else "ok",
         "write_policy": "preview_only",
         "write_performed": False,
         "active_memory_write_performed": False,
@@ -130,6 +155,8 @@ def prepare_document_disassembly(
             "content_hash": source["content_hash"],
             "page_count": page_count,
             "page_limit": page_limit or None,
+            "pages_returned": page_batch_count,
+            "page_range": {"start": page_start, "end": page_end} if page_batch_count else None,
             "encrypted": _parse_bool(info.get("encrypted")),
             "page_size": info.get("page size"),
             "extraction_status": "preview",
@@ -138,7 +165,9 @@ def prepare_document_disassembly(
         "text": {
             "content": text_content,
             "char_count": len(text_content),
-            "page_count": len(page_texts[:page_limit or len(page_texts)]),
+            "page_count": len(page_texts[:page_batch_count or len(page_texts)]),
+            "page_start": page_start,
+            "page_end": page_end,
             "extractor": "pdftotext",
         },
         "image_inventory": {
@@ -158,6 +187,7 @@ def prepare_document_disassembly(
             ],
         },
         "extraction_receipts": receipts,
+        "resume": resume,
         "promotion_guidance": {
             "default_action": "review_disassembly_before_document_draft",
             "auto_promote": False,
@@ -171,6 +201,9 @@ def prepare_document_disassembly(
     }
     payload["quality_report"] = build_document_quality_report(payload)
     payload["artifact_manifest"] = build_document_artifact_manifest(payload)
+    payload["artifact_manifest"]["resume"]["page_range"] = payload["document"]["page_range"]
+    payload["artifact_manifest"]["resume"]["merge_strategy"] = "page_range_manifest_merge"
+    payload["artifact_manifest"]["resume"]["resume_token"] = resume["resume_token"]
     visual_candidates, visual_request_arguments, visual_request = _visual_evidence_plan(payload)
     payload["visual_artifact_candidates"] = visual_candidates
     payload["visual_extraction_request_arguments"] = visual_request_arguments
@@ -310,13 +343,16 @@ def _parse_pdfimages_pages(stdout: str) -> dict[int, int]:
 
 def _page_records(
     page_count: int,
-    page_limit: int,
+    page_start: int,
+    page_end: int,
     page_texts: list[str],
     image_counts: dict[int, int],
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    for index in range(page_limit):
-        page_number = index + 1
+    if page_count <= 0 or page_end < page_start:
+        return []
+    for page_number in range(page_start, page_end + 1):
+        index = page_number - page_start
         text = page_texts[index] if index < len(page_texts) else ""
         non_whitespace = len(re.sub(r"\s+", "", text))
         if non_whitespace == 0:
@@ -336,8 +372,6 @@ def _page_records(
                 "visual_review_needed": text_status != "text" or image_count > 0,
             }
         )
-    if page_count == 0 and not records:
-        return []
     return records
 
 
@@ -434,6 +468,101 @@ def _normalize_max_pages(value: int | None) -> int | None:
     if value is None:
         return None
     return max(1, int(value))
+
+
+def _page_window(
+    *,
+    page_count: int,
+    max_pages: int | None,
+    page_range: str | None,
+    resume_state: dict[str, Any] | None,
+) -> tuple[int, int]:
+    if page_range and resume_state:
+        raise ValueError("page_range and resume_token cannot be used together")
+    if page_count <= 0:
+        return 1, 0
+    if resume_state:
+        start = int(resume_state.get("next_page") or 1)
+        if start < 1 or start > page_count + 1:
+            raise ValueError("resume_token next_page is outside document bounds")
+        if start > page_count:
+            return page_count, page_count
+        end = page_count
+    elif page_range:
+        start, end = _parse_page_range(page_range)
+        if start > page_count:
+            raise ValueError("page_range starts after the document page count")
+        end = min(end, page_count)
+    else:
+        start, end = 1, page_count
+    if max_pages is not None:
+        end = min(end, start + max_pages - 1)
+    if end < start:
+        raise ValueError("page_range end must be greater than or equal to start")
+    return start, end
+
+
+def _parse_page_range(value: str) -> tuple[int, int]:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("page_range cannot be blank")
+    if "-" in text:
+        start_text, end_text = text.split("-", 1)
+    else:
+        start_text, end_text = text, text
+    try:
+        start = int(start_text.strip())
+        end = int(end_text.strip())
+    except ValueError as exc:
+        raise ValueError("page_range must use positive page numbers such as '1-5'") from exc
+    if start <= 0 or end <= 0:
+        raise ValueError("page_range pages must be positive")
+    if end < start:
+        raise ValueError("page_range end must be greater than or equal to start")
+    return start, end
+
+
+def _resume_payload(
+    *,
+    source_hash: str,
+    page_count: int,
+    page_start: int,
+    page_end: int,
+) -> dict[str, Any]:
+    has_more = page_count > 0 and page_end < page_count
+    next_page = page_end + 1 if has_more else None
+    token_payload = {
+        "source_hash": source_hash,
+        "page_count": page_count,
+        "next_page": next_page,
+    }
+    return {
+        "has_more": has_more,
+        "page_count": page_count,
+        "page_range": {"start": page_start, "end": page_end} if page_count else None,
+        "next_page": next_page,
+        "resume_token": _encode_resume_token(token_payload) if has_more else None,
+        "merge_strategy": "page_range_manifest_merge",
+    }
+
+
+def _encode_resume_token(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_resume_token(value: str | None) -> dict[str, Any] | None:
+    if value is None or not str(value).strip():
+        return None
+    text = str(value).strip()
+    padded = text + ("=" * ((4 - len(text) % 4) % 4))
+    try:
+        decoded = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("resume_token is invalid") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("resume_token is invalid")
+    return decoded
 
 
 def _parse_int(value: str | None) -> int | None:

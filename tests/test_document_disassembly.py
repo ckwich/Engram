@@ -135,6 +135,93 @@ def test_prepare_pdf_disassembly_reports_missing_local_tools(tmp_path):
     assert payload["capabilities"]["pdfimages"]["available"] is False
 
 
+def test_prepare_pdf_disassembly_supports_page_ranges_and_resume_tokens(tmp_path):
+    pdf = tmp_path / "sample.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n% sample")
+    calls: list[list[str]] = []
+
+    def range_runner(args: list[str], timeout_seconds: int) -> ExtractorCommandResult:
+        calls.append(args)
+        command = Path(args[0]).name.lower()
+        if command == "pdfinfo":
+            return ExtractorCommandResult(
+                returncode=0,
+                stdout="Title: Range Book\nPages: 4\nEncrypted: no\n",
+                stderr="",
+            )
+        if command == "pdftotext":
+            assert args[1:6] == ["-layout", "-enc", "UTF-8", "-f", "2"]
+            assert args[6:8] == ["-l", "2"]
+            return ExtractorCommandResult(
+                returncode=0,
+                stdout="Range page two has enough text for a focused pass.",
+                stderr="",
+            )
+        if command == "pdfimages":
+            assert args[1:5] == ["-f", "2", "-l", "2"]
+            return ExtractorCommandResult(
+                returncode=0,
+                stdout="\n".join(
+                    [
+                        "page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio",
+                        "2       0 image     640   480  rgb     3   8  jpeg   no        12  0   144   144 20K  5%",
+                    ]
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {args}")
+
+    payload = prepare_document_disassembly(
+        source_path=pdf,
+        page_range="2-2",
+        tool_paths={"pdfinfo": "pdfinfo", "pdftotext": "pdftotext", "pdfimages": "pdfimages"},
+        runner=range_runner,
+    )
+
+    assert payload["status"] == "partial"
+    assert payload["document"]["page_count"] == 4
+    assert payload["document"]["page_range"] == {"start": 2, "end": 2}
+    assert [page["page_number"] for page in payload["pages"]] == [2]
+    assert payload["resume"]["has_more"] is True
+    assert payload["resume"]["next_page"] == 3
+    assert payload["resume"]["resume_token"]
+    assert payload["artifact_manifest"]["resume"]["page_range"] == {"start": 2, "end": 2}
+    assert payload["artifact_manifest"]["resume"]["merge_strategy"] == "page_range_manifest_merge"
+    assert any(Path(call[0]).name.lower() == "pdftotext" for call in calls)
+
+
+def test_prepare_pdf_disassembly_resume_token_rejects_stale_source_hash(tmp_path):
+    first_pdf = tmp_path / "first.pdf"
+    second_pdf = tmp_path / "second.pdf"
+    first_pdf.write_bytes(b"%PDF first")
+    second_pdf.write_bytes(b"%PDF second")
+
+    def first_page_runner(args: list[str], timeout_seconds: int) -> ExtractorCommandResult:
+        command = Path(args[0]).name.lower()
+        if command == "pdfinfo":
+            return ExtractorCommandResult(returncode=0, stdout="Title: Book\nPages: 2\n", stderr="")
+        if command == "pdftotext":
+            return ExtractorCommandResult(returncode=0, stdout="First page text.", stderr="")
+        if command == "pdfimages":
+            return ExtractorCommandResult(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {args}")
+
+    first = prepare_document_disassembly(
+        source_path=first_pdf,
+        page_range="1-1",
+        tool_paths={"pdfinfo": "pdfinfo", "pdftotext": "pdftotext", "pdfimages": "pdfimages"},
+        runner=first_page_runner,
+    )
+
+    with pytest.raises(ValueError, match="resume_token source hash does not match"):
+        prepare_document_disassembly(
+            source_path=second_pdf,
+            resume_token=first["resume"]["resume_token"],
+            tool_paths={"pdfinfo": "pdfinfo", "pdftotext": "pdftotext", "pdfimages": "pdfimages"},
+            runner=first_page_runner,
+        )
+
+
 def test_book_dismantling_gate_validates_required_fixture_manifests():
     report = run_book_dismantling_gate(default_book_dismantling_fixture_manifests())
 

@@ -1937,6 +1937,8 @@ async def prepare_document_disassembly(
     source_path: str,
     source_type: str = "pdf",
     max_pages: int | None = None,
+    page_range: str | None = None,
+    resume_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Prepare a no-write local document disassembly preview.
@@ -1950,7 +1952,13 @@ async def prepare_document_disassembly(
     visual extraction, or document draft promotion.
     """
     started_at = time.perf_counter()
-    input_payload = {"source_path": source_path, "source_type": source_type, "max_pages": max_pages}
+    input_payload = {
+        "source_path": source_path,
+        "source_type": source_type,
+        "max_pages": max_pages,
+        "page_range": page_range,
+        "resume_token": resume_token,
+    }
     if _daemon_enabled():
         try:
             payload = await _call_daemon("prepare_document_disassembly", input_payload)
@@ -1967,6 +1975,8 @@ async def prepare_document_disassembly(
                 source_path=source_path,
                 source_type=source_type,
                 max_pages=max_pages,
+                page_range=page_range,
+                resume_token=resume_token,
             ),
             "error": None,
         }
@@ -1992,6 +2002,8 @@ async def prepare_document_intake_review(
     require_table_coverage: bool = True,
     require_ocr_coverage: bool = True,
     source_type: str = "pdf",
+    page_range: str | None = None,
+    resume_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Prepare an end-to-end no-write document intake review packet.
@@ -2009,6 +2021,8 @@ async def prepare_document_intake_review(
         "require_table_coverage": require_table_coverage,
         "require_ocr_coverage": require_ocr_coverage,
         "source_type": source_type,
+        "page_range": page_range,
+        "resume_token": resume_token,
     }
     if _daemon_enabled():
         try:
@@ -2047,6 +2061,8 @@ async def prepare_document_intake_review(
             require_table_coverage=require_table_coverage,
             require_ocr_coverage=require_ocr_coverage,
             source_type=source_type,
+            page_range=page_range,
+            resume_token=resume_token,
         )
     except Exception as e:
         payload = {

@@ -26,6 +26,8 @@ def prepare_document_intake_review(
     require_table_coverage: bool = True,
     require_ocr_coverage: bool = True,
     source_type: str = "pdf",
+    page_range: str | None = None,
+    resume_token: str | None = None,
     document_disassembler: DocumentDisassembler = prepare_document_disassembly,
 ) -> dict[str, Any]:
     """Prepare an end-to-end no-write review packet for a local document."""
@@ -37,12 +39,16 @@ def prepare_document_intake_review(
         "require_visual_coverage": bool(require_visual_coverage),
         "require_table_coverage": bool(require_table_coverage),
         "require_ocr_coverage": bool(require_ocr_coverage),
+        "page_range": page_range,
+        "resume_token": resume_token,
     }
     try:
         disassembly = document_disassembler(
             source_path=source_path,
             source_type=source_type,
             max_pages=max_pages,
+            page_range=page_range,
+            resume_token=resume_token,
         )
     except ValueError as exc:
         return _failure_packet(
@@ -94,7 +100,7 @@ def prepare_document_intake_review(
         else None
     )
     return _packet(
-        status="partial" if coverage_missing else "ok",
+        status="partial" if coverage_missing or _has_more(disassembly) else "ok",
         source=_source_summary(source_path, disassembly),
         disassembly=disassembly,
         document_preview=document_preview,
@@ -186,6 +192,11 @@ def _source_summary(source_path: str, disassembly: dict[str, Any] | None = None)
     }
 
 
+def _has_more(disassembly: dict[str, Any]) -> bool:
+    resume = disassembly.get("resume")
+    return bool(isinstance(resume, dict) and resume.get("has_more"))
+
+
 def _normalize_disassembly_error(error: dict[str, Any]) -> dict[str, str]:
     code = str(error.get("code") or "runtime_error")
     category = "infrastructure" if code in {"missing_extractor", "tool_failed", "runtime_error"} else "validation"
@@ -237,6 +248,7 @@ def _packet(
         promotion_guidance = {"default_action": "review_before_promotion", "auto_promote": False}
     promotion_guidance = {**promotion_guidance, "auto_promote": False}
     documents_consulted = 1 if isinstance(disassembly, dict) and isinstance(disassembly.get("document"), dict) else 0
+    resume = disassembly.get("resume") if isinstance(disassembly, dict) else None
     return {
         "schema_version": DOCUMENT_INTAKE_REVIEW_SCHEMA_VERSION,
         "record_type": "document_intake_review",
@@ -255,6 +267,7 @@ def _packet(
             "artifacts_read": 0,
             "documents_consulted": documents_consulted,
             "coverage_missing": coverage_missing,
+            "resume": resume if isinstance(resume, dict) else None,
             "input": input_payload,
         },
         "error": error,

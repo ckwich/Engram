@@ -135,6 +135,34 @@ class MemoryOSRuntime:
             },
         )
 
+    def record_document_disassembly_job(
+        self,
+        disassembly: dict[str, Any],
+        *,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Record daemon-owned document disassembly job receipts."""
+        document = disassembly.get("document") if isinstance(disassembly.get("document"), dict) else {}
+        source = disassembly.get("source") if isinstance(disassembly.get("source"), dict) else {}
+        job = self.jobs.enqueue(
+            "document_disassembly",
+            {
+                "document_id": document.get("document_id"),
+                "source_uri": source.get("source_uri"),
+                "page_range": document.get("page_range"),
+                "resume": disassembly.get("resume"),
+                "request": request,
+            },
+        )
+        return self.jobs.succeed(
+            job["job_id"],
+            result={
+                "document_id": document.get("document_id"),
+                "status": disassembly.get("status") or "ok",
+                "resume": disassembly.get("resume"),
+            },
+        )
+
     def store_memory(
         self,
         *,

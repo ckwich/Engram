@@ -20,7 +20,9 @@ def build_document_artifact_manifest(
     source = dict(disassembly.get("source") or {})
     document = dict(disassembly.get("document") or {})
     pages = list(disassembly.get("pages") or [])
-    text_pages = _split_text_pages((disassembly.get("text") or {}).get("content") or "")
+    text = disassembly.get("text") if isinstance(disassembly.get("text"), dict) else {}
+    text_page_start = int(text.get("page_start") or 1)
+    text_pages = _split_text_pages(text.get("content") or "")
     failed_pages = _page_set((disassembly.get("quality_seed") or {}).get("failed_pages"))
     root = _data_root(data_root)
     source_hash = _require_hash(source.get("content_hash") or document.get("content_hash"))
@@ -37,7 +39,8 @@ def build_document_artifact_manifest(
     states: dict[str, str] = {}
     for page in pages:
         page_number = int(page.get("page_number"))
-        text = text_pages[page_number - 1] if page_number - 1 < len(text_pages) else ""
+        text_index = page_number - text_page_start
+        text = text_pages[text_index] if 0 <= text_index < len(text_pages) else ""
         text_artifact = None
         if text.strip():
             text_artifact = _artifact_record(

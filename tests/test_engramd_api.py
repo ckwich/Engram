@@ -342,6 +342,19 @@ class FakeMemoryOSRuntime:
             "error": None,
         }
 
+    def record_document_disassembly_job(self, disassembly, *, request):
+        self.calls.append(
+            (
+                "record_document_disassembly_job",
+                {"document_id": disassembly.get("document", {}).get("document_id"), "request": request},
+            )
+        )
+        return {
+            "job_id": "job:document",
+            "job_kind": "document_disassembly",
+            "status": "succeeded",
+        }
+
     def inspector(self, *, limit=20):
         return {
             "schema_version": "2026-05-13.memory-os-inspector.v1",
@@ -594,6 +607,46 @@ def test_prepare_document_disassembly_routes_to_document_disassembler():
     assert response["body"]["disassembly"]["record_type"] == "document_disassembly_preview"
     assert response["body"]["disassembly"]["source"]["path"] == "C:/docs/book.pdf"
     assert response["body"]["disassembly"]["document"]["page_limit"] == 5
+
+
+def test_prepare_document_disassembly_records_daemon_owned_job_when_runtime_available():
+    runtime = FakeMemoryOSRuntime()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        document_disassembler=lambda **kwargs: {
+            "record_type": "document_disassembly_preview",
+            "status": "partial",
+            "source": {"source_uri": "file:///book.pdf"},
+            "document": {"document_id": "doc_book", "page_range": {"start": 2, "end": 2}},
+            "resume": {"has_more": True, "next_page": 3},
+            "error": None,
+        },
+        memory_os_runtime=runtime,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/prepare_document_disassembly",
+        {
+            "source_path": "C:/docs/book.pdf",
+            "source_type": "pdf",
+            "page_range": "2-2",
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["job"]["job_kind"] == "document_disassembly"
+    assert runtime.calls[-1] == (
+        "record_document_disassembly_job",
+        {
+            "document_id": "doc_book",
+            "request": {
+                "source_path": "C:/docs/book.pdf",
+                "source_type": "pdf",
+                "page_range": "2-2",
+            },
+        },
+    )
 
 
 def test_document_workflow_routes_delegate_to_document_toolset():
