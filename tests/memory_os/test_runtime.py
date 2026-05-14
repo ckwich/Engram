@@ -1,5 +1,5 @@
 from core.memory_os.runtime import MemoryOSRuntime
-from core.memory_os._records import list_records, upsert_record
+from core.memory_os._records import list_records, read_record, upsert_record
 from core.vector_index import InMemoryVectorIndex
 
 
@@ -171,6 +171,71 @@ def test_memory_os_runtime_query_knowledge_returns_project_capsule_response(tmp_
     assert response["policy"]["review_state_available"] is False
     assert response["policy"]["review_filter_enforced"] is False
     assert response["policy"]["review_state_basis"] == "not_available_in_current_memory_os_records"
+
+
+def test_memory_os_runtime_query_knowledge_focus_ranks_newer_full_text_context(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    runtime.store_memory(
+        key="aaa_old_ekc_plan",
+        content=(
+            "# Summary\n\n"
+            "Old EKC query_knowledge stable eval pack planning note. "
+            "It contains the same focus terms but should not outrank fresher implementation evidence."
+        ),
+        title="Old EKC Plan",
+        project="Engram",
+        domain="planning",
+        tags=["ekc", "query_knowledge", "stable eval pack"],
+    )
+    filler = " ".join(["context"] * 80)
+    runtime.store_memory(
+        key="zzz_current_ekc_slice",
+        content=(
+            "# Summary\n\n"
+            "Current EKC query_knowledge stable eval pack implementation note. "
+            f"{filler} "
+            "Full-text marker: the stable eval pack now validates the whole EKC workflow."
+        ),
+        title="Current EKC Slice",
+        project="Engram",
+        domain="implementation",
+        tags=["ekc", "query_knowledge", "stable eval pack"],
+    )
+    old_chunk = read_record(runtime.ledger, "chunks", "aaa_old_ekc_plan:chunk:0")
+    current_chunk = read_record(runtime.ledger, "chunks", "zzz_current_ekc_slice:chunk:0")
+    upsert_record(
+        runtime.ledger,
+        "chunks",
+        "aaa_old_ekc_plan:chunk:0",
+        {**old_chunk, "updated_at": "2026-05-13T00:00:00+00:00"},
+    )
+    upsert_record(
+        runtime.ledger,
+        "chunks",
+        "zzz_current_ekc_slice:chunk:0",
+        {**current_chunk, "updated_at": "2026-05-14T00:00:00+00:00"},
+    )
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-current-ekc",
+            "ask": {
+                "goal": "Orient me to the EKC stable eval work.",
+                "task_type": "project_orientation",
+                "project": "Engram",
+                "focus": ["query_knowledge", "stable eval pack"],
+            },
+        }
+    )
+
+    assert response["status"] == "ok"
+    assert response["citations"][0]["key"] == "zzz_current_ekc_slice"
+    assert "Full-text marker" in response["answer"]["summary"]
 
 
 def test_memory_os_runtime_materializes_and_reads_persisted_project_capsule(tmp_path):
@@ -483,6 +548,74 @@ def test_memory_os_runtime_query_knowledge_returns_implementation_context_artifa
     assert response["answer"]["items"][0]["key"] == "impl_context"
     assert response["citations"][0]["level"] == "chunk"
     assert response["planner"]["strategy"] == "implementation_context"
+
+
+def test_memory_os_runtime_implementation_context_adds_ranked_brief(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    upsert_record(
+        runtime.ledger,
+        "chunks",
+        "old_impl:chunk:0",
+        {
+            "chunk_record_id": "old_impl:chunk:0",
+            "memory_key": "old_impl",
+            "document_id": "old_impl:chunk:0",
+            "chunk_id": 0,
+            "project": "Engram",
+            "domain": "planning",
+            "updated_at": "2026-05-13T00:00:00+00:00",
+            "text": "Earlier query_knowledge stable eval pack planning context.",
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "chunks",
+        "current_impl:chunk:0",
+        {
+            "chunk_record_id": "current_impl:chunk:0",
+            "memory_key": "current_impl",
+            "document_id": "current_impl:chunk:0",
+            "chunk_id": 0,
+            "project": "Engram",
+            "domain": "implementation",
+            "updated_at": "2026-05-14T00:00:00+00:00",
+            "text": (
+                "Current implementation context for query_knowledge stable eval pack. "
+                "Branch: codex/ekc-v0-contract. Keep the request/response envelope stable. "
+                "Do not treat server.py/core/memory_manager.py as a real file path. "
+                "Files changed: core/memory_os/runtime.py and tests/memory_os/test_runtime.py. "
+                "Next recommended step: polish EKC ranking and implementation-context briefing."
+            ),
+        },
+    )
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-implementation-context-brief",
+            "ask": {
+                "goal": "Continue EKC implementation work.",
+                "task_type": "implementation_context",
+                "project": "Engram",
+                "focus": ["query_knowledge", "stable eval pack"],
+            },
+        }
+    )
+
+    assert response["status"] == "partial"
+    assert response["answer"]["items"][0]["key"] == "current_impl"
+    assert response["answer"]["brief"]["summary"].startswith("Current implementation context")
+    assert response["answer"]["brief"]["next_actions"] == [
+        "polish EKC ranking and implementation-context briefing."
+    ]
+    assert response["answer"]["brief"]["relevant_files"] == [
+        "core/memory_os/runtime.py",
+        "tests/memory_os/test_runtime.py",
+    ]
 
 
 def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from core.memory_os._records import list_records
@@ -64,6 +65,10 @@ def build_artifact_family_packet(
         "write_performed": False,
         "active_memory_write_performed": False,
     }
+    if family == "implementation_context":
+        answer["brief"] = _implementation_context_brief(items)
+        for item in items:
+            item.pop("_brief_text", None)
     errors = (
         [
             {
@@ -165,15 +170,19 @@ def _implementation_context_items(
     max_records: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     chunks = _matching_records(list_records(ledger, "chunks"), project=project, focus=focus)
-    items = [
-        {
-            "key": chunk.get("memory_key") or chunk.get("key") or chunk.get("parent_key"),
-            "chunk_id": int(chunk.get("chunk_id") or 0),
-            "domain": chunk.get("domain"),
-            "text_preview": str(chunk.get("text") or "")[:240],
-        }
-        for chunk in chunks[: max(int(max_records), 1)]
-    ]
+    items = []
+    for chunk in chunks[: max(int(max_records), 1)]:
+        text = str(chunk.get("text") or "")
+        items.append(
+            {
+                "key": chunk.get("memory_key") or chunk.get("key") or chunk.get("parent_key"),
+                "chunk_id": int(chunk.get("chunk_id") or 0),
+                "domain": chunk.get("domain"),
+                "text_preview": text[:240],
+                "updated_at": chunk.get("updated_at"),
+                "_brief_text": text,
+            }
+        )
     citations = [
         {
             "level": "chunk",
@@ -262,6 +271,13 @@ def _matching_records(
             continue
         if _matches_focus(record, focus):
             matches.append(record)
+    matches.sort(
+        key=lambda record: (
+            _focus_score(record, focus),
+            str(record.get("updated_at") or record.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
     return matches
 
 
@@ -273,6 +289,71 @@ def _matches_focus(record: dict[str, Any], focus: list[str] | None) -> bool:
     return any(term in haystack for term in terms)
 
 
+def _focus_score(record: dict[str, Any], focus: list[str] | None) -> int:
+    terms = [str(term).strip().lower() for term in focus or [] if str(term).strip()]
+    if not terms:
+        return 0
+    haystack = json.dumps(record, ensure_ascii=False, sort_keys=True).lower()
+    return sum(1 for term in terms if term in haystack)
+
+
 def _has_decision_signal(chunk: dict[str, Any]) -> bool:
     haystack = json.dumps(chunk, ensure_ascii=False, sort_keys=True).lower()
     return "decision" in haystack
+
+
+def _implementation_context_brief(items: list[dict[str, Any]]) -> dict[str, Any]:
+    previews = [
+        str(item.get("_brief_text") or item.get("text_preview") or "").strip()
+        for item in items
+    ]
+    previews = [preview for preview in previews if preview]
+    return {
+        "summary": _first_sentence(previews[0]) if previews else "",
+        "next_actions": _extract_next_actions(previews),
+        "relevant_files": _extract_file_refs(previews),
+    }
+
+
+def _first_sentence(text: str) -> str:
+    normalized = " ".join(str(text).split())
+    for delimiter in (". ", "? ", "! "):
+        if delimiter in normalized:
+            return normalized.split(delimiter, 1)[0] + delimiter.strip()
+    return normalized
+
+
+def _extract_next_actions(texts: list[str]) -> list[str]:
+    actions: list[str] = []
+    patterns = (
+        "next recommended step:",
+        "next step:",
+        "todo:",
+        "action:",
+    )
+    for text in texts:
+        lower = text.lower()
+        for pattern in patterns:
+            start = lower.find(pattern)
+            if start < 0:
+                continue
+            action = text[start + len(pattern) :].strip()
+            action = re.split(r"\s+(?:files changed|validation performed):", action, maxsplit=1, flags=re.IGNORECASE)[0]
+            action = action.strip()
+            if action and action not in actions:
+                actions.append(action)
+    return actions
+
+
+def _extract_file_refs(texts: list[str]) -> list[str]:
+    files: list[str] = []
+    for text in texts:
+        for match in re.findall(r"\b(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\b", text):
+            cleaned = match.rstrip(".,;:")
+            if not re.search(r"\.[A-Za-z0-9]{1,8}$", cleaned):
+                continue
+            if any("." in part and not part.startswith(".") for part in cleaned.split("/")[:-1]):
+                continue
+            if cleaned and cleaned not in files:
+                files.append(cleaned)
+    return files

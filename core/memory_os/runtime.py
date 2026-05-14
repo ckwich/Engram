@@ -435,17 +435,23 @@ class MemoryOSRuntime:
         budget = normalized["budget"]
         ask = normalized["ask"]
         query = _knowledge_search_query(ask)
+        max_source_reads = max(int(budget.get("max_source_reads", 12)), 1)
         search = self.search_memories(
             query,
-            limit=max(int(budget.get("max_source_reads", 12)), 1),
+            limit=max_source_reads * 2,
             project=ask["project"],
             include_stale=False,
             retrieval_mode="hybrid",
         )
-        results = list(search.get("results") or [])
+        results = _prepare_knowledge_results(
+            self.ledger,
+            list(search.get("results") or []),
+            ask=ask,
+            limit=max_source_reads,
+        )
         planner = build_planner_receipt(
             strategy="project_capsule",
-            methods_used=["artifact", "hybrid_search"],
+            methods_used=["artifact", "hybrid_search", "chunk_hydration", "focus_rerank"],
             request_budget=budget,
         )
         if not results:
@@ -585,6 +591,62 @@ def _knowledge_search_query(ask: dict[str, Any]) -> str:
     parts = [ask.get("goal") or "project orientation", ask.get("project") or ""]
     parts.extend(ask.get("focus") or [])
     return " ".join(str(part).strip() for part in parts if str(part).strip())
+
+
+def _prepare_knowledge_results(
+    ledger: MemoryOSLedger,
+    results: list[dict[str, Any]],
+    *,
+    ask: dict[str, Any],
+    limit: int,
+) -> list[dict[str, Any]]:
+    focus_terms = _knowledge_focus_terms(ask)
+    hydrated: list[dict[str, Any]] = []
+    for result in results:
+        item = dict(result)
+        key = str(item.get("key") or "")
+        chunk_id = int(item.get("chunk_id") or 0)
+        chunk_record = read_record(ledger, "chunks", f"{key}:chunk:{chunk_id}") if key else None
+        if chunk_record:
+            text = str(chunk_record.get("text") or item.get("snippet") or "")
+            item["text"] = text
+            item["snippet"] = text[:300]
+            item["title"] = chunk_record.get("title") or item.get("title") or key
+            item["tags"] = chunk_record.get("tags") or item.get("tags") or []
+            item["project"] = chunk_record.get("project") or item.get("project")
+            item["domain"] = chunk_record.get("domain") or item.get("domain")
+            item["_ekc_updated_at"] = str(chunk_record.get("updated_at") or "")
+            item["_ekc_focus_score"] = _knowledge_focus_score(chunk_record, focus_terms)
+        else:
+            item["text"] = str(item.get("text") or item.get("snippet") or "")
+            item["_ekc_updated_at"] = ""
+            item["_ekc_focus_score"] = _knowledge_focus_score(item, focus_terms)
+        hydrated.append(item)
+
+    hydrated.sort(
+        key=lambda item: (
+            int(item.get("_ekc_focus_score") or 0),
+            str(item.get("_ekc_updated_at") or ""),
+            float(item.get("score") or 0.0),
+        ),
+        reverse=True,
+    )
+    return [
+        {key: value for key, value in item.items() if not str(key).startswith("_ekc_")}
+        for item in hydrated[: max(int(limit), 1)]
+    ]
+
+
+def _knowledge_focus_terms(ask: dict[str, Any]) -> list[str]:
+    terms = [str(term).strip().lower() for term in ask.get("focus") or [] if str(term).strip()]
+    return terms
+
+
+def _knowledge_focus_score(record: dict[str, Any], focus_terms: list[str]) -> int:
+    if not focus_terms:
+        return 0
+    haystack = str(record).lower()
+    return sum(1 for term in focus_terms if term in haystack)
 
 
 def _project_capsule_response(
