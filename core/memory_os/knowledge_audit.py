@@ -20,9 +20,14 @@ def build_evidence_audit(
     max_records: int = 12,
 ) -> dict[str, Any]:
     """Audit ledgered evidence metadata without reading or writing memory bodies."""
-    artifacts = _matching_records(list_records(ledger, "knowledge_artifacts"), project=project, focus=focus)
     documents = _matching_records(list_records(ledger, "documents"), project=project, focus=focus)
     document_by_id = {str(document.get("document_id") or ""): document for document in documents}
+    artifacts = _matching_artifacts(
+        list_records(ledger, "knowledge_artifacts"),
+        project=project,
+        focus=focus,
+        document_by_id=document_by_id,
+    )
     receipts = [
         receipt
         for receipt in list_records(ledger, "retrieval_receipts")
@@ -99,6 +104,35 @@ def _artifact_findings(artifact: dict[str, Any]) -> list[dict[str, Any]]:
                 "severity": "high",
                 "ref": artifact_id,
                 "message": f"{artifact_id} is marked {state}.",
+            }
+        )
+    coverage_receipt = artifact.get("coverage_receipt") if isinstance(artifact.get("coverage_receipt"), dict) else {}
+    coverage_missing = {str(item) for item in coverage_receipt.get("coverage_missing") or []}
+    if "visual" in coverage_missing:
+        findings.append(
+            {
+                "code": "unresolved_visual_evidence",
+                "severity": "high",
+                "ref": artifact_id,
+                "message": f"{artifact_id} is missing required visual evidence coverage.",
+            }
+        )
+    if "ocr" in coverage_missing:
+        findings.append(
+            {
+                "code": "missing_ocr_coverage",
+                "severity": "high",
+                "ref": artifact_id,
+                "message": f"{artifact_id} is missing required OCR coverage.",
+            }
+        )
+    if "table" in coverage_missing:
+        findings.append(
+            {
+                "code": "missing_table_coverage",
+                "severity": "high",
+                "ref": artifact_id,
+                "message": f"{artifact_id} is missing required table coverage.",
             }
         )
     citations = list(artifact.get("citations") or [])
@@ -218,6 +252,30 @@ def _matching_records(
             continue
         if _matches_focus(record, focus):
             matches.append(record)
+    return matches
+
+
+def _matching_artifacts(
+    artifacts: list[dict[str, Any]],
+    *,
+    project: str,
+    focus: list[str] | None,
+    document_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for artifact in artifacts:
+        record_project = str(artifact.get("project") or "").strip()
+        if record_project and record_project != project:
+            continue
+        document_id = str(artifact.get("document_id") or "")
+        if not (_matches_focus(artifact, focus) or document_id in document_by_id):
+            continue
+        artifact_id = str(artifact.get("artifact_id") or id(artifact))
+        if artifact_id in seen:
+            continue
+        seen.add(artifact_id)
+        matches.append(artifact)
     return matches
 
 

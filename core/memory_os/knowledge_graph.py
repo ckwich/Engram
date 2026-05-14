@@ -20,13 +20,19 @@ def build_graph_evidence(
     max_records: int = 12,
 ) -> dict[str, Any]:
     """Build bounded graph evidence without loading neighbor memory bodies."""
-    edges = _matching_edges(
+    stored_edges = _matching_edges(
         list_records(ledger, "graph_edges"),
         project=project,
         focus=focus,
-    )[: max(int(max_records), 1)]
+    )
+    draft_edges = _matching_draft_graph_proposals(
+        list_records(ledger, "drafts"),
+        project=project,
+        focus=focus,
+    )
+    edges = (stored_edges + draft_edges)[: max(int(max_records), 1)]
     if not edges:
-        return _no_answer("No graph edges matched the requested evidence packet.")
+        return _no_answer("No graph edges or draft graph proposals matched the requested evidence packet.")
 
     paths = [_path_payload(index, edge) for index, edge in enumerate(edges, start=1)]
     contradictions = [
@@ -47,6 +53,7 @@ def build_graph_evidence(
         "project": project,
         "path_limit": max(int(max_records), 1),
         "edge_count": len(edges),
+        "draft_proposal_count": sum(1 for edge in edges if edge.get("status") == "draft"),
         "evidence_paths": paths,
         "contradiction_count": len(contradictions),
         "contradictions": contradictions,
@@ -99,6 +106,34 @@ def _matching_edges(
         if _matches_focus(edge, focus):
             matches.append(edge)
     return matches
+
+
+def _matching_draft_graph_proposals(
+    drafts: list[dict[str, Any]],
+    *,
+    project: str,
+    focus: list[str] | None,
+) -> list[dict[str, Any]]:
+    proposals: list[dict[str, Any]] = []
+    for draft in drafts:
+        draft_project = str(draft.get("project") or "").strip()
+        if draft_project and draft_project != project:
+            continue
+        for edge in draft.get("candidate_graph_edges") or []:
+            if not isinstance(edge, dict):
+                continue
+            proposal = {
+                **edge,
+                "edge_id": edge.get("edge_id") or edge.get("proposal_id"),
+                "status": edge.get("status") or "draft",
+                "created_by": edge.get("created_by") or draft.get("created_by"),
+                "created_at": edge.get("created_at") or draft.get("created_at"),
+                "updated_at": edge.get("updated_at") or draft.get("updated_at"),
+                "project": draft_project or edge.get("project"),
+            }
+            if _matches_focus(proposal, focus) or _matches_focus(draft, focus):
+                proposals.append(proposal)
+    return proposals
 
 
 def _path_payload(index: int, edge: dict[str, Any]) -> dict[str, Any]:

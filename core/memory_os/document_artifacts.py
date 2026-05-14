@@ -269,6 +269,7 @@ def _artifact_record(
         else None,
     }
     source_sha256 = str(source.get("content_hash") or review_packet.get("source", {}).get("sha256") or "")
+    source_uri = str(source.get("source_uri") or review_packet.get("source", {}).get("source_uri") or "")
     artifact_id = stable_id(
         "doc_artifact",
         {
@@ -291,6 +292,14 @@ def _artifact_record(
             if isinstance(page, dict)
         ],
         "coverage_receipt": coverage_receipt,
+        "citations": [
+            {
+                "level": "document",
+                "source": "memory_os",
+                "document_id": document.get("document_id"),
+                "source_ref": source_uri,
+            }
+        ],
         "created_by_tool": "store_document_artifact",
         "created_at": now_iso(),
         "review_state": review_state,

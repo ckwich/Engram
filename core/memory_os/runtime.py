@@ -810,7 +810,7 @@ def _orientation_response(
         freshness={"state": "fresh", "source_snapshot_id": "memory_os:latest"},
         budget_used={
             "artifacts_built": 0,
-            "artifacts_read": 0,
+            "artifacts_read": int(orientation.get("artifacts_read") or 0),
             "source_reads": int(orientation.get("source_reads") or 0),
             "tokens_out_estimate": len(str(answer)) // 4,
         },

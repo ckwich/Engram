@@ -77,16 +77,22 @@ def build_document_orientation(
         return _no_answer("No document records matched the requested orientation.")
     chunks = list_records(ledger, "chunks")
     receipts = list_records(ledger, "retrieval_receipts")
+    artifacts = _matching_document_artifacts(
+        list_records(ledger, "knowledge_artifacts"),
+        document_ids={str(document.get("document_id") or "") for document in documents},
+    )
     limited_documents = documents[: max(int(max_records), 1)]
     summaries, omissions = _document_summaries(
         limited_documents,
         chunks=chunks,
         receipts=receipts,
+        artifacts=artifacts,
     )
     answer = {
         "orientation_type": "document_orientation",
         "project": project,
         "document_count": len(summaries),
+        "document_evidence_artifact_count": len(artifacts),
         "chunk_count": sum(int(document["chunk_count"]) for document in summaries),
         "documents": summaries,
     }
@@ -95,6 +101,7 @@ def build_document_orientation(
         citations=_document_citations(summaries),
         omissions=omissions,
         source_reads=len(limited_documents) + _related_read_count(summaries),
+        artifacts_read=len(artifacts),
     )
 
 
@@ -104,6 +111,7 @@ def _orientation_result(
     citations: list[dict[str, Any]],
     omissions: list[dict[str, str]],
     source_reads: int,
+    artifacts_read: int = 0,
 ) -> dict[str, Any]:
     status = "partial" if omissions else "ok"
     return {
@@ -113,6 +121,7 @@ def _orientation_result(
         "omissions": omissions,
         "errors": [dict(ORIENTATION_INCOMPLETE_ERROR)] if omissions else [],
         "source_reads": source_reads,
+        "artifacts_read": artifacts_read,
     }
 
 
@@ -132,6 +141,7 @@ def _document_summaries(
     *,
     chunks: list[dict[str, Any]],
     receipts: list[dict[str, Any]],
+    artifacts: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     summaries: list[dict[str, Any]] = []
     omissions: list[dict[str, str]] = []
@@ -142,6 +152,11 @@ def _document_summaries(
             (receipt for receipt in receipts if str(receipt.get("document_id") or "") == document_id),
             None,
         )
+        doc_artifacts = [
+            artifact
+            for artifact in artifacts or []
+            if str(artifact.get("document_id") or "") == document_id
+        ]
         if not doc_chunks:
             omissions.append(
                 {
@@ -165,6 +180,7 @@ def _document_summaries(
                 "source_type": source_ref.get("source_type"),
                 "page_count": _page_count(document, coverage),
                 "chunk_count": len(doc_chunks),
+                "document_evidence_artifact_count": len(doc_artifacts),
                 "coverage": _coverage_summary(coverage),
             }
         )
@@ -249,6 +265,19 @@ def _matching_documents(
         if _matches_focus(record, focus) or _source_uri(record) in source_uris:
             matches.append(record)
     return matches
+
+
+def _matching_document_artifacts(
+    artifacts: list[dict[str, Any]],
+    *,
+    document_ids: set[str],
+) -> list[dict[str, Any]]:
+    return [
+        artifact
+        for artifact in artifacts
+        if str(artifact.get("document_id") or "") in document_ids
+        and str(artifact.get("artifact_type") or "") == "document_evidence"
+    ]
 
 
 def _matches_project(record: dict[str, Any], project: str) -> bool:

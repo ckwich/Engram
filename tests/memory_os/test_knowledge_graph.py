@@ -85,6 +85,48 @@ def test_build_graph_evidence_surfaces_contradictions_as_partial(tmp_path):
     ]
 
 
+def test_build_graph_evidence_surfaces_draft_graph_proposals_without_neighbor_bodies(tmp_path):
+    ledger = MemoryOSLedger(tmp_path / "ledger.sqlite3")
+    upsert_record(
+        ledger,
+        "drafts",
+        "draft:doc",
+        {
+            "draft_id": "draft:doc",
+            "project": "Engram",
+            "document_id": "doc_design",
+            "candidate_graph_edges": [
+                {
+                    "proposal_id": "proposal:one",
+                    "from_ref": {"kind": "document", "key": "doc_design"},
+                    "to_ref": {"kind": "claim", "key": "motion_priority"},
+                    "edge_type": "contradicts",
+                    "confidence": 0.72,
+                    "evidence": "Draft says the book contradicts a stale claim.",
+                    "source": "document_intelligence.auto_graph",
+                    "status": "draft",
+                    "content": "This draft body must not be exposed.",
+                }
+            ],
+        },
+    )
+
+    packet = build_graph_evidence(
+        ledger,
+        project="Engram",
+        focus=["motion"],
+        max_records=5,
+    )
+
+    edge = packet["answer"]["evidence_paths"][0]["edges"][0]
+    assert packet["status"] == "partial"
+    assert packet["answer"]["draft_proposal_count"] == 1
+    assert edge["edge_id"] == "proposal:one"
+    assert edge["status"] == "draft"
+    assert "content" not in edge
+    assert packet["answer"]["contradiction_count"] == 1
+
+
 def test_build_graph_evidence_returns_no_answer_without_matching_edges(tmp_path):
     packet = build_graph_evidence(
         MemoryOSLedger(tmp_path / "ledger.sqlite3"),
