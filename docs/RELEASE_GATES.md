@@ -4,7 +4,8 @@ This file is the short, executable gate map for Engram maintenance work. Use it
 before building EKC on top of the repo, and use the longer
 `docs/ENGRAM_MEMORY_OS_1_0_RELEASE_CHECKLIST.md` before calling a branch
 Engram 1.0 ready. The current stability-tier summary lives in
-`docs/ENGRAM_CURRENT_STATUS.md`.
+`docs/ENGRAM_CURRENT_STATUS.md`; the local release-candidate checkpoint lives in
+`docs/ENGRAM_LOCAL_1_0_RELEASE_CANDIDATE.md`.
 
 ## Gate Levels
 

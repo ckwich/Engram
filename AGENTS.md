@@ -7,7 +7,7 @@ This file governs how AI agents (Codex, Claude Code, etc.) interact with the Eng
 Engram 1.0 is now the full local-first, agent-facing Memory OS rebuild exposed through MCP. The target stack is `engramd` owning a SQLite ledger, content-addressed source store, LanceDB retrieval, Kuzu graph storage, embeddings, jobs, transactions, snapshots, and repairs, with thin MCP clients as the normal multi-session agent entrypoint. The current JSON/Chroma runtime is legacy compatibility and migration input; keep it recoverable while daemon-owned Memory OS services become the normal stable path.
 
 ## Required Reading Before Changes
-Always read `plan.md`, `docs/ENGRAM_CURRENT_STATUS.md`, and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifying core architecture. The active final-stabilization plan is `docs/superpowers/plans/2026-05-14-engram-final-stabilization-plan.md`; the earlier Memory OS rebuild plan at `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md` remains implementation history. Archived local-core 1.0 docs under `docs/archive/legacy-local-core-1-0/` are historical only and must not be treated as the current roadmap.
+Always read `plan.md`, `docs/ENGRAM_CURRENT_STATUS.md`, `docs/ENGRAM_LOCAL_1_0_RELEASE_CANDIDATE.md`, and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifying core architecture. The active final-stabilization plan is `docs/superpowers/plans/2026-05-14-engram-final-stabilization-plan.md`; the earlier Memory OS rebuild plan at `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md` remains implementation history. Archived local-core 1.0 docs under `docs/archive/legacy-local-core-1-0/` are historical only and must not be treated as the current roadmap.
 
 ## File Responsibilities
 

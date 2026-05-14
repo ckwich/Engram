@@ -12,6 +12,8 @@ Engram 1.0 is a local Model Context Protocol (MCP) server that gives AI agents a
 The rebuilt 1.0 runtime uses a daemon-owned SQLite ledger, content-addressed source artifacts, LanceDB retrieval, and Kuzu graph storage. Legacy JSON memories and ChromaDB remain as compatibility and migration inputs until every caller is moved through the rebuilt runtime.
 
 Current status by stability tier lives in `docs/ENGRAM_CURRENT_STATUS.md`.
+The current local 1.0 release-candidate checkpoint is
+`docs/ENGRAM_LOCAL_1_0_RELEASE_CANDIDATE.md`.
 
 Engram is built around one simple idea: agents should retrieve the smallest useful context first, then expand only when needed.
 

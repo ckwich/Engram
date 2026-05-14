@@ -5,6 +5,8 @@ Date: 2026-05-14
 This page is the short operational truth for the current Engram repo. For the
 full architecture, see `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`; for executable
 release gates, see `docs/RELEASE_GATES.md`.
+The local release-candidate checkpoint is
+`docs/ENGRAM_LOCAL_1_0_RELEASE_CANDIDATE.md`.
 
 ## Stable
 
