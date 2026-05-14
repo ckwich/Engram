@@ -5,6 +5,7 @@ finish line. They are retained for historical context only.
 
 The active Engram 1.0 target is now the Memory OS rebuild described in:
 
+- `docs/ENGRAM_CURRENT_STATUS.md`
 - `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 
 In the rebuild target, SQLite ledger, content-addressed source storage, LanceDB

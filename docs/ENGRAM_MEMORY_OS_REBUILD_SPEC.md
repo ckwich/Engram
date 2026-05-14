@@ -4,6 +4,7 @@ Status: Canonical Engram 1.0 rebuild spec
 Date: 2026-05-11
 Updated: 2026-05-13
 Scope: Public, generic, local-first, agent-facing persistent memory system
+Operational status: see `docs/ENGRAM_CURRENT_STATUS.md`
 
 ## Executive Summary
 

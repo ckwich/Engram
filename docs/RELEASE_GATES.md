@@ -3,7 +3,8 @@
 This file is the short, executable gate map for Engram maintenance work. Use it
 before building EKC on top of the repo, and use the longer
 `docs/ENGRAM_MEMORY_OS_1_0_RELEASE_CHECKLIST.md` before calling a branch
-Engram 1.0 ready.
+Engram 1.0 ready. The current stability-tier summary lives in
+`docs/ENGRAM_CURRENT_STATUS.md`.
 
 ## Gate Levels
 
@@ -87,7 +88,8 @@ Expected:
   visual/OCR/table coverage receipts, explicit artifact storage, and EKC
   document/evidence responses.
 - The full pytest suite passes.
-- `docs/ENGRAM_MEMORY_OS_1_0_RELEASE_CHECKLIST.md`, README, AGENTS, `plan.md`,
+- `docs/ENGRAM_CURRENT_STATUS.md`,
+  `docs/ENGRAM_MEMORY_OS_1_0_RELEASE_CHECKLIST.md`, README, AGENTS, `plan.md`,
   and the rebuild spec still describe the same local-first Memory OS target.
 
 ## Backend Promotion Rule

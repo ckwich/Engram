@@ -11,6 +11,8 @@ Engram 1.0 is a local Model Context Protocol (MCP) server that gives AI agents a
 
 The rebuilt 1.0 runtime uses a daemon-owned SQLite ledger, content-addressed source artifacts, LanceDB retrieval, and Kuzu graph storage. Legacy JSON memories and ChromaDB remain as compatibility and migration inputs until every caller is moved through the rebuilt runtime.
 
+Current status by stability tier lives in `docs/ENGRAM_CURRENT_STATUS.md`.
+
 Engram is built around one simple idea: agents should retrieve the smallest useful context first, then expand only when needed.
 
 ---
@@ -128,6 +130,17 @@ beyond the orientation, review, audit, graph, or artifact-family packet.
 ## MCP Tool Surface
 
 Engram exposes structured MCP tools first. Text wrappers remain available for older clients, but new integrations should prefer the structured tools.
+
+Agent key and size guidance:
+
+- Avoid forward-slash characters in durable memory keys. Use readable
+  snake_case keys such as `engram_final_stabilization_slice_1_status_2026_05_14`
+  so filesystem-backed compatibility paths and other tools do not interpret a
+  key as a nested path.
+- Keep direct memory write content under the 15K server-side request guidance.
+  For larger source material, use chunk preview, source intake, document intake,
+  or artifact workflows so reviewers see coverage and omissions before
+  promotion.
 
 Product release identity and protocol identity are intentionally separate:
 `memory_protocol()` reports product version `1.0.0`, protocol `version: 2`,
@@ -787,6 +800,7 @@ Post-1.0 work is hosted/commercial packaging: hosted sync, tenant auth, billing,
 
 Planning docs:
 
+- `docs/ENGRAM_CURRENT_STATUS.md`
 - `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md`
 - `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md`
 - `docs/RELEASE_GATES.md`

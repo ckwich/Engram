@@ -7,7 +7,7 @@ This file governs how AI agents (Codex, Claude Code, etc.) interact with the Eng
 Engram 1.0 is now the full local-first, agent-facing Memory OS rebuild exposed through MCP. The target stack is `engramd` owning a SQLite ledger, content-addressed source store, LanceDB retrieval, Kuzu graph storage, embeddings, jobs, transactions, snapshots, and repairs, with thin MCP clients as the normal multi-session agent entrypoint. The current JSON/Chroma runtime is legacy compatibility and migration input; keep it recoverable while daemon-owned Memory OS services become the normal stable path.
 
 ## Required Reading Before Changes
-Always read `plan.md` and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifying core architecture. The active implementation plan is `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md`. Archived local-core 1.0 docs under `docs/archive/legacy-local-core-1-0/` are historical only and must not be treated as the current roadmap.
+Always read `plan.md`, `docs/ENGRAM_CURRENT_STATUS.md`, and `docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md` before modifying core architecture. The active final-stabilization plan is `docs/superpowers/plans/2026-05-14-engram-final-stabilization-plan.md`; the earlier Memory OS rebuild plan at `docs/superpowers/plans/2026-05-13-engram-memory-os-rebuild-1-0-plan.md` remains implementation history. Archived local-core 1.0 docs under `docs/archive/legacy-local-core-1-0/` are historical only and must not be treated as the current roadmap.
 
 ## File Responsibilities
 
@@ -65,6 +65,14 @@ stdout corruption breaks MCP stdio transport. Use `sys.stderr` for debug output 
 
 ### Chunk IDs are stable references
 Chunk IDs use `{md5(key)}_{chunk_index}` format. Agents store these references. Never change the ID format without a migration.
+
+### Memory keys and request size
+Use human-readable durable memory keys and avoid forward-slash characters in
+keys. Slash-like path keys can collide with filesystem-backed compatibility
+storage and make repo handoffs harder for humans to inspect. Keep direct memory
+write content under the 15K server-side request guidance; use source intake,
+document intake, artifact storage, or chunk preview workflows for larger
+material so review coverage stays explicit.
 
 ### Graph edge records are migration contracts
 Graph edges are durable migration data. Keep `from_ref`, `to_ref`, `edge_type`, `confidence`, `evidence`, `source`, `status`, `created_by`, `created_at`, `updated_at`, and `edge_id` stable unless a migration is provided. New graph storage backends must implement the `GraphStore` load/save contract before replacing JSON. Cross-document/book concept links are first-class graph data; use typed edges such as `related_to`, `same_as`, `similar_to`, `extends`, `refines`, `applies_to`, `synthesizes`, `supports`, `contradicts`, `example_of`, `illustrates`, and `cites` with source/document refs and evidence.

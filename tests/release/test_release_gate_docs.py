@@ -39,3 +39,22 @@ def test_user_facing_docs_link_to_release_gates() -> None:
     assert "tests\\architecture" in checklist
     assert "tests\\backend_gates" in checklist
     assert "pre-EKC readiness lane" in agents
+
+
+def test_user_facing_docs_link_to_current_status() -> None:
+    readme = _read("README.md")
+    agents = _read("AGENTS.md")
+    gates = _read("docs/RELEASE_GATES.md")
+    spec = _read("docs/ENGRAM_MEMORY_OS_REBUILD_SPEC.md")
+
+    for doc in (readme, agents, gates, spec):
+        assert "docs/ENGRAM_CURRENT_STATUS.md" in doc
+
+
+def test_agent_docs_include_key_and_size_guidance() -> None:
+    readme = _read("README.md")
+    agents = _read("AGENTS.md")
+
+    for doc in (readme, agents):
+        assert "forward-slash" in doc
+        assert "15K" in doc

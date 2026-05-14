@@ -131,8 +131,9 @@ Agents should always start at tier 1 and escalate only when needed.
       silently truncate or error before submission.
 
 ### Engram Protocol
-- [ ] Add v0.4 section to AGENTS.md template with forward-slash key warning
-      and 15K char guidance baked in as defaults
+- [x] Add v0.4 section to AGENTS.md template with forward-slash key warning
+      and 15K char guidance baked in as defaults. Completed in the final
+      stabilization status-doc slice; README and AGENTS now carry the guidance.
 
 ### Reliability
 - [x] Add integration test: store → search → retrieve_chunk → delete cycle
