@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import inspect
+
+import server_daemon_client
+
 from core.chunk_preview import preview_memory_chunks
 from core.context_compiler import list_context_profiles
 from core.document_artifacts import build_document_artifact_manifest
@@ -101,6 +105,17 @@ def test_document_evidence_payloads_report_no_active_memory_writes(tmp_path):
 
     for operation, payload in payloads.items():
         assert_write_policy_metadata(payload, operation=operation)
+
+
+def test_apply_document_promotion_transaction_advertises_write_contract():
+    doc = inspect.getdoc(server_daemon_client.apply_document_promotion_transaction) or ""
+    protocol = server_daemon_client.memory_protocol()
+
+    assert "write" in doc.lower()
+    assert "accept=True" in doc
+    assert "explicit" in doc.lower()
+    assert "apply_document_promotion_transaction" in protocol["document_workflow"]
+    assert "apply_document_promotion_transaction" in protocol["canonical_tools"]
 
 
 def test_project_capsule_draft_reports_review_required_no_write_contract():

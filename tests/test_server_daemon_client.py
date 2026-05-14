@@ -20,6 +20,7 @@ STABLE_DOCUMENT_WORKFLOW = [
     "prepare_document_understanding_packet",
     "prepare_document_draft",
     "prepare_document_promotion_transaction",
+    "apply_document_promotion_transaction",
 ]
 
 
@@ -207,6 +208,16 @@ class FakeDaemonClient:
     def prepare_document_promotion_transaction(self, payload):
         self.calls.append(("prepare_document_promotion_transaction", payload))
         return {"transaction": {"approved_by": payload["approved_by"]}, "error": None}
+
+    def apply_document_promotion_transaction(self, payload):
+        self.calls.append(("apply_document_promotion_transaction", payload))
+        return {
+            "status": "ok" if payload.get("accept") else "policy_denied",
+            "write_performed": bool(payload.get("accept")),
+            "active_memory_write_performed": bool(payload.get("accept")),
+            "graph_write_performed": False,
+            "error": None,
+        }
 
     def prepare_document_artifact_store(self, payload):
         self.calls.append(("prepare_document_artifact_store", payload))
@@ -605,6 +616,14 @@ def test_document_intelligence_tools_use_daemon_when_configured(monkeypatch):
             selected_memory_indexes=[0],
         )
     )
+    asyncio.run(
+        server.apply_document_promotion_transaction(
+            {"transaction_id": "doc_promote_1"},
+            accept=True,
+            approved_by="reviewer",
+            selected_operation_indexes=[0],
+        )
+    )
 
     assert [call[0] for call in client.calls] == [
         "list_document_extractors",
@@ -618,6 +637,7 @@ def test_document_intelligence_tools_use_daemon_when_configured(monkeypatch):
         "prepare_document_understanding_packet",
         "prepare_document_draft",
         "prepare_document_promotion_transaction",
+        "apply_document_promotion_transaction",
     ]
 
 
@@ -660,10 +680,16 @@ def test_daemon_client_protocol_advertises_stable_document_workflow():
 
 
 def test_daemon_client_document_tool_docstrings_preserve_no_write_contract():
-    for tool_name in STABLE_DOCUMENT_WORKFLOW:
+    write_tools = {"apply_document_promotion_transaction"}
+    for tool_name in [tool for tool in STABLE_DOCUMENT_WORKFLOW if tool not in write_tools]:
         doc = inspect.getdoc(getattr(server_daemon_client, tool_name))
 
         assert doc is not None
         normalized = doc.lower()
         assert "no-write" in normalized or "does not write" in normalized
         assert "promot" in normalized
+
+    apply_doc = inspect.getdoc(server_daemon_client.apply_document_promotion_transaction) or ""
+    assert "write" in apply_doc.lower()
+    assert "accept=True" in apply_doc
+    assert "explicit" in apply_doc.lower()

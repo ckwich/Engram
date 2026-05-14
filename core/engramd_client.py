@@ -120,6 +120,9 @@ class EngramDaemonClient:
     def prepare_document_promotion_transaction(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/prepare_document_promotion_transaction", payload)
 
+    def apply_document_promotion_transaction(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/apply_document_promotion_transaction", payload)
+
     def prepare_document_artifact_store(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/prepare_document_artifact_store", payload)
 

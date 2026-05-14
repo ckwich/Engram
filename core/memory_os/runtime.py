@@ -39,6 +39,9 @@ from core.memory_os.knowledge_orientations import (
 )
 from core.memory_os.knowledge_planner import build_planner_receipt
 from core.memory_os.knowledge_review import build_review_preparation
+from core.memory_os.document_promotion import (
+    apply_document_promotion_transaction as apply_reviewed_document_promotion,
+)
 from core.memory_os.project_capsule_artifact import build_project_capsule_artifact
 from core.memory_os.retrieval import MemoryOSRetrievalIndex
 from core.memory_os.snapshots import SnapshotService
@@ -488,6 +491,24 @@ class MemoryOSRuntime:
             prepared_transaction_id,
             accept=accept,
             review_packet=review_packet,
+        )
+
+    def apply_document_promotion_transaction(
+        self,
+        document_promotion_transaction: dict[str, Any],
+        *,
+        accept: bool = False,
+        approved_by: str | None = None,
+        selected_operation_indexes: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Apply reviewed document draft promotion writes after explicit acceptance."""
+        return apply_reviewed_document_promotion(
+            self.ledger,
+            self,
+            document_promotion_transaction,
+            accept=accept,
+            approved_by=approved_by,
+            selected_operation_indexes=selected_operation_indexes,
         )
 
     def _build_project_capsule_artifact(self, normalized: dict[str, Any]) -> dict[str, Any]:

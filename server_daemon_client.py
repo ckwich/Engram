@@ -52,6 +52,7 @@ STABLE_DOCUMENT_WORKFLOW = [
     "prepare_document_understanding_packet",
     "prepare_document_draft",
     "prepare_document_promotion_transaction",
+    "apply_document_promotion_transaction",
 ]
 DOCUMENT_ARTIFACT_WORKFLOW = [
     "prepare_document_artifact_store",
@@ -908,6 +909,32 @@ async def prepare_document_promotion_transaction(
     except EngramDaemonClientError as exc:
         return {
             "transaction": None,
+            "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+        }
+
+
+@mcp.tool()
+async def apply_document_promotion_transaction(
+    document_promotion_transaction: dict[str, Any],
+    accept: bool = False,
+    approved_by: str | None = None,
+    selected_operation_indexes: list[int] | None = None,
+) -> dict[str, Any]:
+    """Apply reviewed document promotion writes; requires explicit accept=True."""
+    payload = {
+        "document_promotion_transaction": document_promotion_transaction,
+        "accept": accept,
+        "approved_by": approved_by,
+        "selected_operation_indexes": selected_operation_indexes,
+    }
+    try:
+        return await _call_daemon("apply_document_promotion_transaction", payload)
+    except EngramDaemonClientError as exc:
+        return {
+            "status": "unavailable",
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "graph_write_performed": False,
             "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
         }
 

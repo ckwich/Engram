@@ -103,6 +103,7 @@ def test_client_document_methods_map_to_stable_daemon_routes():
     client.prepare_document_understanding_packet({"document_record": {}, "analysis": {}})
     client.prepare_document_draft({"document_record": {}, "analysis": {}})
     client.prepare_document_promotion_transaction({"document_draft": {}, "approved_by": "reviewer"})
+    client.apply_document_promotion_transaction({"document_promotion_transaction": {}, "accept": True})
     client.prepare_document_artifact_store({"review_packet": {}})
     client.store_document_artifact({"prepared_transaction_id": "txn", "accept": True})
 
@@ -119,6 +120,7 @@ def test_client_document_methods_map_to_stable_daemon_routes():
         "prepare_document_understanding_packet",
         "prepare_document_draft",
         "prepare_document_promotion_transaction",
+        "apply_document_promotion_transaction",
         "prepare_document_artifact_store",
         "store_document_artifact",
     ]

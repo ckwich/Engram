@@ -209,6 +209,8 @@ class EngramDaemonAPI:
                     request,
                     result_key="transaction",
                 )
+            if route == "/v1/apply_document_promotion_transaction":
+                return await self._apply_document_promotion_transaction(request)
             if route == "/v1/prepare_document_artifact_store":
                 return await self._prepare_document_artifact_store(request)
             if route == "/v1/store_document_artifact":
@@ -268,6 +270,22 @@ class EngramDaemonAPI:
                 str(request.get("prepared_transaction_id") or ""),
                 accept=bool(request.get("accept", False)),
                 review_packet=request.get("review_packet"),
+            )
+        )
+
+    async def _apply_document_promotion_transaction(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.memory_os_runtime is None:
+            return self._error(
+                503,
+                "memory_os_unavailable",
+                "apply_document_promotion_transaction requires daemon-owned Memory OS runtime.",
+            )
+        return self._ok(
+            self.memory_os_runtime.apply_document_promotion_transaction(
+                request.get("document_promotion_transaction") or {},
+                accept=bool(request.get("accept", False)),
+                approved_by=_optional_text(request.get("approved_by")),
+                selected_operation_indexes=request.get("selected_operation_indexes"),
             )
         )
 

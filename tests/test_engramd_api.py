@@ -346,6 +346,33 @@ class FakeMemoryOSRuntime:
             "error": None,
         }
 
+    def apply_document_promotion_transaction(
+        self,
+        document_promotion_transaction,
+        *,
+        accept=False,
+        approved_by=None,
+        selected_operation_indexes=None,
+    ):
+        self.calls.append(
+            (
+                "apply_document_promotion_transaction",
+                {
+                    "document_promotion_transaction": document_promotion_transaction,
+                    "accept": accept,
+                    "approved_by": approved_by,
+                    "selected_operation_indexes": selected_operation_indexes,
+                },
+            )
+        )
+        return {
+            "status": "ok" if accept else "policy_denied",
+            "write_performed": bool(accept),
+            "active_memory_write_performed": bool(accept),
+            "graph_write_performed": False,
+            "error": None,
+        }
+
     def record_document_disassembly_job(self, disassembly, *, request):
         self.calls.append(
             (
@@ -782,6 +809,67 @@ def test_document_artifact_routes_delegate_to_memory_os_runtime():
             },
         ),
     ]
+
+
+def test_apply_document_promotion_route_delegates_to_memory_os_runtime():
+    runtime = FakeMemoryOSRuntime()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        memory_os_runtime=runtime,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/apply_document_promotion_transaction",
+        {
+            "document_promotion_transaction": {"transaction_id": "doc_promote_1"},
+            "accept": True,
+            "approved_by": "agent-review",
+            "selected_operation_indexes": [0],
+        },
+    )
+
+    assert response["status"] == 200
+    assert response["body"]["write_performed"] is True
+    assert runtime.calls[-1] == (
+        "apply_document_promotion_transaction",
+        {
+            "document_promotion_transaction": {"transaction_id": "doc_promote_1"},
+            "accept": True,
+            "approved_by": "agent-review",
+            "selected_operation_indexes": [0],
+        },
+    )
+
+
+def test_apply_document_promotion_route_preserves_selected_operation_schema_for_executor():
+    runtime = FakeMemoryOSRuntime()
+    api = EngramDaemonAPI(
+        memory_manager=FakeMemoryManager(),
+        memory_os_runtime=runtime,
+    )
+
+    response = api.handle(
+        "POST",
+        "/v1/apply_document_promotion_transaction",
+        {
+            "document_promotion_transaction": {"transaction_id": "doc_promote_bad_index"},
+            "accept": True,
+            "approved_by": "agent-review",
+            "selected_operation_indexes": ["0"],
+        },
+    )
+
+    assert response["status"] == 200
+    assert runtime.calls[-1] == (
+        "apply_document_promotion_transaction",
+        {
+            "document_promotion_transaction": {"transaction_id": "doc_promote_bad_index"},
+            "accept": True,
+            "approved_by": "agent-review",
+            "selected_operation_indexes": ["0"],
+        },
+    )
 
 
 def test_memory_os_status_routes_to_runtime_container():

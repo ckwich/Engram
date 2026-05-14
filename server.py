@@ -1056,6 +1056,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                     "prepare_document_extraction_result",
                     "prepare_document_understanding_packet",
                     "prepare_document_promotion_transaction",
+                    "apply_document_promotion_transaction",
                     "prepare_visual_extraction_request",
                     "preview_document_source_connector",
                     "preview_document_extraction",
@@ -1179,6 +1180,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "document draft": "prepare_document_draft",
                 "document understanding": "prepare_document_understanding_packet",
                 "document promotion": "prepare_document_promotion_transaction",
+                "document promotion acceptance": "apply_document_promotion_transaction",
                 "document artifact store": "prepare_document_artifact_store",
                 "document artifact acceptance": "store_document_artifact",
                 "visual extraction request": "prepare_visual_extraction_request",
@@ -1219,6 +1221,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_document_draft": "Prepare a no-write document draft with proposed memories and graph edges.",
             "prepare_document_understanding_packet": "Normalize agent-supplied document understanding into reviewable summary slots, claim/concept/entity candidates, high-value sections, low-confidence warnings, draft memory proposals, and supplied plus auto-generated coverage graph edge proposals.",
             "prepare_document_promotion_transaction": "Prepare a no-write operation plan for reviewed document draft promotion.",
+            "apply_document_promotion_transaction": "Apply reviewed document promotion memory or graph writes only after explicit accept=True.",
             "prepare_document_artifact_store": "Prepare an explicit reviewed document evidence artifact-store transaction; no active memory or graph edges are promoted.",
             "store_document_artifact": "Store ledgered document evidence artifacts only when accept=True and the matching reviewed packet is supplied again; active memories and graph edges remain untouched.",
             "prepare_visual_extraction_request": "Prepare a no-write OCR/vision work request for image-bearing documents; visual interpretation and per-image-ref coverage are required before draft promotion.",
@@ -2443,6 +2446,54 @@ async def prepare_document_promotion_transaction(
             "error": _tool_error("runtime_error", f"Unexpected document promotion failure: {e}"),
         }
     _record_usage_for_payload("prepare_document_promotion_transaction", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def apply_document_promotion_transaction(
+    document_promotion_transaction: dict[str, Any],
+    accept: bool = False,
+    approved_by: str | None = None,
+    selected_operation_indexes: list[int] | None = None,
+) -> dict[str, Any]:
+    """
+    Apply reviewed document promotion writes after explicit accept=True.
+
+    This is a write tool. It executes selected memory and graph operations from
+    a reviewed document promotion transaction through the daemon-owned Memory OS
+    runtime. Direct in-process mode returns unavailable instead of writing.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_promotion_transaction": document_promotion_transaction,
+        "accept": accept,
+        "approved_by": approved_by,
+        "selected_operation_indexes": selected_operation_indexes,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("apply_document_promotion_transaction", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("apply_document_promotion_transaction", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "apply_document_promotion_transaction requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("apply_document_promotion_transaction", input_payload, payload, started_at)
     return payload
 
 
