@@ -336,18 +336,24 @@ Run:
 
 ```powershell
 .\venv\Scripts\python.exe -m pytest tests\memory_os\test_knowledge_eval.py tests\memory_os\test_runtime.py tests\test_agent_protocol_tools.py -q
+$env:ENGRAM_DATA_DIR = Join-Path $env:TEMP ("engram-slice2-agent-eval-" + [guid]::NewGuid().ToString("N"))
 .\venv\Scripts\python.exe server.py --agent-eval
+$exitCode = $LASTEXITCODE
+Remove-Item Env:\ENGRAM_DATA_DIR
+if ($exitCode -ne 0) { exit $exitCode }
 git diff --check
 ```
 
-Expected: focused tests pass; `server.py --agent-eval` reports all retrieval and workflow checks passing.
+Expected: focused tests pass; isolated `server.py --agent-eval` reports all
+retrieval and workflow checks passing. Use an isolated `ENGRAM_DATA_DIR` when a
+live daemon owns the default Chroma store.
 
 - [ ] **Step 5: Commit and store progress**
 
 Run:
 
 ```powershell
-git add core/memory_os/knowledge_eval.py core/memory_os/runtime.py server.py server_daemon_client.py README.md AGENTS.md tests/memory_os/test_knowledge_eval.py tests/test_agent_protocol_tools.py
+git add core/memory_os/knowledge_eval.py core/memory_os/runtime.py server.py server_daemon_client.py README.md AGENTS.md docs/superpowers/plans/2026-05-14-engram-final-stabilization-plan.md tests/memory_os/test_knowledge_eval.py tests/memory_os/test_runtime.py tests/test_agent_protocol_tools.py
 git commit -m "test: complete EKC final eval coverage"
 ```
 

@@ -124,6 +124,9 @@ bundles, start with `query_knowledge` when available. It returns typed EKC 1.0
 responses on the compatibility `engram.knowledge.*.v0` envelope. Use
 `search_memories` and `retrieve_chunk` when you need lower-level evidence
 beyond the orientation, review, audit, graph, or artifact-family packet.
+The stable task list is advertised through `memory_protocol()` as
+`knowledge_contract.task_types` and must stay backed by
+`core.memory_os.knowledge_eval.DEFAULT_WORKFLOW_SCENARIOS`.
 
 ---
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.memory_os._records import upsert_record
 from core.memory_os.knowledge_contract import (
     REQUEST_SCHEMA_VERSION,
     RESPONSE_SCHEMA_VERSION,
@@ -78,6 +79,175 @@ DEFAULT_WORKFLOW_SCENARIOS = (
         "focus": ["evidence"],
     },
 )
+STABLE_EKC_TASK_TYPES = tuple(scenario["task_type"] for scenario in DEFAULT_WORKFLOW_SCENARIOS)
+
+
+def seed_knowledge_contract_eval_fixtures(runtime: Any, *, project: str) -> dict[str, Any]:
+    """Seed the smallest real Memory OS records needed for every EKC workflow."""
+    seeded: list[dict[str, str]] = []
+    runtime.store_memory(
+        key="ekc_eval_architecture_direction",
+        content=(
+            "# Architecture Direction\n\n"
+            "Engram architecture direction is daemon-owned Memory OS runtime. "
+            "Decision: keep query_knowledge stable task types tied to eval scenarios. "
+            "Reviewed writes stay explicit and local-first memory remains the product boundary."
+        ),
+        title="EKC Eval Architecture Direction",
+        tags=["ekc", "eval", "architecture", "decision", "reviewed"],
+        project=project,
+        domain="architecture",
+        status="accepted",
+        canonical=True,
+        force=True,
+    )
+    seeded.append({"table": "memories", "id": "ekc_eval_architecture_direction"})
+    runtime.store_memory(
+        key="ekc_eval_implementation_context",
+        content=(
+            "# Implementation Context\n\n"
+            "Implementation context for query_knowledge eval coverage. "
+            "Next step: keep protocol task_types synchronized with the EKC eval pack."
+        ),
+        title="EKC Eval Implementation Context",
+        tags=["ekc", "eval", "implementation"],
+        project=project,
+        domain="implementation",
+        status="accepted",
+        canonical=True,
+        force=True,
+    )
+    seeded.append({"table": "memories", "id": "ekc_eval_implementation_context"})
+
+    source_uri = "file:///eval/source_document_evidence.md"
+    document_id = "doc_eval_source_document_evidence"
+    upsert_record(
+        runtime.ledger,
+        "sources",
+        "source:ekc_eval",
+        {
+            "source_uri": source_uri,
+            "source_type": "markdown",
+            "title": "Source Document Evidence Review",
+            "project": project,
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "documents",
+        document_id,
+        {
+            "document_id": document_id,
+            "title": "Source Document Evidence Review",
+            "project": project,
+            "source_ref": {"source_uri": source_uri, "source_type": "markdown"},
+            "document": {"page_count": 1},
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "chunks",
+        f"{document_id}:chunk:0",
+        {
+            "chunk_record_id": f"{document_id}:chunk:0",
+            "document_id": document_id,
+            "memory_key": "ekc_eval_document_evidence",
+            "chunk_id": 0,
+            "project": project,
+            "domain": "document",
+            "status": "accepted",
+            "text": "Source document evidence supports review, entity, and claim coverage.",
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "retrieval_receipts",
+        f"coverage:{document_id}",
+        {
+            "coverage_map_id": f"coverage:{document_id}",
+            "document_id": document_id,
+            "page_count": 1,
+            "chunk_count": 1,
+            "claim_count": 1,
+            "visual_needed_pages": [],
+            "interpreted_visual_count": 0,
+            "low_confidence_region_count": 0,
+            "skipped_region_count": 0,
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "drafts",
+        "draft:ekc_eval_review",
+        {
+            "draft_id": "draft:ekc_eval_review",
+            "record_type": "document_draft",
+            "document_id": document_id,
+            "project": project,
+            "review_status": "candidate",
+            "promotion_required": True,
+            "proposed_memories": [{"key": "ekc_eval_review_memory"}],
+            "candidate_graph_edges": [
+                {
+                    "proposal_id": "proposal:ekc_eval_review_claim",
+                    "from_ref": {"kind": "document", "key": document_id},
+                    "to_ref": {"kind": "claim", "key": "ekc_eval_claim"},
+                    "edge_type": "supports",
+                    "confidence": 0.91,
+                    "evidence": "Review draft supports the EKC eval claim.",
+                    "source": "knowledge_eval.seed",
+                    "status": "draft",
+                }
+            ],
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "graph_edges",
+        "edge:ekc_eval_claim",
+        {
+            "edge_id": "edge:ekc_eval_claim",
+            "from_ref": {"kind": "claim", "key": "ekc_eval_claim"},
+            "to_ref": {"kind": "claim", "key": "query_knowledge_eval"},
+            "edge_type": "supports",
+            "confidence": 0.93,
+            "evidence": "Claim graph evidence supports stable query_knowledge eval coverage.",
+            "source": "knowledge_eval.seed",
+            "status": "active",
+            "created_by": "eval",
+            "created_at": "2026-05-14T00:00:00+00:00",
+            "updated_at": "2026-05-14T00:00:00+00:00",
+            "project": project,
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "entities",
+        "entity:ekc_eval_entity",
+        {
+            "entity_id": "entity:ekc_eval_entity",
+            "canonical_name": "Entity Evaluation Concept",
+            "entity_type": "concept",
+            "project": project,
+            "source_refs": [{"document_id": document_id, "source_ref": source_uri}],
+        },
+    )
+    seeded.extend(
+        [
+            {"table": "sources", "id": "source:ekc_eval"},
+            {"table": "documents", "id": document_id},
+            {"table": "chunks", "id": f"{document_id}:chunk:0"},
+            {"table": "retrieval_receipts", "id": f"coverage:{document_id}"},
+            {"table": "drafts", "id": "draft:ekc_eval_review"},
+            {"table": "graph_edges", "id": "edge:ekc_eval_claim"},
+            {"table": "entities", "id": "entity:ekc_eval_entity"},
+        ]
+    )
+    return {
+        "schema_version": "2026-05-14.ekc-eval-fixtures.v1",
+        "project": project,
+        "records": seeded,
+    }
 
 
 def run_project_orientation_eval(
@@ -241,6 +411,10 @@ def _run_ekc_workflow_scenario(
         }
     )
     validation = validate_knowledge_response(payload)
+    planner = payload.get("planner") if isinstance(payload.get("planner"), dict) else {}
+    planner_strategy = str(planner.get("strategy") or "")
+    active_memory_write_performed = bool(payload.get("active_memory_write_performed", False))
+    write_performed = bool(payload.get("write_performed", False))
     return {
         "scenario_id": scenario["scenario_id"],
         "task_type": task_type,
@@ -249,6 +423,11 @@ def _run_ekc_workflow_scenario(
         "has_citation": bool(payload.get("citations")),
         "schema_valid": validation["valid"],
         "schema_errors": validation.get("errors", []),
+        "planner_strategy": planner_strategy,
+        "planner_strategy_matches_task": planner_strategy == task_type,
+        "write_performed": write_performed,
+        "active_memory_write_performed": active_memory_write_performed,
+        "read_only": not active_memory_write_performed,
     }
 
 
@@ -272,11 +451,16 @@ def _summarize_ekc(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _summarize_workflows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     ok_or_partial_count = sum(1 for row in rows if row["status"] in {"ok", "partial"})
     schema_valid_rate = _rate(rows, "schema_valid")
-    citation_presence_rate = _rate(rows, "has_citation")
+    citation_required_rows = [row for row in rows if row["status"] in {"ok", "partial"}]
+    citation_presence_rate = _rate(citation_required_rows, "has_citation")
+    planner_strategy_match_rate = _rate(rows, "planner_strategy_matches_task")
+    active_memory_write_free_rate = _rate(rows, "read_only")
     passes = (
         ok_or_partial_count == len(rows)
         and schema_valid_rate == 1.0
         and citation_presence_rate == 1.0
+        and planner_strategy_match_rate == 1.0
+        and active_memory_write_free_rate == 1.0
     )
     return {
         "scenario_count": len(rows),
@@ -284,6 +468,8 @@ def _summarize_workflows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "ok_or_partial_count": ok_or_partial_count,
         "schema_valid_rate": schema_valid_rate,
         "citation_presence_rate": citation_presence_rate,
+        "planner_strategy_match_rate": planner_strategy_match_rate,
+        "active_memory_write_free_rate": active_memory_write_free_rate,
         "scenarios": rows,
         "passes": passes,
     }

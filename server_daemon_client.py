@@ -27,6 +27,18 @@ PRODUCT_STABILITY = "stable"
 PROTOCOL_VERSION = 2
 PROTOCOL_SCHEMA_VERSION = "2026-04-27"
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
+STABLE_EKC_TASK_TYPES = (
+    "project_orientation",
+    "source_orientation",
+    "document_orientation",
+    "review_preparation",
+    "evidence_audit",
+    "graph_evidence",
+    "entity_profile",
+    "decision_packet",
+    "implementation_context",
+    "evidence_bundle",
+)
 STABLE_DOCUMENT_WORKFLOW = [
     "list_document_extractors",
     "preview_document_source_connector",
@@ -141,6 +153,7 @@ def memory_protocol() -> dict[str, Any]:
             "response_version": "engram.knowledge.response.v0",
             "release_track": "1.0",
             "stability": "stable",
+            "task_types": list(STABLE_EKC_TASK_TYPES),
             "scope": "project_orientation, source_orientation, document_orientation, review_preparation, evidence_audit, graph_evidence, entity_profile, decision_packet, implementation_context, evidence_bundle",
         },
         "aliases": {

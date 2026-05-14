@@ -45,6 +45,9 @@ from core.memory_os.snapshots import SnapshotService
 from core.memory_os.transactions import MemoryTransactionService
 
 
+CURRENT_MEMORY_STATUSES = ("active", "accepted", "reviewed")
+
+
 class MemoryOSRuntime:
     """Container for daemon-owned Memory OS stores, indexes, and services."""
 
@@ -294,7 +297,7 @@ class MemoryOSRuntime:
         if canonical_only:
             filters["canonical"] = True
         if not include_stale:
-            filters["status"] = "active"
+            filters["status"] = CURRENT_MEMORY_STATUSES
         search = (
             self.retrieval.hybrid_search(search_text, filters=filters, limit=max(int(limit), 1))
             if retrieval_mode == "hybrid"
@@ -403,7 +406,7 @@ class MemoryOSRuntime:
                 normalized,
                 artifact_record=persisted,
                 planner=build_planner_receipt(
-                    strategy="project_capsule",
+                    strategy="project_orientation",
                     methods_used=["persisted_artifact"],
                     request_budget=normalized["budget"],
                 ),
@@ -506,8 +509,13 @@ class MemoryOSRuntime:
             limit=max_source_reads,
         )
         planner = build_planner_receipt(
-            strategy="project_capsule",
-            methods_used=["artifact", "hybrid_search", "chunk_hydration", "focus_rerank"],
+            strategy="project_orientation",
+            methods_used=[
+                "project_capsule_artifact",
+                "hybrid_search",
+                "chunk_hydration",
+                "focus_rerank",
+            ],
             request_budget=budget,
         )
         if not results:

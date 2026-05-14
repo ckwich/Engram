@@ -67,6 +67,7 @@ from core.memory_quality import audit_memory_quality as build_memory_quality_aud
 from core.operation_log import operation_log
 from core.project_capsule import build_project_capsule_draft
 from core.reliability_harness import run_agent_reliability_harness
+from core.memory_os.knowledge_eval import STABLE_EKC_TASK_TYPES
 from core.retrieval_backend_status import build_retrieval_backend_status
 from core.retrieval_eval import run_retrieval_eval
 from core.session_pins import SessionPinStore
@@ -1080,6 +1081,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
                 "stability": "stable",
                 "cost_class": "low-to-medium",
                 "tools": ["query_knowledge"],
+                "task_types": list(STABLE_EKC_TASK_TYPES),
             },
             "retrieval_quality": {
                 "purpose": "Inspect retrieval cost, quality, citations, and workflow recipes before scaling memory.",

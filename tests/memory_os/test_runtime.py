@@ -166,6 +166,7 @@ def test_memory_os_runtime_query_knowledge_returns_project_capsule_response(tmp_
     assert response["budget_used"]["artifacts_read"] == 0
     assert response["planner"]["budget"]["requested"]["max_source_reads"] == 12
     assert response["planner"]["budget"]["used"]["artifacts_built"] == 1
+    assert response["planner"]["strategy"] == "project_orientation"
     assert response["planner"]["failure_receipts"] == []
     assert response["policy"]["unsupported_inferences_used"] is False
     assert response["policy"]["review_state_available"] is False
@@ -238,6 +239,39 @@ def test_memory_os_runtime_query_knowledge_focus_ranks_newer_full_text_context(t
     assert "Full-text marker" in response["answer"]["summary"]
 
 
+def test_memory_os_runtime_query_knowledge_accepts_reviewed_source_statuses(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    runtime.store_memory(
+        key="engram_accepted_direction",
+        content="# Summary\n\nAccepted reviewed evidence is eligible for EKC project orientation.",
+        title="Accepted Direction",
+        project="Engram",
+        status="accepted",
+        tags=["reviewed", "decision"],
+    )
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-accepted-source",
+            "ask": {
+                "goal": "Get current project context.",
+                "task_type": "project_orientation",
+                "project": "Engram",
+                "focus": ["reviewed"],
+            },
+        }
+    )
+
+    assert response["status"] == "ok"
+    assert response["citations"][0]["key"] == "engram_accepted_direction"
+    assert "Accepted reviewed evidence" in response["answer"]["summary"]
+
+
 def test_memory_os_runtime_materializes_and_reads_persisted_project_capsule(tmp_path):
     runtime = MemoryOSRuntime(
         tmp_path,
@@ -304,7 +338,7 @@ def test_memory_os_runtime_query_knowledge_no_answer_has_failure_receipt(tmp_pat
     )
 
     assert response["status"] == "no_answer"
-    assert response["planner"]["strategy"] == "project_capsule"
+    assert response["planner"]["strategy"] == "project_orientation"
     assert response["planner"]["budget"]["requested"]["max_artifacts"] == 1
     assert response["planner"]["failure_receipts"] == [
         {

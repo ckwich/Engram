@@ -5,6 +5,8 @@ import importlib
 import re
 from pathlib import Path
 
+from core.memory_os.knowledge_eval import DEFAULT_WORKFLOW_SCENARIOS
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -149,16 +151,26 @@ def test_memory_protocol_advertises_knowledge_contract_v0():
     server = load_server_module()
 
     payload = asyncio.run(server.memory_protocol())
+    expected_task_types = [scenario["task_type"] for scenario in DEFAULT_WORKFLOW_SCENARIOS]
 
-    assert payload["tool_groups"]["knowledge_contract"] == {
-        "stability": "stable",
-        "cost_class": "low-to-medium",
-        "tools": ["query_knowledge"],
-    }
+    assert payload["tool_groups"]["knowledge_contract"]["stability"] == "stable"
+    assert payload["tool_groups"]["knowledge_contract"]["cost_class"] == "low-to-medium"
+    assert payload["tool_groups"]["knowledge_contract"]["tools"] == ["query_knowledge"]
+    assert payload["tool_groups"]["knowledge_contract"]["task_types"] == expected_task_types
     assert payload["progressive_discovery"]["load_next"]["knowledge contract"] == "query_knowledge"
     assert "query_knowledge" in payload["canonical_tools"]
     assert "project capsule" in payload["canonical_tools"]["query_knowledge"]
     assert "artifact-family" in payload["canonical_tools"]["query_knowledge"]
+
+
+def test_daemon_client_knowledge_protocol_matches_eval_pack():
+    import server_daemon_client
+
+    payload = server_daemon_client.memory_protocol()
+    expected_task_types = [scenario["task_type"] for scenario in DEFAULT_WORKFLOW_SCENARIOS]
+
+    assert payload["knowledge_contract"]["stability"] == "stable"
+    assert payload["knowledge_contract"]["task_types"] == expected_task_types
 
 
 def test_readme_mcp_tool_table_covers_protocol_tools():
