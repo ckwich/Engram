@@ -884,8 +884,8 @@ def preview_visual_extraction(
     visual_coverage = None
     if normalized_visual_request is not None:
         visual_coverage = _build_visual_coverage(normalized_visual_request, artifacts)
-        if not visual_coverage["coverage_complete"]:
-            raise ValueError("visual_request image_refs require observations for every requested image_ref")
+    quality_warnings = _visual_quality_warnings(normalized_visual_request, visual_coverage, artifacts)
+    status = "partial" if quality_warnings else "ok"
 
     extractor_receipt = prepare_extractor_receipt(
         document_record=document_record,
@@ -895,6 +895,7 @@ def preview_visual_extraction(
     )
     return {
         "schema_version": VISUAL_PREVIEW_SCHEMA_VERSION,
+        "status": status,
         "write_policy": "preview_only",
         "write_performed": False,
         "active_memory_write_performed": False,
@@ -902,6 +903,7 @@ def preview_visual_extraction(
         "document_id": document_id,
         "visual_artifacts": artifacts,
         "visual_coverage": visual_coverage,
+        "quality_warnings": quality_warnings,
         "extractor_receipt": extractor_receipt,
         "receipt": {
             "observation_count": len(observations),
@@ -1042,6 +1044,7 @@ def _normalize_visual_request(value: Any, document_id: str) -> dict[str, Any] | 
     return {
         "request_id": request_id,
         "image_refs": _normalize_image_refs(value.get("image_refs")),
+        "requested_capabilities": _normalize_visual_capabilities(value.get("requested_capabilities") or []),
     }
 
 
@@ -1062,6 +1065,72 @@ def _build_visual_coverage(visual_request: dict[str, Any], artifacts: list[dict[
         "missing_image_refs": missing_refs,
         "coverage_complete": not missing_refs,
     }
+
+
+def _visual_quality_warnings(
+    visual_request: dict[str, Any] | None,
+    visual_coverage: dict[str, Any] | None,
+    artifacts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    requested_capabilities = set((visual_request or {}).get("requested_capabilities") or [])
+    missing_count = (
+        len(visual_coverage.get("missing_image_refs") or [])
+        if isinstance(visual_coverage, dict)
+        else 0
+    )
+    if missing_count:
+        warnings.append(
+            {
+                "code": "unresolved_visual_evidence",
+                "severity": "high",
+                "missing_image_ref_count": missing_count,
+                "message": "Visual request is missing observations for required image refs.",
+            }
+        )
+        if "ocr_text" in requested_capabilities:
+            warnings.append(
+                {
+                    "code": "missing_ocr_coverage",
+                    "severity": "high",
+                    "missing_image_ref_count": missing_count,
+                    "message": "OCR coverage is missing for one or more requested image refs.",
+                }
+            )
+        if "table_structure" in requested_capabilities:
+            warnings.append(
+                {
+                    "code": "missing_table_coverage",
+                    "severity": "high",
+                    "missing_image_ref_count": missing_count,
+                    "message": "Table structure coverage is missing for one or more requested image refs.",
+                }
+            )
+
+    for artifact in artifacts:
+        confidence = artifact.get("confidence")
+        if not isinstance(confidence, (int, float)) or confidence >= LOW_CONFIDENCE_THRESHOLD:
+            continue
+        artifact_type = str(artifact.get("artifact_type") or "")
+        if artifact_type.startswith("ocr"):
+            code = "low_confidence_ocr"
+            message = "OCR observation confidence is below review threshold."
+        elif artifact_type == "table":
+            code = "low_confidence_table"
+            message = "Table observation confidence is below review threshold."
+        else:
+            code = "low_confidence_visual_evidence"
+            message = "Visual observation confidence is below review threshold."
+        warnings.append(
+            {
+                "code": code,
+                "severity": "medium",
+                "artifact_id": artifact.get("artifact_id"),
+                "confidence": confidence,
+                "message": message,
+            }
+        )
+    return warnings
 
 
 def _visual_artifact_match_keys(artifact: dict[str, Any]) -> set[str]:

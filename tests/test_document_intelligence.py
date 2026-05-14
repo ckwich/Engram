@@ -359,22 +359,32 @@ def test_preview_visual_extraction_requires_coverage_for_every_requested_image_r
         extractor_kind="agent_native",
     )
 
-    with pytest.raises(ValueError, match="visual_request image_refs require observations"):
-        preview_visual_extraction(
-            document_record=document,
-            visual_request=request,
-            observations=[
-                {
-                    "artifact_type": "figure",
-                    "source_ref": request["image_refs"][0],
-                    "page_number": 2,
-                    "description": "A reviewed figure on page 2.",
-                    "confidence": 0.86,
-                }
-            ],
-            extractor_id="agent-native-vision",
-            extractor_kind="agent_native",
-        )
+    partial = preview_visual_extraction(
+        document_record=document,
+        visual_request=request,
+        observations=[
+            {
+                "artifact_type": "figure",
+                "source_ref": request["image_refs"][0],
+                "page_number": 2,
+                "description": "A reviewed figure on page 2.",
+                "confidence": 0.86,
+            }
+        ],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    assert partial["status"] == "partial"
+    assert partial["visual_coverage"]["coverage_complete"] is False
+    assert partial["quality_warnings"] == [
+        {
+            "code": "unresolved_visual_evidence",
+            "severity": "high",
+            "missing_image_ref_count": 1,
+            "message": "Visual request is missing observations for required image refs.",
+        }
+    ]
 
     preview = preview_visual_extraction(
         document_record=document,
@@ -406,6 +416,8 @@ def test_preview_visual_extraction_requires_coverage_for_every_requested_image_r
         "missing_image_refs": [],
         "coverage_complete": True,
     }
+    assert preview["status"] == "ok"
+    assert preview["quality_warnings"] == []
     assert preview["receipt"]["visual_request_coverage_complete"] is True
 
 
@@ -436,22 +448,67 @@ def test_visual_coverage_requires_artifact_specific_matches_on_same_page():
         extractor_kind="agent_native",
     )
 
-    with pytest.raises(ValueError, match="visual_request image_refs require observations"):
-        preview_visual_extraction(
-            document_record=document,
-            visual_request=request,
-            observations=[
-                {
-                    "artifact_type": "figure",
-                    "source_ref": request["image_refs"][0],
-                    "page_number": 12,
-                    "description": "The first figure on page 12.",
-                    "confidence": 0.83,
-                }
-            ],
-            extractor_id="agent-native-vision",
-            extractor_kind="agent_native",
-        )
+    partial = preview_visual_extraction(
+        document_record=document,
+        visual_request=request,
+        observations=[
+            {
+                "artifact_type": "figure",
+                "source_ref": request["image_refs"][0],
+                "page_number": 12,
+                "description": "The first figure on page 12.",
+                "confidence": 0.83,
+            }
+        ],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    assert partial["status"] == "partial"
+    assert partial["visual_coverage"]["missing_image_refs"] == [request["image_refs"][1]]
+
+
+def test_preview_visual_extraction_reports_missing_ocr_table_and_low_confidence():
+    document = prepare_document_record(
+        title="Scanned Table",
+        source_uri="file:///docs/scanned-table.pdf",
+        source_type="pdf",
+        content_hash="sha256:" + "a" * 64,
+        media_type="application/pdf",
+    )
+    request = prepare_visual_extraction_request(
+        document_record=document,
+        image_refs=[
+            {"source_uri": "file:///docs/scanned-table.pdf", "page_number": 4},
+            {"source_uri": "file:///docs/scanned-table.pdf", "page_number": 5},
+        ],
+        requested_capabilities=["ocr_text", "table_structure"],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    preview = preview_visual_extraction(
+        document_record=document,
+        visual_request=request,
+        observations=[
+            {
+                "artifact_type": "ocr_block",
+                "source_ref": request["image_refs"][0],
+                "page_number": 4,
+                "text": "uncertain OCR",
+                "confidence": 0.31,
+            }
+        ],
+        extractor_id="agent-native-vision",
+        extractor_kind="agent_native",
+    )
+
+    codes = {warning["code"] for warning in preview["quality_warnings"]}
+    assert preview["status"] == "partial"
+    assert "missing_ocr_coverage" in codes
+    assert "missing_table_coverage" in codes
+    assert "unresolved_visual_evidence" in codes
+    assert "low_confidence_ocr" in codes
 
 
 def test_preview_visual_extraction_accepts_coordinates_alias_and_source_artifact_ids():
