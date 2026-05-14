@@ -1,4 +1,5 @@
 from core.memory_os.runtime import MemoryOSRuntime
+from core.memory_os._records import upsert_record
 from core.vector_index import InMemoryVectorIndex
 
 
@@ -248,6 +249,57 @@ def test_memory_os_runtime_query_knowledge_no_answer_has_failure_receipt(tmp_pat
             "recoverable": True,
         }
     ]
+
+
+def test_memory_os_runtime_query_knowledge_returns_source_orientation(tmp_path):
+    runtime = MemoryOSRuntime(
+        tmp_path,
+        embed_text=_embed,
+        vector_index=InMemoryVectorIndex(),
+    )
+    runtime.initialize()
+    upsert_record(
+        runtime.ledger,
+        "sources",
+        "source-design",
+        {
+            "source_uri": "file:///books/design.pdf",
+            "source_type": "pdf",
+            "project": "Engram",
+        },
+    )
+    upsert_record(
+        runtime.ledger,
+        "documents",
+        "doc_design",
+        {
+            "document_id": "doc_design",
+            "title": "Design Book",
+            "project": "Engram",
+            "source_ref": {"source_uri": "file:///books/design.pdf", "source_type": "pdf"},
+            "document": {"page_count": 3},
+        },
+    )
+
+    response = runtime.query_knowledge(
+        {
+            "request_id": "req-source-orientation",
+            "ask": {
+                "goal": "Orient me to the source.",
+                "task_type": "source_orientation",
+                "project": "Engram",
+                "focus": ["design"],
+            },
+        }
+    )
+
+    assert response["status"] == "partial"
+    assert response["answer"]["orientation_type"] == "source_orientation"
+    assert response["answer"]["documents"][0]["document_id"] == "doc_design"
+    assert response["errors"][0]["code"] == "orientation_incomplete"
+    assert response["citations"][0]["level"] == "document"
+    assert response["budget_used"]["artifacts_built"] == 0
+    assert response["planner"]["strategy"] == "source_orientation"
 
 
 def test_memory_os_runtime_query_knowledge_returns_schema_failure(tmp_path):

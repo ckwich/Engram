@@ -20,7 +20,15 @@ def _artifact(summary: str = "Engram is a local-first Memory OS.") -> dict:
         "open_questions": [],
         "important_entities": [],
         "recent_changes": [],
-        "citations": [{"citation_id": "cit_001", "level": "chunk", "key": "engram_direction", "chunk_id": 0}],
+        "citations": [
+            {
+                "citation_id": "cit_001",
+                "level": "chunk",
+                "source": "memory_os",
+                "key": "engram_direction",
+                "chunk_id": 0,
+            }
+        ],
         "staleness": {"state": "fresh", "invalidated_by": []},
     }
 

@@ -45,6 +45,32 @@ def test_normalize_knowledge_request_defaults_to_safe_project_capsule_contract()
     assert request["budget"]["max_artifacts"] == 1
 
 
+def test_normalize_knowledge_request_supports_source_and_document_orientation_defaults():
+    source_request = normalize_knowledge_request(
+        {
+            "ask": {
+                "goal": "Orient me to this source.",
+                "task_type": "source_orientation",
+                "project": "Engram",
+            }
+        }
+    )
+    document_request = normalize_knowledge_request(
+        {
+            "ask": {
+                "goal": "Orient me to this document.",
+                "task_type": "document_orientation",
+                "project": "Engram",
+            }
+        }
+    )
+
+    assert source_request["shape"]["response_type"] == "source_orientation_summary"
+    assert document_request["shape"]["response_type"] == "document_orientation_summary"
+    assert source_request["policy"]["write_behavior"] == "read_only"
+    assert document_request["policy"]["allow_unreviewed_sources"] is False
+
+
 def test_normalize_knowledge_request_rejects_unsafe_policy_overrides():
     for unsafe_policy, expected_code in (
         ({"allow_unreviewed_sources": True}, "unreviewed_sources_not_allowed"),

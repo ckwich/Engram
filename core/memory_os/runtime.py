@@ -26,6 +26,10 @@ from core.memory_os.knowledge_contract import (
     normalize_knowledge_request,
     ok_response,
 )
+from core.memory_os.knowledge_orientations import (
+    build_document_orientation,
+    build_source_orientation,
+)
 from core.memory_os.knowledge_planner import build_planner_receipt
 from core.memory_os.project_capsule_artifact import build_project_capsule_artifact
 from core.memory_os.retrieval import MemoryOSRetrievalIndex
@@ -284,6 +288,28 @@ class MemoryOSRuntime:
             return normalized
 
         ask = normalized["ask"]
+        if ask["task_type"] == "source_orientation":
+            return _orientation_response(
+                normalized,
+                build_source_orientation(
+                    self.ledger,
+                    project=ask["project"],
+                    focus=ask["focus"],
+                    max_records=int(normalized["budget"].get("max_source_reads", 12)),
+                ),
+                strategy="source_orientation",
+            )
+        if ask["task_type"] == "document_orientation":
+            return _orientation_response(
+                normalized,
+                build_document_orientation(
+                    self.ledger,
+                    project=ask["project"],
+                    focus=ask["focus"],
+                    max_records=int(normalized["budget"].get("max_source_reads", 12)),
+                ),
+                strategy="document_orientation",
+            )
         persisted = self.knowledge_artifacts.read_latest_artifact(
             project=ask["project"],
             artifact_type="project_capsule",
@@ -586,6 +612,44 @@ def _artifact_response_citations(artifact_record: dict[str, Any]) -> list[dict[s
         if isinstance(citation, dict)
     )
     return normalize_knowledge_citations(citations, default_source="memory_os")
+
+
+def _orientation_response(
+    normalized: dict[str, Any],
+    orientation: dict[str, Any],
+    *,
+    strategy: str,
+) -> dict[str, Any]:
+    planner = build_planner_receipt(
+        strategy=strategy,
+        methods_used=["ledger_records"],
+        request_budget=normalized["budget"],
+        omissions=list(orientation.get("omissions") or []),
+    )
+    if orientation.get("status") == "no_answer":
+        error = (orientation.get("errors") or [{}])[0]
+        return no_answer_response(
+            request_id=normalized["request_id"],
+            code=str(error.get("code") or "no_orientation_evidence"),
+            message=str(error.get("message") or "No orientation evidence was available."),
+            planner=planner,
+        )
+    answer = dict(orientation.get("answer") or {})
+    return ok_response(
+        request_id=normalized["request_id"],
+        answer=answer,
+        citations=list(orientation.get("citations") or []),
+        freshness={"state": "fresh", "source_snapshot_id": "memory_os:latest"},
+        budget_used={
+            "artifacts_built": 0,
+            "artifacts_read": 0,
+            "source_reads": int(orientation.get("source_reads") or 0),
+            "tokens_out_estimate": len(str(answer)) // 4,
+        },
+        planner=planner,
+        partial=orientation.get("status") == "partial",
+        errors=list(orientation.get("errors") or []),
+    )
 
 
 def _default_embed_text(text: str) -> list[float]:

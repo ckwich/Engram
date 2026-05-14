@@ -121,7 +121,7 @@ def memory_protocol() -> dict[str, Any]:
             "tool": "query_knowledge",
             "contract_version": "engram.knowledge.request.v0",
             "response_version": "engram.knowledge.response.v0",
-            "scope": "project_orientation via project_capsule_summary",
+            "scope": "project_orientation, source_orientation, document_orientation",
         },
         "aliases": {
             "find_memories": "search_memories",
@@ -177,11 +177,11 @@ async def memory_os_status() -> dict[str, Any]:
 @mcp.tool()
 async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
     """
-    Return an Engram Knowledge Contract v0 response for task-shaped project context.
+    Return an Engram Knowledge Contract v0 response for task-shaped orientation.
 
-    EKC v0 supports project_orientation requests and returns a typed project
-    capsule summary with citations, freshness, policy, budget, planner, and
-    explicit errors. This tool is read-only.
+    EKC v0 supports project_orientation, source_orientation, and
+    document_orientation requests with citations, freshness, policy, budget,
+    planner, and explicit errors. This tool is read-only.
     """
     try:
         return await _call_daemon("query_knowledge", request)
@@ -206,7 +206,29 @@ async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
                 "source_reads": 0,
                 "tokens_out_estimate": 0,
             },
-            "planner": {"strategy": "none", "methods_used": [], "omissions": []},
+            "planner": {
+                "strategy": "none",
+                "methods_used": [],
+                "omissions": [],
+                "budget": {
+                    "requested": {},
+                    "used": {
+                        "artifacts_built": 0,
+                        "artifacts_read": 0,
+                        "source_reads": 0,
+                        "tokens_out_estimate": 0,
+                    },
+                },
+                "failure_receipts": [
+                    {
+                        "code": "runtime_error",
+                        "category": "infrastructure",
+                        "message": f"Engram daemon error: {exc}",
+                        "recoverable": True,
+                    }
+                ],
+                "response_status": "unavailable",
+            },
             "errors": [
                 {
                     "code": "runtime_error",

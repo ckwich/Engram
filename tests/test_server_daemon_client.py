@@ -171,7 +171,15 @@ class FakeDaemonClient:
             "request_id": payload["request_id"],
             "status": "ok",
             "answer": {"project": payload["ask"]["project"]},
-            "citations": [{"citation_id": "cit_001", "level": "chunk"}],
+            "citations": [
+                {
+                    "citation_id": "cit_001",
+                    "level": "chunk",
+                    "source": "memory_os",
+                    "key": "engram_direction",
+                    "chunk_id": 0,
+                }
+            ],
             "freshness": {"state": "fresh"},
             "policy": {
                 "unreviewed_sources_used": False,
@@ -186,7 +194,22 @@ class FakeDaemonClient:
                 "source_reads": 0,
                 "tokens_out_estimate": 0,
             },
-            "planner": {"strategy": "project_capsule", "methods_used": ["artifact"], "omissions": []},
+            "planner": {
+                "strategy": "project_capsule",
+                "methods_used": ["artifact"],
+                "omissions": [],
+                "budget": {
+                    "requested": {"max_artifacts": 1, "max_source_reads": 12, "max_tokens_out": 2500},
+                    "used": {
+                        "artifacts_built": 1,
+                        "artifacts_read": 0,
+                        "source_reads": 0,
+                        "tokens_out_estimate": 0,
+                    },
+                },
+                "failure_receipts": [],
+                "response_status": "ok",
+            },
             "errors": [],
         }
 

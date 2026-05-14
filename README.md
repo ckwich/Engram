@@ -115,9 +115,10 @@ context_pack(
 
 `context_pack` returns selected chunks, citations, omitted-result counts, and budget receipts so agents can see what context they spent.
 
-For repeated project orientation, start with `query_knowledge` when available.
-It returns a typed EKC v0 project capsule response. Use `search_memories` and
-`retrieve_chunk` when you need lower-level evidence beyond the capsule.
+For repeated project, source, or document orientation, start with
+`query_knowledge` when available. It returns typed EKC v0 responses. Use
+`search_memories` and `retrieve_chunk` when you need lower-level evidence beyond
+the orientation packet.
 
 ---
 
@@ -141,7 +142,7 @@ and protocol `schema_version: "2026-04-27"`.
 | `prepare_context` | Compile a no-write, cited context packet for an agent task. |
 | `make_handoff` | Generate a no-write handoff packet with context refs, citations, next steps, and validation notes. |
 | `prepare_project_capsule` | Prepare a no-write project capsule draft from context refs and quality signals. |
-| `query_knowledge` | Return an EKC v0 project-orientation response with project capsule evidence, citations, policy, budget, planner, and typed errors. |
+| `query_knowledge` | Return an EKC v0 project, source, or document orientation response with citations, policy, budget, planner, and typed errors. |
 | `retrieve_chunk` | Retrieve one chunk by memory key and chunk ID. |
 | `retrieve_chunks` | Retrieve several known chunks in one call. |
 | `retrieve_memory` | Retrieve a full memory intentionally. |

@@ -887,7 +887,29 @@ def _query_knowledge_runtime_error(
             "source_reads": 0,
             "tokens_out_estimate": 0,
         },
-        "planner": {"strategy": "none", "methods_used": [], "omissions": []},
+        "planner": {
+            "strategy": "none",
+            "methods_used": [],
+            "omissions": [],
+            "budget": {
+                "requested": {},
+                "used": {
+                    "artifacts_built": 0,
+                    "artifacts_read": 0,
+                    "source_reads": 0,
+                    "tokens_out_estimate": 0,
+                },
+            },
+            "failure_receipts": [
+                {
+                    "code": code,
+                    "category": "infrastructure",
+                    "message": message,
+                    "recoverable": True,
+                }
+            ],
+            "response_status": "unavailable",
+        },
         "errors": [{"code": code, "category": "infrastructure", "message": message}],
     }
 
@@ -1165,7 +1187,7 @@ async def memory_protocol() -> MemoryProtocolPayload:
             "prepare_context": "Compile a no-write, cited context packet for a task using retrieval profiles.",
             "make_handoff": "Generate a no-write handoff packet with context refs, citations, next steps, and validation notes.",
             "prepare_project_capsule": "Prepare a no-write project capsule draft from context refs and quality signals.",
-            "query_knowledge": "Return an EKC v0 project capsule response with citations, freshness, policy, budget, planner, and typed errors.",
+            "query_knowledge": "Return an EKC v0 project capsule, source, or document orientation response with citations, freshness, policy, budget, planner, and typed errors.",
             "audit_memory_quality": "Read-only metadata quality audit for scope, lifecycle, chunking, and retrieval risk signals.",
             "list_ingestion_pipelines": "List no-write source-intake presets such as transcript, code_scan, design_doc, and handoff.",
             "conflict_scan": "List active contradiction, invalidation, and supersession graph edges without loading memory bodies.",
@@ -1325,11 +1347,11 @@ async def daemon_status() -> dict[str, Any]:
 @mcp.tool()
 async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
     """
-    Return an Engram Knowledge Contract v0 project capsule response.
+    Return an Engram Knowledge Contract v0 orientation response.
 
     This tool is read-only. It requires the daemon-owned Memory OS path because
-    EKC v0 is a serving contract over compiled local context, not a legacy
-    direct-mode memory write path.
+    EKC v0 is a serving contract over compiled local context and ledgered
+    source/document evidence, not a legacy direct-mode memory write path.
     """
     if _daemon_enabled():
         try:

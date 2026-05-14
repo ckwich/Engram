@@ -14,8 +14,12 @@ from core.memory_os.knowledge_planner import (
 
 REQUEST_SCHEMA_VERSION = "engram.knowledge.request.v0"
 RESPONSE_SCHEMA_VERSION = "engram.knowledge.response.v0"
-SUPPORTED_TASK_TYPES = {"project_orientation"}
-SUPPORTED_RESPONSE_TYPES = {"project_capsule_summary"}
+SUPPORTED_TASK_TYPES = {"project_orientation", "source_orientation", "document_orientation"}
+SUPPORTED_RESPONSE_TYPES = {
+    "project_capsule_summary",
+    "source_orientation_summary",
+    "document_orientation_summary",
+}
 STATUSES = (
     "ok",
     "partial",
@@ -27,7 +31,11 @@ STATUSES = (
     "unavailable",
 )
 
-DEFAULT_SHAPE = {"response_type": "project_capsule_summary", "format": "json"}
+DEFAULT_SHAPES = {
+    "project_orientation": {"response_type": "project_capsule_summary", "format": "json"},
+    "source_orientation": {"response_type": "source_orientation_summary", "format": "json"},
+    "document_orientation": {"response_type": "document_orientation_summary", "format": "json"},
+}
 DEFAULT_SCOPE = {
     "review_state": ["reviewed", "accepted"],
     "source_kinds": ["note", "document", "decision", "conversation", "code"],
@@ -93,7 +101,7 @@ def normalize_knowledge_request(raw: dict[str, Any]) -> dict[str, Any]:
             message=f"Unsupported task type: {task_type}",
         )
 
-    shape = _merge(DEFAULT_SHAPE, raw.get("shape"))
+    shape = _merge(DEFAULT_SHAPES[task_type], raw.get("shape"))
     if shape["response_type"] not in SUPPORTED_RESPONSE_TYPES:
         return schema_failed_response(
             request_id=request_id,

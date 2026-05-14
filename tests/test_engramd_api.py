@@ -686,7 +686,15 @@ def test_query_knowledge_routes_to_memory_os_runtime():
                 "request_id": request["request_id"],
                 "status": "ok",
                 "answer": {"project": request["ask"]["project"]},
-                "citations": [{"citation_id": "cit_001", "level": "chunk"}],
+                "citations": [
+                    {
+                        "citation_id": "cit_001",
+                        "level": "chunk",
+                        "source": "memory_os",
+                        "key": "engram_direction",
+                        "chunk_id": 0,
+                    }
+                ],
                 "freshness": {"state": "fresh"},
                 "policy": {
                     "unreviewed_sources_used": False,
@@ -705,6 +713,21 @@ def test_query_knowledge_routes_to_memory_os_runtime():
                     "strategy": "project_capsule",
                     "methods_used": ["artifact"],
                     "omissions": [],
+                    "budget": {
+                        "requested": {
+                            "max_artifacts": 1,
+                            "max_source_reads": 12,
+                            "max_tokens_out": 2500,
+                        },
+                        "used": {
+                            "artifacts_built": 1,
+                            "artifacts_read": 0,
+                            "source_reads": 0,
+                            "tokens_out_estimate": 0,
+                        },
+                    },
+                    "failure_receipts": [],
+                    "response_status": "ok",
                 },
                 "errors": [],
             }
