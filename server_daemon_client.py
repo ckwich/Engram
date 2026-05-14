@@ -17,6 +17,12 @@ from typing import Any
 from fastmcp import FastMCP
 
 from core.engramd_client import EngramDaemonClient, EngramDaemonClientError
+from core.mcp.tool_registry import (
+    DOCUMENT_ARTIFACT_WORKFLOW,
+    STABLE_DOCUMENT_WORKFLOW,
+    STABLE_EKC_TASK_TYPES,
+    build_memory_protocol_sections,
+)
 
 
 mcp = FastMCP("engram")
@@ -27,37 +33,6 @@ PRODUCT_STABILITY = "stable"
 PROTOCOL_VERSION = 2
 PROTOCOL_SCHEMA_VERSION = "2026-04-27"
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
-STABLE_EKC_TASK_TYPES = (
-    "project_orientation",
-    "source_orientation",
-    "document_orientation",
-    "review_preparation",
-    "evidence_audit",
-    "graph_evidence",
-    "entity_profile",
-    "decision_packet",
-    "implementation_context",
-    "evidence_bundle",
-)
-STABLE_DOCUMENT_WORKFLOW = [
-    "list_document_extractors",
-    "preview_document_source_connector",
-    "prepare_document_disassembly",
-    "prepare_document_intake_review",
-    "prepare_document_extraction_request",
-    "prepare_document_extraction_result",
-    "preview_document_extraction",
-    "prepare_visual_extraction_request",
-    "preview_visual_extraction",
-    "prepare_document_understanding_packet",
-    "prepare_document_draft",
-    "prepare_document_promotion_transaction",
-    "apply_document_promotion_transaction",
-]
-DOCUMENT_ARTIFACT_WORKFLOW = [
-    "prepare_document_artifact_store",
-    "store_document_artifact",
-]
 
 
 def _daemon_url() -> str:
@@ -122,6 +97,7 @@ def _format_daemon_store_response(key: str, response: dict[str, Any]) -> str:
 @mcp.tool()
 def memory_protocol() -> dict[str, Any]:
     """Describe the daemon-client Engram MCP contract for agents."""
+    protocol_sections = build_memory_protocol_sections(thin_client=True)
     return {
         "product": {
             "name": PRODUCT_NAME,
@@ -163,34 +139,10 @@ def memory_protocol() -> dict[str, Any]:
             "read_memory": "retrieve_memory",
             "write_memory": "store_memory",
         },
-        "document_workflow": STABLE_DOCUMENT_WORKFLOW,
-        "document_artifact_workflow": DOCUMENT_ARTIFACT_WORKFLOW,
-        "tool_groups": {
-            "document_intelligence": {
-                "stability": "stable",
-                "cost_class": "low-to-medium",
-                "tools": STABLE_DOCUMENT_WORKFLOW,
-            },
-            "document_artifacts": {
-                "stability": "stable",
-                "cost_class": "medium-write",
-                "tools": DOCUMENT_ARTIFACT_WORKFLOW,
-            },
-        },
-        "canonical_tools": [
-            "memory_protocol",
-            "daemon_status",
-            "memory_os_status",
-            "query_knowledge",
-            "search_memories",
-            "retrieve_chunk",
-            "retrieve_chunks",
-            "retrieve_memory",
-            "store_memory",
-            "prepare_source_memory",
-            *STABLE_DOCUMENT_WORKFLOW,
-            *DOCUMENT_ARTIFACT_WORKFLOW,
-        ],
+        "document_workflow": protocol_sections["document_workflow"],
+        "document_artifact_workflow": protocol_sections["document_artifact_workflow"],
+        "tool_groups": protocol_sections["tool_groups"],
+        "canonical_tools": protocol_sections["canonical_tools"],
         "warnings": [
             "Start or autostart engramd before using this entrypoint.",
             "Use daemon_status() to prove daemon reachability before blaming missing memory.",

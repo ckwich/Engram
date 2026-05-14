@@ -3,25 +3,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 
+from core.mcp.tool_registry import (
+    STABLE_DOCUMENT_WORKFLOW,
+    build_memory_protocol_sections,
+    validate_protocol_sections,
+)
+
 import server
 import server_daemon_client
-
-
-STABLE_DOCUMENT_WORKFLOW = [
-    "list_document_extractors",
-    "preview_document_source_connector",
-    "prepare_document_disassembly",
-    "prepare_document_intake_review",
-    "prepare_document_extraction_request",
-    "prepare_document_extraction_result",
-    "preview_document_extraction",
-    "prepare_visual_extraction_request",
-    "preview_visual_extraction",
-    "prepare_document_understanding_packet",
-    "prepare_document_draft",
-    "prepare_document_promotion_transaction",
-    "apply_document_promotion_transaction",
-]
 
 
 class FakeDaemonClient:
@@ -669,13 +658,14 @@ def test_document_artifact_tools_use_daemon_when_configured(monkeypatch):
 
 def test_daemon_client_protocol_advertises_stable_document_workflow():
     protocol = server_daemon_client.memory_protocol()
+    registry_sections = build_memory_protocol_sections(thin_client=True)
 
     assert protocol["document_workflow"] == STABLE_DOCUMENT_WORKFLOW
-    assert protocol["tool_groups"]["document_intelligence"] == {
-        "stability": "stable",
-        "cost_class": "low-to-medium",
-        "tools": STABLE_DOCUMENT_WORKFLOW,
-    }
+    assert protocol["tool_groups"] == registry_sections["tool_groups"]
+    assert protocol["document_workflow"] == registry_sections["document_workflow"]
+    assert protocol["document_artifact_workflow"] == registry_sections["document_artifact_workflow"]
+    assert protocol["canonical_tools"] == registry_sections["canonical_tools"]
+    assert validate_protocol_sections(protocol, thin_client=True) == []
     assert set(STABLE_DOCUMENT_WORKFLOW).issubset(set(protocol["canonical_tools"]))
 
 

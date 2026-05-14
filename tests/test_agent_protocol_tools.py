@@ -6,6 +6,11 @@ import re
 from pathlib import Path
 
 from core.memory_os.knowledge_eval import DEFAULT_WORKFLOW_SCENARIOS
+from core.mcp.tool_registry import (
+    CANONICAL_TOOLS,
+    build_memory_protocol_sections,
+    validate_protocol_sections,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +133,33 @@ def test_memory_protocol_supports_progressive_discovery_manifest():
     assert "memory_os_round_trip_check" in payload["canonical_tools"]
     assert "retrieval_backend_status" in payload["canonical_tools"]
     assert payload["warnings"][0].startswith("Do not call retrieve_memory")
+
+
+def test_memory_protocol_sections_match_tool_registry():
+    server = load_server_module()
+
+    payload = asyncio.run(server.memory_protocol())
+    registry_sections = build_memory_protocol_sections()
+
+    assert payload["stability"] == registry_sections["stability"]
+    assert payload["tool_groups"] == registry_sections["tool_groups"]
+    assert payload["progressive_discovery"] == registry_sections["progressive_discovery"]
+    assert payload["canonical_tools"] == {
+        name: metadata.description for name, metadata in CANONICAL_TOOLS.items()
+    }
+    assert validate_protocol_sections(payload) == []
+
+
+def test_full_server_and_thin_client_agree_on_document_workflow_tool_names():
+    import server_daemon_client
+
+    server = load_server_module()
+
+    full_payload = asyncio.run(server.memory_protocol())
+    thin_payload = server_daemon_client.memory_protocol()
+
+    assert full_payload["tool_groups"]["document_intelligence"]["tools"] == thin_payload["document_workflow"]
+    assert full_payload["tool_groups"]["document_artifacts"]["tools"] == thin_payload["document_artifact_workflow"]
 
 
 def test_memory_protocol_marks_new_v06_surfaces_as_beta_or_stable():
