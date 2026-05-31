@@ -1,0 +1,58 @@
+{
+  "contract_version": "engram.knowledge.response.v0",
+  "request_id": "req-ok",
+  "status": "ok",
+  "answer": {
+    "project": "Engram",
+    "summary": "Engram uses a daemon-owned Memory OS with a thin MCP client.",
+    "artifact_type": "project_capsule_summary"
+  },
+  "citations": [
+    {
+      "citation_id": "cit_001",
+      "level": "artifact",
+      "source": "memory_os",
+      "artifact_id": "artifact:engram:project_capsule:v0",
+      "source_ref": "memory:engram_architecture_hardening_closeout_2026_05_13"
+    }
+  ],
+  "freshness": {
+    "state": "fresh",
+    "basis": "current_session"
+  },
+  "policy": {
+    "unreviewed_sources_used": false,
+    "unsupported_inferences_used": false,
+    "review_state_available": false,
+    "review_filter_enforced": false,
+    "review_state_basis": "not_available_in_current_memory_os_records",
+    "review_filter_requested": ["reviewed", "accepted"]
+  },
+  "budget_used": {
+    "artifacts_built": 1,
+    "artifacts_read": 0,
+    "source_reads": 1,
+    "tokens_out_estimate": 96
+  },
+  "planner": {
+    "strategy": "project_capsule",
+    "methods_used": ["artifact"],
+    "omissions": [],
+    "budget": {
+      "requested": {
+        "max_artifacts": 1,
+        "max_source_reads": 12,
+        "max_tokens_out": 2500
+      },
+      "used": {
+        "artifacts_built": 1,
+        "artifacts_read": 0,
+        "source_reads": 1,
+        "tokens_out_estimate": 96
+      }
+    },
+    "failure_receipts": [],
+    "response_status": "ok"
+  },
+  "errors": []
+}

@@ -1,0 +1,594 @@
+from __future__ import annotations
+
+import asyncio
+import importlib
+from pathlib import Path
+
+from core.memory_os.knowledge_eval import STABLE_EKC_TASK_TYPES
+from core.mcp.tool_registry import (
+    CANONICAL_TOOLS,
+    build_memory_protocol_sections,
+    validate_protocol_sections,
+)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_server_module():
+    import server
+
+    return importlib.reload(server)
+
+
+def test_memory_protocol_describes_agent_retrieval_contract():
+    server = load_server_module()
+
+    payload = asyncio.run(server.memory_protocol())
+
+    assert payload["name"] == "Engram memory protocol"
+    assert payload["product"] == {
+        "name": "Engram",
+        "version": "1.0.0",
+        "release_track": "1.0",
+        "stability": "stable",
+    }
+    assert payload["version"] == 2
+    assert [step["tool"] for step in payload["retrieval_ladder"]] == [
+        "search_memories",
+        "retrieve_chunk",
+        "retrieve_memory",
+    ]
+    assert payload["aliases"]["find_memories"] == "search_memories"
+    assert payload["aliases"]["read_chunk"] == "retrieve_chunk"
+    assert payload["aliases"]["write_memory"] == "store_memory"
+    assert payload["warnings"][0].startswith("Do not call retrieve_memory")
+
+
+def test_memory_protocol_supports_progressive_discovery_manifest():
+    server = load_server_module()
+
+    payload = asyncio.run(server.memory_protocol())
+
+    assert payload["version"] == 2
+    assert payload["schema_version"] == "2026-04-27"
+    assert payload["stability"]["memory_protocol"] == "stable"
+    assert payload["tool_groups"]["retrieval"]["cost_class"] == "low-to-medium"
+    assert "context_pack" in payload["tool_groups"]["retrieval"]["tools"]
+    assert payload["tool_groups"]["graph"]["stability"] == "beta"
+    assert "add_graph_edge" in payload["tool_groups"]["graph"]["tools"]
+    assert "impact_scan" in payload["tool_groups"]["graph"]["tools"]
+    assert "conflict_scan" in payload["tool_groups"]["graph"]["tools"]
+    assert "graph_backend_status" in payload["tool_groups"]["graph"]["tools"]
+    assert "prepare_graph_readiness_report" in payload["tool_groups"]["graph"]["tools"]
+    assert "prepare_graph_proposal_batch" in payload["tool_groups"]["graph"]["tools"]
+    assert "apply_graph_proposal_batch" in payload["tool_groups"]["graph"]["tools"]
+    assert "repair_graph_edge_refs" in payload["tool_groups"]["graph"]["tools"]
+    assert "repair_graph_store_reconciliation" in payload["tool_groups"]["graph"]["tools"]
+    assert payload["tool_groups"]["source_intake"]["stability"] == "beta"
+    assert "prepare_source_memory" in payload["tool_groups"]["source_intake"]["tools"]
+    assert "list_source_drafts" in payload["tool_groups"]["source_intake"]["tools"]
+    assert "discard_source_draft" in payload["tool_groups"]["source_intake"]["tools"]
+    assert "store_prepared_memory" in payload["tool_groups"]["source_intake"]["tools"]
+    assert payload["tool_groups"]["document_intelligence"]["stability"] == "beta"
+    assert "list_document_extractors" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "prepare_document_disassembly" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "prepare_document_coverage_pass" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "prepare_document_draft" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "prepare_document_extraction_request" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "prepare_document_extraction_result" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "prepare_document_promotion_transaction" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "prepare_visual_extraction_request" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "preview_document_source_connector" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "preview_document_extraction" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert "preview_visual_extraction" in payload["tool_groups"]["document_intelligence"]["tools"]
+    assert payload["tool_groups"]["agent_workflows"]["stability"] == "beta"
+    assert "prepare_context" in payload["tool_groups"]["agent_workflows"]["tools"]
+    assert "list_context_profiles" in payload["tool_groups"]["agent_workflows"]["tools"]
+    assert "make_handoff" in payload["tool_groups"]["agent_workflows"]["tools"]
+    assert "prepare_project_capsule" in payload["tool_groups"]["agent_workflows"]["tools"]
+    assert "audit_memory_quality" in payload["tool_groups"]["memory_review"]["tools"]
+    assert payload["tool_groups"]["usage"]["stability"] == "beta"
+    assert payload["tool_groups"]["migration"]["stability"] == "beta"
+    assert "migration_dry_run" in payload["tool_groups"]["migration"]["tools"]
+    assert "memory_os_round_trip_check" in payload["tool_groups"]["migration"]["tools"]
+    assert "prepare_legacy_related_to_graph_migration" in payload["tool_groups"]["migration"]["tools"]
+    assert "apply_legacy_related_to_graph_migration" in payload["tool_groups"]["migration"]["tools"]
+    assert payload["tool_groups"]["retrieval_backend"]["stability"] == "beta"
+    assert payload["tool_groups"]["retrieval_backend"]["tools"] == ["retrieval_backend_status"]
+    assert payload["tool_groups"]["knowledge_prs"]["stability"] == "beta"
+    assert "prepare_knowledge_branch" in payload["tool_groups"]["knowledge_prs"]["tools"]
+    assert "prepare_knowledge_pr" in payload["tool_groups"]["knowledge_prs"]["tools"]
+    assert "run_memory_ci" in payload["tool_groups"]["knowledge_prs"]["tools"]
+    assert "inspect_knowledge_pr" in payload["tool_groups"]["knowledge_prs"]["tools"]
+    assert "merge_knowledge_pr" in payload["tool_groups"]["knowledge_prs"]["tools"]
+    assert payload["tool_groups"]["benchmarks"]["stability"] == "beta"
+    assert "list_memory_benchmark_suites" in payload["tool_groups"]["benchmarks"]["tools"]
+    assert "run_memory_benchmark" in payload["tool_groups"]["benchmarks"]["tools"]
+    assert "inspect_benchmark_run" in payload["tool_groups"]["benchmarks"]["tools"]
+    assert payload["progressive_discovery"]["start_here"] == "memory_protocol"
+    assert payload["progressive_discovery"]["load_next"]["source ingestion"] == "prepare_source_memory"
+    assert payload["progressive_discovery"]["load_next"]["conflict inspection"] == "conflict_scan"
+    assert payload["progressive_discovery"]["load_next"]["graph backend status"] == "graph_backend_status"
+    assert payload["progressive_discovery"]["load_next"]["graph readiness"] == "prepare_graph_readiness_report"
+    assert payload["progressive_discovery"]["load_next"]["graph proposal batch"] == "prepare_graph_proposal_batch"
+    assert payload["progressive_discovery"]["load_next"]["graph proposal acceptance"] == "apply_graph_proposal_batch"
+    assert payload["progressive_discovery"]["load_next"]["graph edge ref repair"] == "repair_graph_edge_refs"
+    assert (
+        payload["progressive_discovery"]["load_next"]["graph store reconciliation repair"]
+        == "repair_graph_store_reconciliation"
+    )
+    assert payload["progressive_discovery"]["load_next"]["document extraction"] == "preview_document_extraction"
+    assert payload["progressive_discovery"]["load_next"]["document extractor discovery"] == "list_document_extractors"
+    assert payload["progressive_discovery"]["load_next"]["document disassembly"] == "prepare_document_disassembly"
+    assert payload["progressive_discovery"]["load_next"]["document coverage pass"] == "prepare_document_coverage_pass"
+    assert payload["progressive_discovery"]["load_next"]["document source connector"] == "preview_document_source_connector"
+    assert payload["progressive_discovery"]["load_next"]["document extraction request"] == "prepare_document_extraction_request"
+    assert payload["progressive_discovery"]["load_next"]["document extraction result"] == "prepare_document_extraction_result"
+    assert payload["progressive_discovery"]["load_next"]["document draft"] == "prepare_document_draft"
+    assert payload["progressive_discovery"]["load_next"]["document promotion"] == "prepare_document_promotion_transaction"
+    assert payload["progressive_discovery"]["load_next"]["document ingestion"] == "prepare_document_ingestion_plan"
+    assert payload["progressive_discovery"]["load_next"]["document ingestion completion"] == "prepare_document_ingestion_completion"
+    assert payload["progressive_discovery"]["load_next"]["document usable acceptance"] == "complete_document_ingestion"
+    assert payload["progressive_discovery"]["load_next"]["visual extraction request"] == "prepare_visual_extraction_request"
+    assert payload["progressive_discovery"]["load_next"]["visual extraction"] == "preview_visual_extraction"
+    assert payload["progressive_discovery"]["load_next"]["context compiler"] == "prepare_context"
+    assert payload["progressive_discovery"]["load_next"]["retrieval profiles"] == "list_context_profiles"
+    assert payload["progressive_discovery"]["load_next"]["handoff generator"] == "make_handoff"
+    assert payload["progressive_discovery"]["load_next"]["project capsule"] == "prepare_project_capsule"
+    assert payload["progressive_discovery"]["load_next"]["usage review"] == "usage_summary"
+    assert payload["progressive_discovery"]["load_next"]["memory quality"] == "audit_memory_quality"
+    assert payload["progressive_discovery"]["load_next"]["knowledge branch"] == "prepare_knowledge_branch"
+    assert payload["progressive_discovery"]["load_next"]["knowledge pr"] == "prepare_knowledge_pr"
+    assert payload["progressive_discovery"]["load_next"]["memory ci"] == "run_memory_ci"
+    assert payload["progressive_discovery"]["load_next"]["benchmark suites"] == "list_memory_benchmark_suites"
+    assert payload["progressive_discovery"]["load_next"]["memory benchmark"] == "run_memory_benchmark"
+    assert payload["progressive_discovery"]["load_next"]["benchmark run inspection"] == "inspect_benchmark_run"
+    assert payload["progressive_discovery"]["load_next"]["knowledge pr inspection"] == "inspect_knowledge_pr"
+    assert payload["progressive_discovery"]["load_next"]["knowledge pr merge"] == "merge_knowledge_pr"
+    assert payload["progressive_discovery"]["load_next"]["migration dry run"] == "migration_dry_run"
+    assert payload["progressive_discovery"]["load_next"]["migration round trip"] == "memory_os_round_trip_check"
+    assert (
+        payload["progressive_discovery"]["load_next"]["legacy related_to graph migration"]
+        == "prepare_legacy_related_to_graph_migration"
+    )
+    assert payload["progressive_discovery"]["load_next"]["retrieval backend status"] == "retrieval_backend_status"
+    assert "preview_document_extraction" in payload["canonical_tools"]
+    assert "list_document_extractors" in payload["canonical_tools"]
+    assert "prepare_document_disassembly" in payload["canonical_tools"]
+    assert "prepare_document_coverage_pass" in payload["canonical_tools"]
+    assert "preview_document_source_connector" in payload["canonical_tools"]
+    assert "prepare_document_extraction_request" in payload["canonical_tools"]
+    assert "prepare_document_extraction_result" in payload["canonical_tools"]
+    assert "prepare_document_draft" in payload["canonical_tools"]
+    assert "prepare_document_promotion_transaction" in payload["canonical_tools"]
+    assert "prepare_document_ingestion_plan" in payload["canonical_tools"]
+    assert "run_document_ingestion" in payload["canonical_tools"]
+    assert "resume_document_ingestion" in payload["canonical_tools"]
+    assert "inspect_document_ingestion" in payload["canonical_tools"]
+    assert "prepare_document_ingestion_completion" in payload["canonical_tools"]
+    assert "complete_document_ingestion" in payload["canonical_tools"]
+    assert "prepare_visual_extraction_request" in payload["canonical_tools"]
+    assert "preview_visual_extraction" in payload["canonical_tools"]
+    assert "prepare_context" in payload["canonical_tools"]
+    assert "list_context_profiles" in payload["canonical_tools"]
+    assert "make_handoff" in payload["canonical_tools"]
+    assert "prepare_project_capsule" in payload["canonical_tools"]
+    assert "conflict_scan" in payload["canonical_tools"]
+    assert "graph_backend_status" in payload["canonical_tools"]
+    assert "prepare_graph_readiness_report" in payload["canonical_tools"]
+    assert "prepare_graph_proposal_batch" in payload["canonical_tools"]
+    assert "apply_graph_proposal_batch" in payload["canonical_tools"]
+    assert "repair_graph_edge_refs" in payload["canonical_tools"]
+    assert "repair_graph_store_reconciliation" in payload["canonical_tools"]
+    assert "prepare_knowledge_branch" in payload["canonical_tools"]
+    assert "prepare_knowledge_pr" in payload["canonical_tools"]
+    assert "run_memory_ci" in payload["canonical_tools"]
+    assert "inspect_knowledge_pr" in payload["canonical_tools"]
+    assert "merge_knowledge_pr" in payload["canonical_tools"]
+    assert "list_memory_benchmark_suites" in payload["canonical_tools"]
+    assert "run_memory_benchmark" in payload["canonical_tools"]
+    assert "inspect_benchmark_run" in payload["canonical_tools"]
+    assert "audit_memory_quality" in payload["canonical_tools"]
+    assert "migration_dry_run" in payload["canonical_tools"]
+    assert "memory_os_round_trip_check" in payload["canonical_tools"]
+    assert "prepare_legacy_related_to_graph_migration" in payload["canonical_tools"]
+    assert "apply_legacy_related_to_graph_migration" in payload["canonical_tools"]
+    assert "retrieval_backend_status" in payload["canonical_tools"]
+    assert payload["warnings"][0].startswith("Do not call retrieve_memory")
+
+
+def test_memory_protocol_sections_match_tool_registry():
+    server = load_server_module()
+
+    payload = asyncio.run(server.memory_protocol())
+    registry_sections = build_memory_protocol_sections()
+
+    assert payload["stability"] == registry_sections["stability"]
+    assert payload["tool_groups"] == registry_sections["tool_groups"]
+    assert payload["progressive_discovery"] == registry_sections["progressive_discovery"]
+    assert payload["canonical_tools"] == {
+        name: metadata.description for name, metadata in CANONICAL_TOOLS.items()
+    }
+    assert validate_protocol_sections(payload) == []
+
+
+def test_full_server_and_thin_client_agree_on_document_workflow_tool_names():
+    import server_daemon_client
+
+    server = load_server_module()
+
+    full_payload = asyncio.run(server.memory_protocol())
+    thin_payload = server_daemon_client.memory_protocol()
+
+    assert full_payload["tool_groups"]["document_intelligence"]["tools"] == thin_payload["document_workflow"]
+    assert full_payload["tool_groups"]["document_artifacts"]["tools"] == thin_payload["document_artifact_workflow"]
+    assert full_payload["tool_groups"]["benchmarks"]["tools"] == thin_payload["benchmark_workflow"]
+
+
+def test_memory_protocol_marks_new_v06_surfaces_as_beta_or_stable():
+    server = load_server_module()
+
+    payload = asyncio.run(server.memory_protocol())
+
+    assert payload["tool_groups"]["retrieval"]["stability"] == "stable"
+    assert payload["tool_groups"]["knowledge_contract"]["stability"] == "stable"
+    assert payload["tool_groups"]["graph"]["stability"] == "beta"
+    assert payload["tool_groups"]["source_intake"]["stability"] == "beta"
+    assert payload["tool_groups"]["document_intelligence"]["stability"] == "beta"
+    assert payload["tool_groups"]["agent_workflows"]["stability"] == "beta"
+    assert payload["tool_groups"]["usage"]["stability"] == "beta"
+    assert payload["tool_groups"]["operations"]["stability"] == "beta"
+    assert payload["tool_groups"]["migration"]["stability"] == "beta"
+    assert payload["tool_groups"]["retrieval_backend"]["stability"] == "beta"
+    assert payload["tool_groups"]["knowledge_prs"]["stability"] == "beta"
+    assert payload["tool_groups"]["benchmarks"]["stability"] == "beta"
+
+
+def test_memory_protocol_advertises_knowledge_contract_v0():
+    server = load_server_module()
+
+    payload = asyncio.run(server.memory_protocol())
+    expected_task_types = list(STABLE_EKC_TASK_TYPES)
+
+    assert payload["tool_groups"]["knowledge_contract"]["stability"] == "stable"
+    assert payload["tool_groups"]["knowledge_contract"]["cost_class"] == "low-to-medium"
+    assert payload["tool_groups"]["knowledge_contract"]["tools"] == ["query_knowledge"]
+    assert payload["tool_groups"]["knowledge_contract"]["task_types"] == expected_task_types
+    assert payload["progressive_discovery"]["load_next"]["knowledge contract"] == "query_knowledge"
+    assert "query_knowledge" in payload["canonical_tools"]
+    assert "project capsule" in payload["canonical_tools"]["query_knowledge"]
+    assert "artifact-family" in payload["canonical_tools"]["query_knowledge"]
+
+
+def test_daemon_client_knowledge_protocol_matches_eval_pack():
+    import server_daemon_client
+
+    payload = server_daemon_client.memory_protocol()
+    expected_task_types = list(STABLE_EKC_TASK_TYPES)
+
+    assert payload["knowledge_contract"]["stability"] == "stable"
+    assert payload["knowledge_contract"]["task_types"] == expected_task_types
+
+
+def test_thin_daemon_client_docs_match_context_pack_surface():
+    import server_daemon_client
+
+    payload = server_daemon_client.memory_protocol()
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert "context_pack" not in payload["canonical_tools"]
+    assert "context_pack is available on the full server" in payload["preferred_shortcut"]
+    assert "Thin MCP client entrypoint" in readme
+    assert "does not open local storage directly" in readme
+    assert "search_memories(query, limit=5)" in readme
+    assert "retrieve_chunk(key, chunk_id)" in readme
+    assert "retrieve_memory(key)" in readme
+    assert "query_knowledge" in readme
+    assert "search_memories(query, limit=5)" in agents
+
+
+def test_readme_documents_core_protocol_tools():
+    server = load_server_module()
+    payload = asyncio.run(server.memory_protocol())
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    protocol_tools = {
+        "search_memories",
+        "retrieve_chunk",
+        "retrieve_memory",
+        "query_knowledge",
+    }
+    for tool_name in (
+        "memory_protocol",
+        "search_memories",
+        "retrieve_chunk",
+        "retrieve_memory",
+        "query_knowledge",
+        "prepare_source_memory",
+        "store_prepared_memory",
+    ):
+        if tool_name in protocol_tools:
+            assert tool_name in payload["canonical_tools"] or tool_name in payload["aliases"]
+        assert tool_name in readme
+
+
+def test_search_memories_uses_structured_path_when_filters_are_supplied(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_structured_search(query: str, limit: int = 5, **kwargs):
+        observed["query"] = query
+        observed["limit"] = limit
+        observed["kwargs"] = kwargs
+        return {
+            "query": query,
+            "count": 1,
+            "results": [
+                {
+                    "key": "engram-agent-note",
+                    "chunk_id": 2,
+                    "title": "Engram agent note",
+                    "score": 0.97,
+                    "snippet": "Filtered snippet",
+                    "tags": ["ops"],
+                    "project": "engram",
+                    "domain": "agent",
+                    "canonical": True,
+                    "status": "active",
+                    "stale_type": None,
+                    "explanation": "project=engram; canonical memory",
+                }
+            ],
+        }
+
+    async def fail_if_legacy_search(*args, **kwargs):
+        raise AssertionError("filtered searches should use structured search")
+
+    monkeypatch.setattr(server.memory_manager, "search_memories_structured_async", fake_structured_search)
+    monkeypatch.setattr(server.memory_manager, "search_memories_async", fail_if_legacy_search)
+
+    payload = asyncio.run(
+        server.search_memories(
+            "agent memory",
+            limit=99,
+            project="engram",
+            domain="agent",
+            tags="ops,tooling",
+            include_stale=False,
+            canonical_only=True,
+        )
+    )
+
+    assert observed == {
+        "query": "agent memory",
+        "limit": 20,
+        "kwargs": {
+            "project": "engram",
+            "domain": "agent",
+            "tags": ["ops", "tooling"],
+            "include_stale": False,
+            "canonical_only": True,
+            "pinned_keys": [],
+            "pinned_first": False,
+        },
+    }
+    assert payload["error"] is None
+    assert payload["results"][0]["project"] == "engram"
+
+
+def test_list_memories_filters_and_paginates_metadata(monkeypatch):
+    server = load_server_module()
+    memories = [
+        {
+            "key": "alpha",
+            "title": "Alpha",
+            "tags": ["agent"],
+            "project": "engram",
+            "domain": "memory",
+            "status": "active",
+            "canonical": False,
+            "updated_at": "2026-04-20T10:30:00+00:00",
+            "created_at": "2026-04-19T10:30:00+00:00",
+            "chars": 100,
+            "chunk_count": 1,
+        },
+        {
+            "key": "beta",
+            "title": "Beta",
+            "tags": ["agent", "protocol"],
+            "project": "engram",
+            "domain": "memory",
+            "status": "active",
+            "canonical": True,
+            "updated_at": "2026-04-21T10:30:00+00:00",
+            "created_at": "2026-04-19T10:30:00+00:00",
+            "chars": 200,
+            "chunk_count": 2,
+        },
+        {
+            "key": "gamma",
+            "title": "Gamma",
+            "tags": ["agent"],
+            "project": "other",
+            "domain": "memory",
+            "status": "active",
+            "canonical": False,
+            "updated_at": "2026-04-22T10:30:00+00:00",
+            "created_at": "2026-04-19T10:30:00+00:00",
+            "chars": 300,
+            "chunk_count": 3,
+        },
+    ]
+
+    async def fake_list():
+        return memories
+
+    monkeypatch.setattr(server.memory_manager, "list_memories_async", fake_list)
+
+    payload = asyncio.run(
+        server.list_memories(
+            limit=1,
+            offset=0,
+            project="engram",
+            domain="memory",
+            tags="protocol",
+        )
+    )
+
+    assert payload["count"] == 1
+    assert payload["total"] == 1
+    assert payload["limit"] == 1
+    assert payload["offset"] == 0
+    assert payload["has_more"] is False
+    assert payload["memories"][0]["key"] == "beta"
+    assert payload["memories"][0]["canonical"] is True
+
+
+def test_alias_tools_delegate_to_canonical_tools(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_search_memories(query: str, **kwargs):
+        observed["search"] = {"query": query, **kwargs}
+        return {"query": query, "count": 0, "results": [], "error": None}
+
+    async def fake_retrieve_chunk(key: str, chunk_id: int):
+        observed["chunk"] = {"key": key, "chunk_id": chunk_id}
+        return {"key": key, "chunk_id": chunk_id, "found": True, "chunk": {"text": "chunk"}, "error": None}
+
+    async def fake_store_memory(key: str, content: str, **kwargs):
+        observed["store"] = {"key": key, "content": content, **kwargs}
+        return "stored"
+
+    monkeypatch.setattr(server, "search_memories", fake_search_memories)
+    monkeypatch.setattr(server, "retrieve_chunk", fake_retrieve_chunk)
+    monkeypatch.setattr(server, "store_memory", fake_store_memory)
+
+    search_payload = asyncio.run(server.find_memories("agent", project="engram"))
+    chunk_payload = asyncio.run(server.read_chunk("alpha", 3))
+    store_payload = asyncio.run(server.write_memory("alpha", "body", tags="agent"))
+
+    assert search_payload["query"] == "agent"
+    assert chunk_payload["chunk"]["text"] == "chunk"
+    assert store_payload == "stored"
+    assert observed == {
+        "search": {"query": "agent", "project": "engram"},
+        "chunk": {"key": "alpha", "chunk_id": 3},
+        "store": {"key": "alpha", "content": "body", "tags": "agent"},
+    }
+
+
+def test_read_memory_defaults_to_metadata_and_requires_explicit_full(monkeypatch):
+    server = load_server_module()
+
+    async def fake_retrieve_memory(key: str):
+        return {
+            "key": key,
+            "found": True,
+            "memory": {
+                "key": key,
+                "title": "Alpha",
+                "tags": ["agent"],
+                "updated_at": "2026-04-21T10:30:00+00:00",
+                "chars": 123,
+                "chunk_count": 2,
+                "content": "full body",
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "retrieve_memory", fake_retrieve_memory)
+
+    metadata_payload = asyncio.run(server.read_memory("alpha"))
+    full_payload = asyncio.run(server.read_memory("alpha", full=True))
+
+    assert metadata_payload["mode"] == "metadata"
+    assert metadata_payload["memory"]["key"] == "alpha"
+    assert "content" not in metadata_payload["memory"]
+    assert metadata_payload["guidance"].startswith("Use read_chunk")
+    assert full_payload["mode"] == "full"
+    assert full_payload["result"]["memory"]["content"] == "full body"
+
+
+def test_context_pack_searches_dedupes_and_retrieves_budgeted_chunks(monkeypatch):
+    server = load_server_module()
+    observed: dict[str, object] = {}
+
+    async def fake_search_memories(query: str, **kwargs):
+        observed["search"] = {"query": query, **kwargs}
+        return {
+            "query": query,
+            "count": 3,
+            "results": [
+                {"key": "alpha", "chunk_id": 0, "title": "Alpha", "score": 0.99, "snippet": "a", "tags": []},
+                {"key": "alpha", "chunk_id": 0, "title": "Alpha", "score": 0.98, "snippet": "a2", "tags": []},
+                {"key": "beta", "chunk_id": 1, "title": "Beta", "score": 0.88, "snippet": "b", "tags": []},
+            ],
+            "error": None,
+        }
+
+    async def fake_retrieve_chunks(requests: list[dict]):
+        observed["requests"] = requests
+        return {
+            "requested_count": len(requests),
+            "found_count": 2,
+            "results": [
+                {
+                    "key": "alpha",
+                    "chunk_id": 0,
+                    "found": True,
+                    "chunk": {
+                        "title": "Alpha",
+                        "text": "Alpha chunk text",
+                        "section_title": "Overview",
+                        "heading_path": ["Alpha", "Overview"],
+                        "chunk_kind": "section",
+                    },
+                    "error": None,
+                },
+                {
+                    "key": "beta",
+                    "chunk_id": 1,
+                    "found": True,
+                    "chunk": {
+                        "title": "Beta",
+                        "text": "Beta chunk text",
+                        "section_title": "Details",
+                        "heading_path": ["Beta", "Details"],
+                        "chunk_kind": "section",
+                    },
+                    "error": None,
+                },
+            ],
+            "error": None,
+        }
+
+    monkeypatch.setattr(server, "search_memories", fake_search_memories)
+    monkeypatch.setattr(server, "retrieve_chunks", fake_retrieve_chunks)
+
+    payload = asyncio.run(
+        server.context_pack(
+            "agent memory",
+            project="engram",
+            max_chunks=5,
+            budget_chars=40,
+        )
+    )
+
+    assert observed["search"] == {
+        "query": "agent memory",
+        "limit": 5,
+        "project": "engram",
+        "domain": None,
+        "tags": None,
+        "include_stale": False,
+        "canonical_only": False,
+    }
+    assert observed["requests"] == [{"key": "alpha", "chunk_id": 0}, {"key": "beta", "chunk_id": 1}]
+    assert payload["count"] == 2
+    assert payload["used_chars"] <= 40
+    assert [chunk["key"] for chunk in payload["chunks"]] == ["alpha", "beta"]
+    assert payload["chunks"][0]["score"] == 0.99
+    assert payload["error"] is None

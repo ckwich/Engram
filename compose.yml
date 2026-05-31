@@ -1,0 +1,121 @@
+name: engram
+
+services:
+  engramd-core:
+    build:
+      context: .
+      target: engramd-core
+    image: engram:local
+    environment:
+      ENGRAM_DATA_DIR: /var/lib/engram
+      HF_HOME: /var/lib/engram/model-cache
+      TRANSFORMERS_CACHE: /var/lib/engram/model-cache
+      ENGRAM_DAEMON_URL: http://127.0.0.1:8765
+      ENGRAM_ALLOW_PUBLIC_BIND: loopback-published
+      ENGRAM_DAEMON_ALLOWED_HOSTS: engramd-core,127.0.0.1,localhost
+    command: ["python", "engramd.py", "--host", "0.0.0.0", "--port", "8765"]
+    user: "10001:10001"
+    ports:
+      - "127.0.0.1:${ENGRAM_DAEMON_HOST_PORT:-8765}:8765"
+    volumes:
+      - engram-data:/var/lib/engram
+      - model-cache:/var/lib/engram/model-cache
+    mem_limit: 4g
+    pids_limit: 512
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "engramd.py", "--health", "--host", "127.0.0.1", "--port", "8765"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  web-inspector:
+    profiles: ["inspector", "web"]
+    build:
+      context: .
+      target: web-inspector
+    image: engram-web-inspector:local
+    depends_on:
+      engramd-core:
+        condition: service_healthy
+    environment:
+      ENGRAM_DAEMON_URL: http://engramd-core:8765
+      ENGRAM_DATA_DIR: /var/lib/engram
+      ENGRAM_WEBUI_HOST: ${ENGRAM_WEBUI_CONTAINER_HOST:-0.0.0.0}
+      ENGRAM_WEBUI_PORT: "5000"
+      ENGRAM_WEBUI_ACCESS_TOKEN: ${ENGRAM_WEBUI_ACCESS_TOKEN:-}
+      ENGRAM_WEBUI_WRITE_TOKEN: ${ENGRAM_WEBUI_WRITE_TOKEN:-}
+      ENGRAM_WEBUI_ALLOWED_HOSTS: ${ENGRAM_WEBUI_ALLOWED_HOSTS:-127.0.0.1,localhost}
+      ENGRAM_WEBUI_TRUSTED_ORIGINS: ${ENGRAM_WEBUI_TRUSTED_ORIGINS:-http://127.0.0.1:${ENGRAM_WEBUI_HOST_PORT:-5000},http://localhost:${ENGRAM_WEBUI_HOST_PORT:-5000}}
+    user: "10001:10001"
+    ports:
+      - "${ENGRAM_WEBUI_BIND:-127.0.0.1}:${ENGRAM_WEBUI_HOST_PORT:-5000}:5000"
+    mem_limit: 1g
+    pids_limit: 256
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  mcp-gateway:
+    profiles: ["mcp"]
+    build:
+      context: .
+      target: thin-client
+    image: engram-thin-client:local
+    depends_on:
+      engramd-core:
+        condition: service_healthy
+    environment:
+      ENGRAM_DAEMON_URL: http://engramd-core:8765
+    user: "10001:10001"
+    mem_limit: 512m
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  ops:
+    profiles: ["ops"]
+    build:
+      context: .
+      target: engramd-core
+    image: engram:local
+    depends_on:
+      engramd-core:
+        condition: service_healthy
+    environment:
+      ENGRAM_DAEMON_URL: http://engramd-core:8765
+      ENGRAM_DATA_DIR: /tmp/engram-ops-daemon
+      HF_HOME: /var/lib/engram/model-cache
+      TRANSFORMERS_CACHE: /var/lib/engram/model-cache
+    user: "10001:10001"
+    volumes:
+      - engram-data:/var/lib/engram
+      - model-cache:/var/lib/engram/model-cache
+    mem_limit: 4g
+    pids_limit: 512
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        python engramd.py --doctor --host engramd-core --port 8765
+        python engramd.py --smoke-test --host engramd-core --port 8765
+        ENGRAM_DATA_DIR=/tmp/engram-ops-self-test ENGRAM_DAEMON_URL= python server.py --self-test
+        rm -rf /tmp/engram-ops-self-test
+        ENGRAM_DATA_DIR=/tmp/engram-ops-agent-eval ENGRAM_DAEMON_URL= python server.py --agent-eval
+        rm -rf /tmp/engram-ops-agent-eval
+
+volumes:
+  engram-data:
+  model-cache:

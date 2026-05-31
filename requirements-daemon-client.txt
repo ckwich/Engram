@@ -1,0 +1,8 @@
+fastmcp~=3.2.0
+
+# Security floors for thin MCP adapter transitive dependencies.
+authlib>=1.6.11
+cryptography>=46.0.7
+python-multipart>=0.0.26
+requests>=2.33.0
+urllib3>=2.7.0

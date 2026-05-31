@@ -1,0 +1,6890 @@
+#!/usr/bin/env python3
+"""
+Engram 1.0.0 — MCP Server
+Provides semantic memory tools to AI agents via the Model Context Protocol.
+
+Three-tier retrieval pattern (agents should follow this):
+  1. search_memories(query) / search_memories_text(query)
+     → scored snippets, identify key + chunk_id
+  2. retrieve_chunk(key, chunk_id) / retrieve_chunk_text(key, chunk_id)
+     → one relevant section, usually sufficient
+  3. retrieve_memory(key) / retrieve_memory_text(key)
+     → full content, use sparingly
+"""
+
+import asyncio
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from contextvars import ContextVar
+from ipaddress import ip_address
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+from core.memory_os.runtime_paths import resolve_data_root
+
+os.environ.setdefault("ENGRAM_DATA_DIR", str(resolve_data_root()))
+
+from fastmcp import FastMCP
+from core.chunk_preview import preview_memory_chunks as build_chunk_preview
+from core.codebase_mapper import codebase_mapping_manager
+from core.context_builder import build_context_receipt, make_filters, merge_graph_candidates
+from core.context_compiler import (
+    build_handoff_packet,
+    build_context_query,
+    compile_context_packet,
+    get_context_profile,
+    list_context_profiles as build_context_profile_catalog,
+)
+from core.document_intelligence import (
+    list_document_extractors as build_document_extractor_catalog,
+    prepare_document_draft as build_document_draft,
+    prepare_document_extraction_request as build_document_extraction_request,
+    prepare_document_extraction_result as build_document_extraction_result,
+    prepare_document_understanding_packet as build_document_understanding_packet,
+    prepare_document_promotion_transaction as build_document_promotion_transaction,
+    prepare_visual_extraction_request as build_visual_extraction_request,
+    preview_document_extraction as build_document_extraction_preview,
+    preview_visual_extraction as build_visual_extraction_preview,
+)
+from core.document_coverage_workbench import (
+    prepare_document_coverage_workbench as build_document_coverage_workbench,
+)
+from core.document_extractors import prepare_document_disassembly as build_document_disassembly
+from core.document_intake_workflow import prepare_document_intake_review as build_document_intake_review
+from core.embedder import embedder
+from core.engramd_client import EngramDaemonClient, EngramDaemonClientError, normalize_daemon_base_url
+from core.graph_backend_status import build_graph_backend_status
+from core.graph_manager import graph_manager
+from core.hybrid_retrieval import normalize_retrieval_mode
+from core.ingestion_pipelines import list_ingestion_pipelines as build_ingestion_pipeline_catalog
+from core.memory_manager import (
+    memory_manager,
+    DuplicateMemoryError,
+    _config,
+    is_chroma_availability_error,
+)
+from core.memory_os.capability_discovery import build_capability_catalog
+from core.memory_os.memory_guardrails import evaluate_memory_write
+from core.memory_os_migration import MemoryOSMigrationKernel, run_round_trip_check
+from core.memory_quality import audit_memory_quality as build_memory_quality_audit
+from core.mcp.backend_tools import (
+    graph_backend_status_payload as build_graph_backend_status_payload,
+    retrieval_backend_status_payload as build_retrieval_backend_status_payload,
+)
+from core.mcp.document_tools import (
+    prepare_document_artifact_store_payload as build_document_artifact_store_payload,
+    prepare_document_intake_review_payload as build_document_intake_review_payload,
+)
+from core.mcp.knowledge_tools import query_knowledge_payload
+from core.mcp.tool_registry import (
+    build_memory_protocol_sections,
+    full_server_daemon_routed_tools,
+)
+from core.network_exposure import PublicBindDenied, validate_raw_service_bind
+from core.operation_log import operation_log
+from core.project_capsule import build_project_capsule_draft
+from core.reliability_harness import run_agent_reliability_harness
+from core.retrieval_backend_status import build_retrieval_backend_status
+from core.retrieval_eval import run_retrieval_eval
+from core.session_pins import SessionPinStore
+from core.server_cli import ServerCliDependencies, run_server_cli
+from core.source_intake import source_intake_manager
+from core.source_connectors import preview_source_connector as build_source_connector_preview
+from core.source_connectors import preview_document_source_connector as build_document_source_connector_preview
+from core.tool_payloads import (
+    build_list_error_payload,
+    build_list_payload,
+    build_search_error_payload,
+    build_search_payload,
+    MemoryListPayload,
+    MemoryProtocolPayload,
+    render_list_payload,
+    render_search_payload,
+    SearchPayload,
+)
+from core.usage_meter import usage_meter
+from core.workflow_templates import list_workflow_templates as build_workflow_templates
+
+mcp = FastMCP("engram")
+session_pin_store = SessionPinStore()
+PRODUCT_NAME = "Engram"
+PRODUCT_VERSION = "1.0.0"
+PRODUCT_RELEASE_TRACK = "1.0"
+PRODUCT_STABILITY = "stable"
+PROTOCOL_VERSION = 2
+PROTOCOL_SCHEMA_VERSION = "2026-04-27"
+DEFAULT_SSE_HOST = "127.0.0.1"
+DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
+DAEMON_STATUS_SCHEMA_VERSION = "2026-05-12.daemon-status.v1"
+_USAGE_METERING_ENABLED: ContextVar[bool] = ContextVar(
+    "engram_usage_metering_enabled",
+    default=True,
+)
+
+
+def _daemon_url() -> str | None:
+    configured = os.environ.get("ENGRAM_DAEMON_URL", "").strip()
+    return configured.rstrip("/") or None
+
+
+def _normalize_daemon_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalize_daemon_base_url(normalized)
+
+
+def _mcp_env(daemon_url: str | None = None) -> dict[str, str]:
+    env = {"ENGRAM_DATA_DIR": str(resolve_data_root())}
+    normalized_daemon_url = _normalize_daemon_url(daemon_url)
+    if normalized_daemon_url is not None:
+        env["ENGRAM_DAEMON_URL"] = normalized_daemon_url
+    return env
+
+
+def _daemon_enabled() -> bool:
+    return _daemon_url() is not None
+
+
+def _configured_data_dir() -> Path:
+    configured = os.environ.get("ENGRAM_DATA_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path(_mcp_env()["ENGRAM_DATA_DIR"]).resolve()
+
+
+def _daemon_autostart_enabled() -> bool:
+    configured = os.environ.get("ENGRAM_DAEMON_AUTOSTART", "1").strip().lower()
+    return configured not in {"0", "false", "no", "off", "disabled"}
+
+
+def _daemon_autostart_timeout_seconds() -> float:
+    configured = os.environ.get("ENGRAM_DAEMON_AUTOSTART_TIMEOUT", "12").strip()
+    try:
+        return max(float(configured), 0.1)
+    except ValueError:
+        return 12.0
+
+
+def _daemon_autostart_poll_seconds() -> float:
+    configured = os.environ.get("ENGRAM_DAEMON_AUTOSTART_POLL_SECONDS", "0.25").strip()
+    try:
+        return min(max(float(configured), 0.05), 2.0)
+    except ValueError:
+        return 0.25
+
+
+def _is_loopback_daemon_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    hostname = parsed.hostname
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _daemon_host_port(url: str) -> tuple[str, int]:
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port
+    if port is None:
+        port = urlparse(DEFAULT_DAEMON_URL).port or 8765
+    return host, port
+
+
+def _daemon_client() -> EngramDaemonClient:
+    url = _daemon_url()
+    if url is None:
+        raise EngramDaemonClientError("ENGRAM_DAEMON_URL is not configured")
+    return EngramDaemonClient(url)
+
+
+def _probe_daemon_health() -> dict[str, Any]:
+    return _daemon_client().health()
+
+
+def _sleep_for_daemon_start(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _start_local_daemon_process(url: str) -> dict[str, Any]:
+    host, port = _daemon_host_port(url)
+    repo_root = Path(__file__).resolve().parent
+    data_dir = _configured_data_dir()
+    log_dir = data_dir / "operations"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "engramd-autostart.log"
+
+    env = os.environ.copy()
+    env["ENGRAM_DATA_DIR"] = str(data_dir)
+    args = [
+        sys.executable,
+        str((repo_root / "engramd.py").resolve()),
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+
+    creationflags = 0
+    popen_kwargs: dict[str, Any] = {}
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        creationflags |= getattr(subprocess, "DETACHED_PROCESS", 0)
+        popen_kwargs["creationflags"] = creationflags
+    else:
+        popen_kwargs["start_new_session"] = True
+
+    with log_path.open("a", encoding="utf-8") as log_file:
+        process = subprocess.Popen(  # nosec B603
+            args,
+            cwd=str(repo_root),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
+            **popen_kwargs,
+        )
+
+    return {"pid": process.pid, "log_path": str(log_path)}
+
+
+def _daemon_startup_payload(
+    *,
+    reachable: bool,
+    health: dict[str, Any] | None,
+    autostart: dict[str, Any],
+    error: Exception | str | None = None,
+) -> dict[str, Any]:
+    message = str(error) if error is not None else None
+    return {
+        "mode": "daemon_client",
+        "configured_url": _daemon_url(),
+        "reachable": reachable,
+        "health": health,
+        "autostart": autostart,
+        "error": _tool_error("runtime_error", message) if message else None,
+    }
+
+
+def _ensure_daemon_available_for_mcp() -> dict[str, Any]:
+    configured_url = _daemon_url()
+    if configured_url is None:
+        return {
+            "mode": "direct",
+            "configured_url": None,
+            "reachable": False,
+            "health": None,
+            "autostart": {"attempted": False, "reason": "not_configured"},
+            "error": None,
+        }
+
+    try:
+        health = _probe_daemon_health()
+        return _daemon_startup_payload(
+            reachable=True,
+            health=health,
+            autostart={"attempted": False, "reason": "already_running"},
+        )
+    except Exception as first_error:
+        if not _daemon_autostart_enabled():
+            return _daemon_startup_payload(
+                reachable=False,
+                health=None,
+                autostart={"attempted": False, "reason": "disabled"},
+                error=first_error,
+            )
+        if not _is_loopback_daemon_url(configured_url):
+            return _daemon_startup_payload(
+                reachable=False,
+                health=None,
+                autostart={"attempted": False, "reason": "not_loopback_url"},
+                error=first_error,
+            )
+
+        try:
+            start_payload = _start_local_daemon_process(configured_url)
+        except Exception as start_error:
+            return _daemon_startup_payload(
+                reachable=False,
+                health=None,
+                autostart={
+                    "attempted": True,
+                    "started": False,
+                    "reason": "start_failed",
+                    "error": str(start_error),
+                },
+                error=start_error,
+            )
+
+        deadline = time.monotonic() + _daemon_autostart_timeout_seconds()
+        last_error: Exception | str = first_error
+        while time.monotonic() < deadline:
+            _sleep_for_daemon_start(_daemon_autostart_poll_seconds())
+            try:
+                health = _probe_daemon_health()
+                return _daemon_startup_payload(
+                    reachable=True,
+                    health=health,
+                    autostart={
+                        "attempted": True,
+                        "started": True,
+                        "pid": start_payload.get("pid"),
+                        "log_path": start_payload.get("log_path"),
+                    },
+                )
+            except Exception as poll_error:
+                last_error = poll_error
+
+        return _daemon_startup_payload(
+            reachable=False,
+            health=None,
+            autostart={
+                "attempted": True,
+                "started": True,
+                "pid": start_payload.get("pid"),
+                "log_path": start_payload.get("log_path"),
+                "reason": "health_timeout",
+            },
+            error=last_error,
+        )
+
+
+def _prepare_mcp_runtime_before_start() -> dict[str, Any]:
+    if _daemon_enabled():
+        return _ensure_daemon_available_for_mcp()
+
+    print("[Engram] Pre-loading embedding model...", file=sys.stderr)
+    embedder._load()
+    print("[Engram] Model ready.", file=sys.stderr)
+    print("[Engram] ChromaDB will initialize on first vector operation.", file=sys.stderr)
+    return {
+        "mode": "direct",
+        "configured_url": None,
+        "reachable": False,
+        "health": None,
+        "autostart": {"attempted": False, "reason": "direct_mode"},
+        "error": None,
+    }
+
+
+async def _call_daemon(method_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    client = _daemon_client()
+    method = getattr(client, method_name)
+    return await asyncio.to_thread(method, payload)
+
+
+async def _daemon_health() -> dict[str, Any]:
+    return await asyncio.to_thread(_daemon_client().health)
+
+
+def _build_health_payload() -> dict[str, Any]:
+    if _daemon_enabled():
+        configured_url = _daemon_url()
+        try:
+            daemon_health = _daemon_client().health()
+        except Exception as exc:
+            return {
+                "product": {
+                    "name": PRODUCT_NAME,
+                    "version": PRODUCT_VERSION,
+                    "release_track": PRODUCT_RELEASE_TRACK,
+                    "stability": PRODUCT_STABILITY,
+                },
+                "status": "degraded",
+                "model": "daemon_owned",
+                "mode": "daemon_client",
+                "daemon_url": configured_url,
+                "daemon_reachable": False,
+                "stats": memory_manager.get_json_fallback_stats(chroma_error=str(exc)),
+                "error": _tool_error("runtime_error", str(exc)),
+            }
+        daemon_ok = daemon_health.get("status") == "ok" and daemon_health.get("error") is None
+        return {
+            "product": {
+                "name": PRODUCT_NAME,
+                "version": PRODUCT_VERSION,
+                "release_track": PRODUCT_RELEASE_TRACK,
+                "stability": PRODUCT_STABILITY,
+            },
+            "status": "ok" if daemon_ok else "degraded",
+            "model": "daemon_owned",
+            "mode": "daemon_client",
+            "daemon_url": configured_url,
+            "daemon_reachable": daemon_ok,
+            "stats": daemon_health.get("stats") or memory_manager.get_json_fallback_stats(
+                chroma_error="daemon did not return stats"
+            ),
+            "error": daemon_health.get("error"),
+        }
+
+    embedder._load()
+    try:
+        memory_manager._ensure_initialized()
+        stats = memory_manager.get_stats()
+    except RuntimeError as exc:
+        if not is_chroma_availability_error(exc):
+            raise
+        return {
+            "product": {
+                "name": PRODUCT_NAME,
+                "version": PRODUCT_VERSION,
+                "release_track": PRODUCT_RELEASE_TRACK,
+                "stability": PRODUCT_STABILITY,
+            },
+            "status": "degraded",
+            "model": "loaded" if embedder._model is not None else "not_loaded",
+            "mode": "daemon_client" if _daemon_enabled() else "direct",
+            "stats": memory_manager.get_json_fallback_stats(chroma_error=str(exc)),
+            "error": _tool_error("runtime_error", str(exc)),
+        }
+    return {
+        "product": {
+            "name": PRODUCT_NAME,
+            "version": PRODUCT_VERSION,
+            "release_track": PRODUCT_RELEASE_TRACK,
+            "stability": PRODUCT_STABILITY,
+        },
+        "status": "ok",
+        "model": "loaded" if embedder._model is not None else "not_loaded",
+        "mode": "daemon_client" if _daemon_enabled() else "direct",
+        "stats": {
+            **stats,
+            "vector_index": {
+                "available": True,
+                "error": None,
+            },
+        },
+        "error": None,
+    }
+
+
+def _clamp_search_limit(limit: int) -> int:
+    return min(max(limit, 1), 20)
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    """Accept comma-separated strings or list-like values as a de-duped string list."""
+    if value is None:
+        return []
+
+    raw_items: list[str] = []
+    if isinstance(value, str):
+        raw_items = value.split(",")
+    else:
+        for item in value:
+            raw_items.extend(str(item).split(","))
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _slugify_memory_key(value: str) -> str:
+    """Create a conservative snake_case key from a title or heading."""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower()).strip("_")
+    return slug or "untitled_memory"
+
+
+def _clamp_list_limit(limit: int | None) -> int:
+    if limit is None:
+        return 50
+    normalized = int(limit)
+    if normalized <= 0:
+        return 0
+    return min(max(normalized, 1), 500)
+
+
+def _normalize_offset(offset: int | None) -> int:
+    if offset is None:
+        return 0
+    return max(int(offset), 0)
+
+
+def _validate_search_query(query: str) -> str | None:
+    if not query or not query.strip():
+        return "❌ Query cannot be empty."
+    if len(query) > 2000:
+        return "❌ Query too long (max 2,000 chars). Shorten your search query."
+    return None
+
+
+def _normalize_session_id(session_id: str | None) -> str | None:
+    if session_id is None:
+        return None
+    normalized = str(session_id).strip()
+    return normalized or None
+
+
+def _normalize_memory_key(key: str) -> str:
+    normalized = str(key).strip()
+    if not normalized:
+        raise ValueError("key is required")
+    return normalized
+
+
+def _pin_payload(session_id: str, pins: list[str], **extra: Any) -> dict[str, Any]:
+    payload = {
+        "session_id": session_id,
+        "count": len(pins),
+        "pins": pins,
+        "error": None,
+    }
+    payload.update(extra)
+    return payload
+
+
+def _runtime_error_payload(message: str, **payload: Any) -> dict[str, Any]:
+    """Attach a stable structured runtime error payload."""
+    data = dict(payload)
+    data["error"] = {
+        "code": "runtime_error",
+        "message": message,
+    }
+    return data
+
+
+def _format_store_success(key: str, result: dict[str, Any]) -> str:
+    graph_treatment = result.get("graph_treatment") if isinstance(result.get("graph_treatment"), dict) else {}
+    semantic_treatment = (
+        result.get("semantic_graph_treatment")
+        if isinstance(result.get("semantic_graph_treatment"), dict)
+        else {}
+    )
+    graph_count = len(graph_treatment.get("graph_edges_written") or []) + len(
+        semantic_treatment.get("graph_edges_written") or []
+    )
+    graph_line = f"\n   Graph edges: {graph_count}" if graph_count else ""
+    return (
+        f"✅ Stored: '{result['title']}'\n"
+        f"   Key: {key}\n"
+        f"   Chunks: {result.get('chunk_count', '?')}\n"
+        f"   Chars: {result['chars']}"
+        f"{graph_line}"
+    )
+
+
+def _format_duplicate_warning(duplicate: dict[str, Any]) -> str:
+    threshold = _config.get("dedup_threshold", 0.92)
+    return (
+        f"⚠️  DUPLICATE DETECTED — similar memory already exists.\n"
+        f"   Existing key:   {duplicate['existing_key']}\n"
+        f"   Existing title: {duplicate['existing_title']}\n"
+        f"   Similarity:     {duplicate['score']:.3f} (threshold: {threshold})\n\n"
+        f"To store anyway, call store_memory again with force=True."
+    )
+
+
+def _format_daemon_store_response(key: str, response: dict[str, Any]) -> str:
+    error = response.get("error")
+    if response.get("stored") is True:
+        return _format_store_success(key, response["result"])
+    if isinstance(error, dict) and error.get("code") == "duplicate":
+        return _format_duplicate_warning(response.get("duplicate") or {})
+    if isinstance(error, dict):
+        return f"❌ Engram error: {error.get('message') or error.get('code')}"
+    return f"❌ Failed to store '{key}': daemon returned an invalid response"
+
+
+def _tool_error(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _repo_path(path: str | None, default: str) -> Path:
+    raw = Path(path or default)
+    if raw.is_absolute():
+        return raw
+    return Path(__file__).resolve().parent / raw
+
+
+def _default_migration_work_root() -> Path:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return Path(__file__).resolve().parent / ".engram" / f"migration-round-trip-{stamp}-{os.getpid()}"
+
+
+def _compact_migration_import_report(
+    report: dict[str, Any],
+    *,
+    operation: str,
+    legacy_dir: Path,
+    write_performed: bool,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    unsupported = report.get("unsupported_fields") or {}
+    payload: dict[str, Any] = {
+        "schema_version": report.get("schema_version"),
+        "operation": operation,
+        "legacy_dir": str(legacy_dir),
+        "write_performed": write_performed,
+        "active_memory_write_performed": False,
+        "dry_run": report.get("dry_run"),
+        "source_count": report.get("source_count", 0),
+        "valid_count": report.get("valid_count", 0),
+        "invalid_count": report.get("invalid_count", 0),
+        "would_import_count": report.get("would_import_count", 0),
+        "imported_count": report.get("imported_count", 0),
+        "chunk_count_total": report.get("chunk_count_total", 0),
+        "derived_chunk_count_total": report.get("derived_chunk_count_total", 0),
+        "chunk_count_mismatch_count": len(report.get("chunk_count_mismatches") or []),
+        "related_to_count": report.get("related_to_count", 0),
+        "unsupported_field_count": sum(len(fields) for fields in unsupported.values()),
+        "unsupported_fields": unsupported,
+        "field_mappings": report.get("field_mappings", {}),
+        "error": None,
+    }
+    if include_details:
+        payload["key_set"] = report.get("key_set", [])
+        payload["artifact_hashes"] = report.get("artifact_hashes", {})
+        payload["chunk_count_mismatches"] = report.get("chunk_count_mismatches", [])
+        payload["invalid"] = report.get("invalid", [])
+    return payload
+
+
+def _compact_round_trip_report(
+    report: dict[str, Any],
+    *,
+    legacy_dir: Path,
+    work_root: Path,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    dry_run = report.get("dry_run") or {}
+    restore = report.get("restore") or {}
+    payload: dict[str, Any] = {
+        "schema_version": report.get("schema_version"),
+        "operation": "memory_os_round_trip_check",
+        "status": report.get("status"),
+        "legacy_dir": str(legacy_dir),
+        "work_root": str(work_root),
+        "write_performed": True,
+        "active_memory_write_performed": False,
+        "source_count": dry_run.get("source_count", 0),
+        "valid_count": dry_run.get("valid_count", 0),
+        "invalid_count": dry_run.get("invalid_count", 0),
+        "chunk_count_total": dry_run.get("chunk_count_total", 0),
+        "derived_chunk_count_total": dry_run.get("derived_chunk_count_total", 0),
+        "chunk_count_mismatch_count": dry_run.get("chunk_count_mismatch_count", 0),
+        "related_to_count": dry_run.get("related_to_count", 0),
+        "unsupported_field_count": sum(
+            len(fields) for fields in (dry_run.get("unsupported_fields") or {}).values()
+        ),
+        "imported_count": (report.get("import") or {}).get("imported_count", 0),
+        "bundle_memory_count": (report.get("bundle") or {}).get("memory_count", 0),
+        "restored_count": restore.get("restored_count", 0),
+        "legacy_json_restored_count": (report.get("legacy_json_restore") or {}).get("restored_count", 0),
+        "parity": report.get("parity", {}),
+        "error": None,
+    }
+    if include_details:
+        payload["report"] = report
+    return payload
+
+
+def _payload_error_message(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if not error:
+        return None
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("code") or error)
+    return str(error)
+
+
+def _collect_context_conflict_scans(
+    context_payload: dict[str, Any],
+    *,
+    enabled: bool,
+) -> list[dict[str, Any]]:
+    """Return compact conflict_scan payloads for selected context memory refs."""
+    if not enabled:
+        return []
+    scans: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for chunk in context_payload.get("chunks") or []:
+        key = str(chunk.get("key") or "").strip()
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        ref = {"kind": "memory", "key": key}
+        try:
+            scans.append(graph_manager.conflict_scan(ref=ref, status="active"))
+        except Exception as exc:
+            scans.append(
+                {
+                    "schema_version": None,
+                    "ref": ref,
+                    "status": "active",
+                    "edge_types": [],
+                    "count": 0,
+                    "conflicts": [],
+                    "error": _tool_error("runtime_error", str(exc)),
+                }
+            )
+    return scans
+
+
+def _record_usage(
+    tool_name: str,
+    input_payload: dict[str, Any],
+    output_payload: Any,
+    started_at: float,
+    *,
+    status: str = "ok",
+    error: str | None = None,
+) -> None:
+    if not _USAGE_METERING_ENABLED.get():
+        return
+    try:
+        usage_meter.record_tool_call(
+            tool=tool_name,
+            input_payload=input_payload,
+            output_payload=output_payload,
+            status=status,
+            duration_ms=int((time.perf_counter() - started_at) * 1000),
+            error=error,
+        )
+    except Exception:
+        # Telemetry must never break the memory transport path.
+        return
+
+
+def _record_usage_for_payload(
+    tool_name: str,
+    input_payload: dict[str, Any],
+    output_payload: Any,
+    started_at: float,
+) -> None:
+    error = _payload_error_message(output_payload)
+    _record_usage(
+        tool_name,
+        input_payload,
+        output_payload,
+        started_at,
+        status="error" if error else "ok",
+        error=error,
+    )
+
+
+def _record_operation_job(
+    *,
+    operation_type: str,
+    status: str,
+    result: Any | None = None,
+    error: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        operation_log.record_job(
+            operation_type=operation_type,
+            status=status,
+            result=result,
+            error=error,
+            metadata=metadata,
+        )
+    except Exception:
+        return
+
+
+def _record_operation_event(
+    *,
+    event_type: str,
+    subject: dict[str, Any],
+    summary: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        operation_log.record_event(
+            event_type=event_type,
+            subject=subject,
+            summary=summary,
+            metadata=metadata,
+        )
+    except Exception:
+        return
+
+
+def _retrieve_chunk_payload(result: dict | None, key: str, chunk_id: int) -> dict[str, Any]:
+    """Normalize chunk retrieval output into the structured contract."""
+    if not result:
+        return {
+            "key": key,
+            "chunk_id": chunk_id,
+            "found": False,
+            "chunk": None,
+            "error": None,
+        }
+
+    chunk = {
+        "title": result.get("title", key),
+        "text": result.get("text"),
+        "section_title": result.get("section_title"),
+        "heading_path": result.get("heading_path", []),
+        "chunk_kind": result.get("chunk_kind"),
+    }
+    error = result.get("error")
+
+    return {
+        "key": key,
+        "chunk_id": chunk_id,
+        "found": bool(result.get("found", True)),
+        "chunk": chunk if result.get("found", True) else None,
+        "error": error,
+    }
+
+
+def _retrieve_memory_payload(key: str, memory: dict | None) -> dict[str, Any]:
+    """Normalize full-memory retrieval output into the structured contract."""
+    return {
+        "key": key,
+        "found": memory is not None,
+        "memory": memory,
+        "error": None,
+    }
+
+
+def _render_retrieve_chunk_payload(payload: dict[str, Any]) -> str:
+    """Render the structured chunk payload for legacy text-returning callers."""
+    error = payload.get("error")
+    if error is not None:
+        return error["message"]
+    if not payload.get("found"):
+        return f"❌ Chunk not found: key='{payload['key']}' chunk_id={payload['chunk_id']}"
+
+    chunk = payload.get("chunk") or {}
+    title = chunk.get("title") or payload["key"]
+    text = chunk.get("text") or ""
+    return (
+        f"📄 Chunk {payload['chunk_id']} from '{title}'\n"
+        f"🔑 Key: {payload['key']}\n\n"
+        f"{text}"
+    )
+
+
+def _render_retrieve_memory_payload(payload: dict[str, Any]) -> str:
+    """Render the structured full-memory payload for legacy text-returning callers."""
+    error = payload.get("error")
+    if error is not None:
+        return error["message"]
+    if not payload.get("found"):
+        return f"❌ Memory not found: '{payload['key']}'"
+
+    memory = payload.get("memory") or {}
+    tags = ", ".join(memory.get("tags", [])) or "none"
+    updated_at = str(memory.get("updated_at", ""))[:16]
+    return (
+        f"📦 {memory.get('title', payload['key'])}\n"
+        f"🔑 Key: {memory.get('key', payload['key'])}\n"
+        f"🏷  Tags: {tags}\n"
+        f"📅 Updated: {updated_at}\n"
+        f"📊 {memory.get('chars', '?')} chars | {memory.get('chunk_count', '?')} chunks\n\n"
+        f"{memory.get('content', '')}"
+    )
+
+
+@mcp.tool()
+async def memory_protocol() -> MemoryProtocolPayload:
+    """
+    Describe the agent-facing Engram tool contract.
+
+    Call this when a client needs to discover the intended retrieval ladder,
+    canonical tool names, compatibility aliases, or token-safety rules.
+    """
+    protocol_sections = build_memory_protocol_sections(include_beta=True)
+    return {
+        "name": "Engram memory protocol",
+        "product": {
+            "name": PRODUCT_NAME,
+            "version": PRODUCT_VERSION,
+            "release_track": PRODUCT_RELEASE_TRACK,
+            "stability": PRODUCT_STABILITY,
+        },
+        "version": PROTOCOL_VERSION,
+        "schema_version": PROTOCOL_SCHEMA_VERSION,
+        "stability": protocol_sections["stability"],
+        "retrieval_ladder": [
+            {
+                "step": 1,
+                "tool": "search_memories",
+                "purpose": "Find scored snippets and capture key + chunk_id references.",
+            },
+            {
+                "step": 2,
+                "tool": "retrieve_chunk",
+                "purpose": "Read one relevant chunk by key + chunk_id; usually sufficient.",
+            },
+            {
+                "step": 3,
+                "tool": "retrieve_memory",
+                "purpose": "Read the full memory only when chunks are insufficient.",
+            },
+        ],
+        "tool_groups": protocol_sections["tool_groups"],
+        "progressive_discovery": protocol_sections["progressive_discovery"],
+        "canonical_tools": protocol_sections["canonical_tools"],
+        "memory_taxonomy": protocol_sections["memory_taxonomy"],
+        "aliases": {
+            "find_memories": "search_memories",
+            "read_chunk": "retrieve_chunk",
+            "read_memory": "retrieve_chunk or retrieve_memory, depending on arguments",
+            "write_memory": "store_memory",
+        },
+        "examples": [
+            "search_memories(query='scheduler bug', limit=5)",
+            "retrieve_chunk(key='example_project_notes', chunk_id=3)",
+            "context_pack(query='agent memory protocol', project='engram', max_chunks=5)",
+            "prepare_context(task='resume repository work', project='C:/Dev/Engram', profile='repo_resume') for a cited working packet",
+            "make_handoff(task='continue rebuild', project='C:/Dev/Engram', next_steps='run validation') before ending a long session",
+            "context_pack(query='FSInventorySubsystem', retrieval_mode='hybrid') when exact identifiers matter",
+            "preview_memory_chunks(content=source_text, title='Transcript review') before promoting source drafts",
+            "list_document_extractors() before choosing a local parser, OCR/vision adapter, or agent-native preview path",
+            "preview_document_source_connector(connector_type='local_path', target='docs') before document extraction",
+            "prepare_document_disassembly(source_path='C:/docs/book.pdf') for no-write local PDF page/text/image inventory plus visual/OCR follow-up request",
+            "prepare_document_coverage_workbench(source_path='C:/docs/book.pdf', visual_request=req) for no-write page-render/OCR/table coverage packets",
+            "prepare_document_intake_review(source_path='C:/docs/book.pdf') for the no-write review packet, coverage receipts, and next extraction request",
+            "prepare_document_extraction_request(source_ref={'source_uri': 'file:///notes.pdf'}, source_type='pdf', requested_outputs=['markdown', 'page_images']) before running a local parser",
+            "prepare_document_extraction_result(extraction_request=req, title='Notes', content=markdown, media_type='text/markdown') before preview_document_extraction",
+            "prepare_document_understanding_packet(document_record=doc, analysis=agent_analysis) before preparing promotion decisions",
+            "prepare_document_draft(document_record=doc, analysis={'decisions': ['...']}) before promoting document evidence",
+            "prepare_document_promotion_transaction(document_draft=draft, approved_by='agent-review') before executing writes",
+            "prepare_document_artifact_store(review_packet=packet) then store_document_artifact(prepared_transaction_id=txn, accept=True, review_packet=packet) for explicit ledgered document evidence",
+            "prepare_document_ingestion_completion(document_id=doc_id, artifact_id=artifact_id, visual_preview=preview, understanding_packet=packet, document_promotion_transaction=txn) before marking a document usable",
+            "complete_document_ingestion(document_id=doc_id, accept=True, approved_by='agent-review') only after full reviewed coverage and graph evidence",
+            "prepare_visual_extraction_request(document_record=doc, image_refs=pages, requested_capabilities=['ocr_text']) before running external OCR",
+            "preview_visual_extraction(document_record=doc, observations=vision_notes) before promoting image-derived claims",
+            "migration_dry_run(legacy_dir='data/memories') before importing the current memory corpus into a Memory OS store",
+            "memory_os_round_trip_check(legacy_dir='data/memories', work_root='.engram/migration-round-trip-check') for migration parity proof",
+            "retrieval_backend_status(store_root='.engram/migration-round-trip-check/store', include_rebuild_probe=True) before considering a retrieval backend switch",
+            "graph_backend_status(store_root='.engram/migration-round-trip-check/store') before considering a graph backend switch",
+            "daemon_status() before assuming this MCP server is using engramd daemon-client mode",
+            "read_memory(key='engram_protocol', full=True) only after chunks are insufficient",
+        ],
+        "warnings": [
+            "Do not call retrieve_memory before search_memories or retrieve_chunk unless the key is already known and full content is explicitly required.",
+            "Prefer context_pack when you need a compact working set rather than whole memories.",
+            "Use retrieval_mode='hybrid' intentionally for identifier-heavy queries; semantic remains the cheaper default.",
+            "Use list_memories for browsing metadata, not topic lookup.",
+            "Codex clients may lazy-load Engram; if mcp__engram__ tools are not initially visible, use tool discovery/search for Engram before concluding it is unavailable.",
+            "ENGRAM_DAEMON_URL opt-in daemon mode routes stable memory tools through engramd; call daemon_status() to verify direct vs daemon-client mode.",
+            "For ordinary multi-session Codex memory use, server_daemon_client.py is the thin entrypoint that delegates to engramd without importing local storage/index modules.",
+            "ENGRAM_RETRIEVAL_BACKEND and ENGRAM_GRAPH_BACKEND are intent-only readiness signals; they do not switch live Chroma or JSON graph storage.",
+            "ENGRAM_DAEMON_AUTOSTART defaults on for loopback daemon-client startup; set it to 0/false/no/off to require a manually started daemon.",
+            "When multiple stdio Engram servers are live, only one process owns ChromaDB; secondary processes keep JSON-first writes available, and vector search/context tools return a runtime error until the owner exits.",
+        ],
+    }
+
+
+@mcp.tool()
+async def daemon_status() -> dict[str, Any]:
+    """
+    Report whether this MCP server is using direct storage or engramd.
+
+    `ENGRAM_DAEMON_URL` enables daemon-client mode for routed MCP tools.
+    `ENGRAM_DAEMON_AUTOSTART` controls startup-time loopback daemon spawning.
+    This status tool verifies the configured mode and, when a daemon URL is
+    present, performs a daemon health request without reading or writing memory;
+    it reports autostart eligibility but does not spawn a daemon itself.
+    """
+    configured_url = _daemon_url()
+    base_payload: dict[str, Any] = {
+        "schema_version": DAEMON_STATUS_SCHEMA_VERSION,
+        "mode": "daemon_client" if configured_url else "direct",
+        "daemon_enabled": configured_url is not None,
+        "configured_url": configured_url,
+        "reachable": False,
+        "health": None,
+        "autostart": {
+            "enabled": _daemon_autostart_enabled(),
+            "eligible": bool(configured_url and _is_loopback_daemon_url(configured_url)),
+            "startup_only": True,
+        },
+        "stable_tools_routed": full_server_daemon_routed_tools() if configured_url else [],
+        "error": None,
+    }
+    if configured_url is None:
+        return base_payload
+
+    try:
+        health = await _daemon_health()
+    except Exception as exc:
+        base_payload["error"] = _tool_error("runtime_error", str(exc))
+        return base_payload
+
+    base_payload["health"] = health
+    base_payload["reachable"] = health.get("error") is None and health.get("status") == "ok"
+    if not base_payload["reachable"]:
+        error = health.get("error")
+        if error:
+            base_payload["error"] = error
+    return base_payload
+
+
+@mcp.tool()
+async def query_knowledge(request: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return an Engram Knowledge Contract 1.0 orientation, review-preparation, evidence-audit, graph-evidence, or artifact-family response.
+
+    This tool is read-only. It requires the daemon-owned Memory OS path because
+    EKC v0 is a serving contract over compiled local context and ledgered
+    source/document/review/audit/graph/artifact-family evidence, not a legacy direct-mode memory write path.
+    """
+    return await query_knowledge_payload(
+        request,
+        daemon_enabled=_daemon_enabled(),
+        query_daemon=lambda payload: asyncio.to_thread(_daemon_client().query_knowledge, payload),
+        daemon_error_type=EngramDaemonClientError,
+    )
+
+
+@mcp.tool()
+async def discover_memory_capabilities(query: str = "", budget_chars: int = 4000) -> dict[str, Any]:
+    """
+    Return a budgeted, read-only catalog of Engram memory capabilities.
+
+    This is a discovery surface only: it reports capability groups, runtime
+    readiness, sync/benchmark affordances, and warnings without loading memory
+    bodies, source text, document excerpts, private sync keys, or benchmark
+    payloads.
+    """
+    input_payload = {"query": str(query or ""), "budget_chars": int(budget_chars or 4000)}
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("discover_memory_capabilities", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.capability-discovery.v1",
+                "write_performed": False,
+                "capability_groups": {},
+                "warnings": [],
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return build_capability_catalog(None, **input_payload)
+
+
+@mcp.tool()
+async def ensure_sync_device_identity(device_name: str = "local") -> dict[str, Any]:
+    """Ensure the daemon-owned Memory OS runtime has a public sync device identity."""
+    input_payload = {"device_name": str(device_name or "local").strip() or "local"}
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("ensure_sync_device_identity", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "status": "unavailable",
+                "local_device": None,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "status": "unavailable",
+        "local_device": None,
+        "error": _tool_error(
+            "daemon_required",
+            "ensure_sync_device_identity requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def export_local_sync_identity() -> dict[str, Any]:
+    """Export a public-only sync identity packet from the daemon-owned runtime."""
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("export_local_sync_identity", {})
+        except EngramDaemonClientError as exc:
+            return {
+                "record_type": "sync_public_identity",
+                "device_id": None,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "record_type": "sync_public_identity",
+        "device_id": None,
+        "error": _tool_error(
+            "daemon_required",
+            "export_local_sync_identity requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def register_sync_peer(
+    peer_identity_packet: dict[str, Any],
+    accept: bool = False,
+    approved_by: str | None = None,
+) -> dict[str, Any]:
+    """Register a reviewed peer public sync identity packet through engramd."""
+    input_payload = {
+        "peer_identity_packet": peer_identity_packet,
+        "accept": accept,
+        "approved_by": approved_by,
+    }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("register_sync_peer", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "status": "unavailable",
+                "write_performed": False,
+                "peer": None,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "status": "unavailable",
+        "write_performed": False,
+        "peer": None,
+        "error": _tool_error(
+            "daemon_required",
+            "register_sync_peer requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def inspect_sync_state() -> dict[str, Any]:
+    """Inspect sync identity, cursor, changeset, and conflict state through engramd."""
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("inspect_sync_state", {})
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-state.v1",
+                "write_performed": False,
+                "status": {"status": "unavailable"},
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-state.v1",
+        "write_performed": False,
+        "status": {"status": "unavailable"},
+        "error": _tool_error(
+            "daemon_required",
+            "inspect_sync_state requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def prepare_sync_changeset(peer_id: str) -> dict[str, Any]:
+    """Prepare a no-write reviewed changeset export packet for a registered sync peer."""
+    normalized_peer_id = str(peer_id or "").strip()
+    input_payload = {"peer_id": normalized_peer_id}
+    if not normalized_peer_id:
+        return {
+            "schema_version": "2026-05-26.sync-prepare.v1",
+            "status": "policy_denied",
+            "write_performed": False,
+            "error": _tool_error("invalid_request", "peer_id is required"),
+        }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("prepare_sync_changeset", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-prepare.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-prepare.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "prepare_sync_changeset requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def export_sync_changeset(
+    plan: dict[str, Any],
+    accept: bool = False,
+    approved_by: str | None = None,
+) -> dict[str, Any]:
+    """Export a reviewed sync changeset as a signed encrypted content-addressed bundle."""
+    input_payload = {
+        "plan": plan,
+        "accept": accept,
+        "approved_by": approved_by,
+    }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("export_sync_changeset", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-export.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-export.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "export_sync_changeset requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def prepare_sync_apply(bundle_b64: str) -> dict[str, Any]:
+    """Prepare a no-write apply plan for a signed encrypted sync bundle."""
+    normalized_bundle = str(bundle_b64 or "").strip()
+    input_payload = {"bundle_b64": normalized_bundle}
+    if not normalized_bundle:
+        return {
+            "schema_version": "2026-05-26.sync-apply.v1",
+            "status": "policy_denied",
+            "write_performed": False,
+            "error": _tool_error("invalid_request", "bundle_b64 is required"),
+        }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("prepare_sync_apply", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-apply.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-apply.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "prepare_sync_apply requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def apply_sync_changeset(
+    bundle_b64: str,
+    plan: dict[str, Any],
+    accept: bool = False,
+    approved_by: str | None = None,
+) -> dict[str, Any]:
+    """Apply a reviewed sync bundle only after re-verification and explicit acceptance."""
+    normalized_bundle = str(bundle_b64 or "").strip()
+    input_payload = {
+        "bundle_b64": normalized_bundle,
+        "plan": plan,
+        "accept": accept,
+        "approved_by": approved_by,
+    }
+    if not normalized_bundle:
+        return {
+            "schema_version": "2026-05-26.sync-apply.v1",
+            "status": "policy_denied",
+            "write_performed": False,
+            "error": _tool_error("invalid_request", "bundle_b64 is required"),
+        }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("apply_sync_changeset", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-apply.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-apply.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "apply_sync_changeset requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def inspect_sync_convergence(peer_id: str) -> dict[str, Any]:
+    """Inspect unresolved sync conflicts for a registered peer."""
+    normalized_peer_id = str(peer_id or "").strip()
+    if not normalized_peer_id:
+        return {
+            "schema_version": "2026-05-26.sync-convergence.v1",
+            "status": "policy_denied",
+            "write_performed": False,
+            "error": _tool_error("invalid_request", "peer_id is required"),
+        }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("inspect_sync_convergence", {"peer_id": normalized_peer_id})
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-convergence.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-convergence.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "inspect_sync_convergence requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def list_sync_conflicts(status: str | None = None) -> dict[str, Any]:
+    """List sync conflict review records without full remote payload bodies."""
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("list_sync_conflicts", {"status": str(status or "").strip() or None})
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-conflicts.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "conflicts": [],
+                "unresolved_conflict_count": 0,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-conflicts.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "conflicts": [],
+        "unresolved_conflict_count": 0,
+        "error": _tool_error(
+            "daemon_required",
+            "list_sync_conflicts requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def resolve_sync_conflict(
+    conflict_id: str,
+    resolution: str,
+    accept: bool = False,
+    approved_by: str | None = None,
+) -> dict[str, Any]:
+    """Resolve a sync conflict review record without directly overwriting memory."""
+    input_payload = {
+        "conflict_id": conflict_id,
+        "resolution": resolution,
+        "accept": accept,
+        "approved_by": approved_by,
+    }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("resolve_sync_conflict", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-conflict.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-conflict.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "resolve_sync_conflict requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def configure_sync_peer_transport(
+    peer_id: str,
+    url: str,
+    mode: str = "manual",
+    allow_pull: bool = False,
+    accept: bool = False,
+    approved_by: str | None = None,
+) -> dict[str, Any]:
+    """Configure reviewed LAN/Tailscale sync listener coordinates for a registered peer."""
+    input_payload = {
+        "peer_id": str(peer_id or "").strip(),
+        "url": str(url or "").strip(),
+        "mode": str(mode or "manual").strip() or "manual",
+        "allow_pull": bool(allow_pull),
+        "accept": accept,
+        "approved_by": approved_by,
+    }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("configure_sync_peer_transport", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-peer-transport.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-peer-transport.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "configure_sync_peer_transport requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def inspect_sync_peer(peer_id: str) -> dict[str, Any]:
+    """Inspect one registered sync peer and its transport coordinates."""
+    input_payload = {"peer_id": str(peer_id or "").strip()}
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("inspect_sync_peer", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-peer-transport.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "peer": None,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-peer-transport.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "peer": None,
+        "error": _tool_error(
+            "daemon_required",
+            "inspect_sync_peer requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def push_sync_changeset(
+    peer_id: str,
+    accept: bool = False,
+    approved_by: str | None = None,
+) -> dict[str, Any]:
+    """Prepare, export, and push a reviewed encrypted changeset to a sync-only peer listener."""
+    input_payload = {
+        "peer_id": str(peer_id or "").strip(),
+        "accept": accept,
+        "approved_by": approved_by,
+    }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("push_sync_changeset", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-peer-transport.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-peer-transport.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "push_sync_changeset requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def list_sync_inbox(peer_id: str | None = None) -> dict[str, Any]:
+    """List encrypted inbound sync bundles without applying or returning bundle bytes."""
+    input_payload = {"peer_id": str(peer_id or "").strip() or None}
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("list_sync_inbox", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-26.sync-inbox.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "inbox": [],
+                "inbox_count": 0,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-26.sync-inbox.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "inbox": [],
+        "inbox_count": 0,
+        "error": _tool_error(
+            "daemon_required",
+            "list_sync_inbox requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def prepare_sync_inbox_apply(peer_id: str | None = None, limit: int = 50) -> dict[str, Any]:
+    """Prepare a no-write plan for applying already staged sync inbox bundles."""
+    input_payload = {"peer_id": str(peer_id or "").strip() or None, "limit": int(limit or 0)}
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("prepare_sync_inbox_apply", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-27.sync-inbox-apply.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-27.sync-inbox-apply.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "prepare_sync_inbox_apply requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def apply_sync_inbox(
+    accept: bool = False,
+    approved_by: str | None = None,
+    peer_id: str | None = None,
+    limit: int = 50,
+    stop_on_error: bool = True,
+) -> dict[str, Any]:
+    """Apply already staged signed sync inbox bundles after explicit acceptance."""
+    input_payload = {
+        "peer_id": str(peer_id or "").strip() or None,
+        "limit": int(limit or 0),
+        "accept": accept,
+        "approved_by": approved_by,
+        "stop_on_error": stop_on_error,
+    }
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("apply_sync_inbox", input_payload)
+        except EngramDaemonClientError as exc:
+            return {
+                "schema_version": "2026-05-27.sync-inbox-apply.v1",
+                "status": "unavailable",
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {exc}"),
+            }
+    return {
+        "schema_version": "2026-05-27.sync-inbox-apply.v1",
+        "status": "unavailable",
+        "write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "apply_sync_inbox requires the daemon-owned Memory OS path.",
+        ),
+    }
+
+
+@mcp.tool()
+async def migration_dry_run(
+    legacy_dir: str = "data/memories",
+    include_details: bool = False,
+) -> dict[str, Any]:
+    """
+    Validate legacy JSON memories against the Memory OS migration ledger without writing.
+
+    This is the safe first migration gate. It scans legacy JSON memories, derives
+    chunk and metadata mappings, and reports unsupported fields and parity risks.
+    It does not create a ledger, write artifacts, or promote active memories.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"legacy_dir": legacy_dir, "include_details": include_details}
+    try:
+        resolved_legacy_dir = _repo_path(legacy_dir, "data/memories")
+        if not resolved_legacy_dir.is_dir():
+            raise ValueError(f"legacy_dir must be an existing directory: {resolved_legacy_dir}")
+        report = await asyncio.to_thread(
+            MemoryOSMigrationKernel(Path(os.devnull)).import_legacy_json,
+            resolved_legacy_dir,
+            True,
+        )
+        payload = _compact_migration_import_report(
+            report,
+            operation="migration_dry_run",
+            legacy_dir=resolved_legacy_dir,
+            write_performed=False,
+            include_details=include_details,
+        )
+    except ValueError as e:
+        payload = {
+            "schema_version": None,
+            "operation": "migration_dry_run",
+            "legacy_dir": legacy_dir,
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    except Exception as e:
+        payload = {
+            "schema_version": None,
+            "operation": "migration_dry_run",
+            "legacy_dir": legacy_dir,
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "error": _tool_error("runtime_error", f"Unexpected migration dry-run failure: {e}"),
+        }
+    _record_usage_for_payload("migration_dry_run", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def memory_os_round_trip_check(
+    legacy_dir: str = "data/memories",
+    work_root: str | None = None,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    """
+    Run a Memory OS legacy import/export/restore parity check.
+
+    This writes only migration work artifacts under work_root. It never writes
+    active memories, never promotes drafts, and never mutates ChromaDB. Use it
+    after migration_dry_run when an agent or operator needs proof that the
+    current corpus can round-trip through the rebuilt ledger and artifact store.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "legacy_dir": legacy_dir,
+        "work_root": work_root,
+        "include_details": include_details,
+    }
+    resolved_legacy_dir = _repo_path(legacy_dir, "data/memories")
+    resolved_work_root = _repo_path(work_root, str(_default_migration_work_root()))
+    try:
+        if not resolved_legacy_dir.is_dir():
+            raise ValueError(f"legacy_dir must be an existing directory: {resolved_legacy_dir}")
+        report = await asyncio.to_thread(
+            run_round_trip_check,
+            resolved_legacy_dir,
+            resolved_work_root,
+            resolved_work_root / "report.json",
+        )
+        payload = _compact_round_trip_report(
+            report,
+            legacy_dir=resolved_legacy_dir,
+            work_root=resolved_work_root,
+            include_details=include_details,
+        )
+    except (FileExistsError, ValueError) as e:
+        payload = {
+            "schema_version": None,
+            "operation": "memory_os_round_trip_check",
+            "legacy_dir": str(resolved_legacy_dir),
+            "work_root": str(resolved_work_root),
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    except Exception as e:
+        payload = {
+            "schema_version": None,
+            "operation": "memory_os_round_trip_check",
+            "legacy_dir": str(resolved_legacy_dir),
+            "work_root": str(resolved_work_root),
+            "write_performed": False,
+            "active_memory_write_performed": False,
+            "error": _tool_error("runtime_error", f"Unexpected Memory OS round-trip failure: {e}"),
+        }
+    _record_usage_for_payload("memory_os_round_trip_check", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_legacy_memory_os_migration(
+    legacy_dir: str = "data/memories",
+    include_details: bool = False,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write daemon-owned legacy JSON to Memory OS migration transaction.
+
+    This checks importability, status policy, duplicate keys, and proposed writes
+    without mutating legacy JSON, Chroma, or active Memory OS records.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"legacy_dir": legacy_dir, "include_details": include_details}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_legacy_memory_os_migration", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "operation": "prepare_legacy_memory_os_migration",
+                "status": "unavailable",
+                "legacy_dir": legacy_dir,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_legacy_memory_os_migration", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "operation": "prepare_legacy_memory_os_migration",
+        "status": "unavailable",
+        "legacy_dir": legacy_dir,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "prepare_legacy_memory_os_migration requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("prepare_legacy_memory_os_migration", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def apply_legacy_memory_os_migration(
+    legacy_dir: str = "data/memories",
+    accept: bool = False,
+    approved_by: str | None = None,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    """
+    Apply reviewed legacy JSON migration writes through daemon-owned Memory OS services.
+
+    This is a write tool. It requires accept=True and approved_by, writes
+    Memory OS memories/source artifacts/retrieval records, and never deletes
+    legacy JSON or Chroma recovery data.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "legacy_dir": legacy_dir,
+        "accept": accept,
+        "approved_by": approved_by,
+        "include_details": include_details,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("apply_legacy_memory_os_migration", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "operation": "apply_legacy_memory_os_migration",
+                "status": "unavailable",
+                "legacy_dir": legacy_dir,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("apply_legacy_memory_os_migration", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "operation": "apply_legacy_memory_os_migration",
+        "status": "unavailable",
+        "legacy_dir": legacy_dir,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "apply_legacy_memory_os_migration requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("apply_legacy_memory_os_migration", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_legacy_related_to_graph_migration(
+    legacy_dir: str = "data/memories",
+    include_details: bool = False,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write daemon-owned migration of legacy related_to graph evidence.
+
+    This reports candidate edge counts, graphable lifecycle policy, skipped
+    draft/historical edges, and missing refs without writing graph edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"legacy_dir": legacy_dir, "include_details": include_details}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_legacy_related_to_graph_migration", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "operation": "prepare_legacy_related_to_graph_migration",
+                "status": "unavailable",
+                "legacy_dir": legacy_dir,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_legacy_related_to_graph_migration", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "operation": "prepare_legacy_related_to_graph_migration",
+        "status": "unavailable",
+        "legacy_dir": legacy_dir,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "prepare_legacy_related_to_graph_migration requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("prepare_legacy_related_to_graph_migration", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def apply_legacy_related_to_graph_migration(
+    legacy_dir: str = "data/memories",
+    accept: bool = False,
+    approved_by: str | None = None,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    """
+    Apply reviewed legacy related_to graph edges through daemon-owned Memory OS.
+
+    This is a write tool. It requires accept=True and approved_by, writes only
+    graph evidence for graphable legacy records, and never loads neighbor memory
+    bodies during traversal.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "legacy_dir": legacy_dir,
+        "accept": accept,
+        "approved_by": approved_by,
+        "include_details": include_details,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("apply_legacy_related_to_graph_migration", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "operation": "apply_legacy_related_to_graph_migration",
+                "status": "unavailable",
+                "legacy_dir": legacy_dir,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("apply_legacy_related_to_graph_migration", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "operation": "apply_legacy_related_to_graph_migration",
+        "status": "unavailable",
+        "legacy_dir": legacy_dir,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "apply_legacy_related_to_graph_migration requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("apply_legacy_related_to_graph_migration", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def retrieval_backend_status(
+    store_root: str | None = None,
+    include_rebuild_probe: bool = False,
+    rebuild_batch_size: int = 128,
+) -> dict[str, Any]:
+    """
+    Report Memory OS retrieval backend readiness without changing live retrieval.
+
+    The current live Engram retrieval path remains legacy JSON plus Chroma.
+    This tool reports whether the optional LanceDB adapter can even be spiked,
+    whether a migrated Memory OS ledger exposes vector source records, and
+    whether the deterministic rebuild plumbing passes. It does not write active
+    memories, mutate ChromaDB, or promote LanceDB as the backend.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "store_root": store_root,
+        "include_rebuild_probe": include_rebuild_probe,
+        "rebuild_batch_size": rebuild_batch_size,
+    }
+    payload = await build_retrieval_backend_status_payload(
+        input_payload,
+        repo_path=_repo_path,
+        run_in_thread=asyncio.to_thread,
+        build_status=build_retrieval_backend_status,
+        tool_error=_tool_error,
+    )
+    _record_usage_for_payload("retrieval_backend_status", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def add_graph_edge(
+    from_ref: dict[str, Any],
+    to_ref: dict[str, Any],
+    edge_type: str,
+    confidence: float = 1.0,
+    evidence: str = "",
+    source: str = "manual",
+    created_by: str = "agent",
+) -> dict[str, Any]:
+    """
+    Add or update a typed relationship between compact Engram references.
+
+    Graph tools return relationship IDs, refs, and short evidence only. They do
+    not load neighbor memory bodies; use search_memories or retrieve_chunk for
+    text retrieval after deciding a relationship is relevant.
+    """
+    try:
+        return {
+            "edge": graph_manager.add_edge(
+                from_ref=from_ref,
+                to_ref=to_ref,
+                edge_type=edge_type,
+                confidence=confidence,
+                evidence=evidence,
+                source=source,
+                created_by=created_by,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        return {"edge": None, "error": _tool_error("invalid_request", str(e))}
+    except RuntimeError as e:
+        return {"edge": None, "error": _tool_error("runtime_error", str(e))}
+
+
+@mcp.tool()
+async def list_graph_edges(
+    ref: dict[str, Any] | None = None,
+    edge_type: str | None = None,
+    status: str = "active",
+) -> dict[str, Any]:
+    """
+    List typed relationship records without loading memory bodies.
+
+    Optional filters keep graph inspection cheap: pass a compact ref to find
+    edges touching a memory key, an edge_type to narrow relationship kind, or a
+    status to include inactive edges intentionally.
+    """
+    try:
+        return graph_manager.list_edges(ref=ref, edge_type=edge_type, status=status)
+    except ValueError as e:
+        return {"count": 0, "edges": [], "error": _tool_error("invalid_request", str(e))}
+    except RuntimeError as e:
+        return {"count": 0, "edges": [], "error": _tool_error("runtime_error", str(e))}
+
+
+@mcp.tool()
+async def impact_scan(
+    root_ref: dict[str, Any],
+    max_hops: int = 1,
+    edge_types: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Traverse relationship IDs outward from a compact ref without reading memory bodies.
+
+    Use this to understand likely impact or related memory keys. The result is a
+    relationship map with compact evidence; it is not permission to load all
+    neighbor memory content.
+    """
+    try:
+        return graph_manager.impact_scan(root_ref=root_ref, max_hops=max_hops, edge_types=edge_types)
+    except ValueError as e:
+        return {
+            "root_ref": root_ref,
+            "count": 0,
+            "edges": [],
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    except RuntimeError as e:
+        return {
+            "root_ref": root_ref,
+            "count": 0,
+            "edges": [],
+            "error": _tool_error("runtime_error", str(e)),
+        }
+
+
+@mcp.tool()
+async def conflict_scan(
+    ref: dict[str, Any] | None = None,
+    status: str = "active",
+) -> dict[str, Any]:
+    """
+    List contradiction, invalidation, and supersession edges without loading memory bodies.
+
+    Use this before relying on a memory set when trust or freshness matters. The
+    response returns compact refs, edge types, confidence, and evidence only;
+    call retrieve_chunk/search_memories separately if body text is needed.
+    """
+    try:
+        return graph_manager.conflict_scan(ref=ref, status=status)
+    except ValueError as e:
+        return {
+            "schema_version": "2026-04-27.conflict-scan.v1",
+            "ref": ref,
+            "status": status,
+            "edge_types": [],
+            "count": 0,
+            "conflicts": [],
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    except RuntimeError as e:
+        return {
+            "schema_version": "2026-04-27.conflict-scan.v1",
+            "ref": ref,
+            "status": status,
+            "edge_types": [],
+            "count": 0,
+            "conflicts": [],
+            "error": _tool_error("runtime_error", str(e)),
+        }
+
+
+@mcp.tool()
+async def audit_graph() -> dict[str, Any]:
+    """
+    Report graph metadata drift without modifying graph storage or loading memory bodies.
+    """
+    try:
+        payload = graph_manager.audit_graph()
+        _record_operation_job(
+            operation_type="graph_audit",
+            status="completed",
+            result={"issue_count": payload.get("issue_count", 0)},
+        )
+        _record_operation_event(
+            event_type="graph_audit_completed",
+            subject={"kind": "graph_audit"},
+            summary="Graph metadata audit completed.",
+            metadata={"issue_count": payload.get("issue_count", 0)},
+        )
+        return payload
+    except RuntimeError as e:
+        payload = {"issue_count": 0, "issues": [], "error": _tool_error("runtime_error", str(e))}
+        _record_operation_job(
+            operation_type="graph_audit",
+            status="failed",
+            result={"issue_count": 0},
+            error=str(e),
+        )
+        return payload
+
+
+@mcp.tool()
+async def graph_backend_status(
+    store_root: str | None = None,
+    graph_path: str | None = "data/graph/edges.json",
+) -> dict[str, Any]:
+    """
+    Report graph backend readiness without changing live graph storage.
+
+    The current live graph path remains the JSON GraphStore. This tool reports
+    JSON graph edge counts, optional Kuzu availability, migrated ledger graph
+    edge counts, and the remaining promotion gates. It does not write graph
+    records, promote Kuzu, or load neighbor memory bodies.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"store_root": store_root, "graph_path": graph_path}
+    payload = await build_graph_backend_status_payload(
+        input_payload,
+        repo_path=_repo_path,
+        run_in_thread=asyncio.to_thread,
+        build_status=build_graph_backend_status,
+        tool_error=_tool_error,
+    )
+    _record_usage_for_payload("graph_backend_status", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def usage_summary(days: int = 7) -> dict[str, Any]:
+    """
+    Return Engram-attributed token estimates and outlier warnings.
+    """
+    days = min(max(days, 1), 90)
+    return usage_meter.get_summary(days=days)
+
+
+@mcp.tool()
+async def list_usage_calls(tool: str | None = None, limit: int = 100) -> dict[str, Any]:
+    """
+    Return recent privacy-safe token usage call records.
+    """
+    limit = min(max(limit, 1), 500)
+    return usage_meter.list_calls(tool=tool, limit=limit)
+
+
+@mcp.tool()
+async def list_ingestion_pipelines() -> dict[str, Any]:
+    """
+    List no-write source-intake pipeline presets for transcripts, code scans, handoffs, and design docs.
+    """
+    return build_ingestion_pipeline_catalog()
+
+
+@mcp.tool()
+async def preview_memory_chunks(
+    content: str,
+    title: str = "",
+    max_size: int = 800,
+    max_chunks: int = 50,
+) -> dict[str, Any]:
+    """
+    Preview Engram's markdown-aware chunk boundaries without storing memory or embeddings.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"content": content, "title": title, "max_size": max_size, "max_chunks": max_chunks}
+    payload = build_chunk_preview(content, title=title, max_size=max_size, max_chunks=max_chunks)
+    _record_usage_for_payload("preview_memory_chunks", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def preview_source_connector(
+    connector_type: str,
+    target: str,
+    include_globs: list[str] | None = None,
+    max_files: int = 20,
+    max_file_size_kb: int = 256,
+    max_source_text_chars: int = 12000,
+) -> dict[str, Any]:
+    """
+    Preview local source files and draft arguments without importing them into memory.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "connector_type": connector_type,
+        "target": target,
+        "include_globs": include_globs,
+        "max_files": max_files,
+        "max_file_size_kb": max_file_size_kb,
+        "max_source_text_chars": max_source_text_chars,
+    }
+    try:
+        payload = build_source_connector_preview(
+            connector_type=connector_type,
+            target=target,
+            include_globs=include_globs,
+            max_files=max_files,
+            max_file_size_kb=max_file_size_kb,
+            max_source_text_chars=max_source_text_chars,
+        )
+    except ValueError as e:
+        payload = {
+            "connector_type": connector_type,
+            "target": target,
+            "count": 0,
+            "items": [],
+            "omitted": [],
+            "write_performed": False,
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    _record_usage_for_payload("preview_source_connector", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def preview_document_source_connector(
+    connector_type: str,
+    target: str,
+    include_globs: list[str] | None = None,
+    max_files: int = 20,
+    max_file_size_kb: int = 256,
+    max_source_text_chars: int = 12000,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Preview local Markdown/text/HTML files or URL targets as document inputs.
+
+    This helper is no-write. URL, PDF, DOCX, and image-bearing sources are
+    reported as requiring an external fetch/parser instead of being parsed
+    speculatively inside Engram.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "connector_type": connector_type,
+        "target": target,
+        "include_globs": include_globs,
+        "max_files": max_files,
+        "max_file_size_kb": max_file_size_kb,
+        "max_source_text_chars": max_source_text_chars,
+        "metadata": metadata,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("preview_document_source_connector", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "connector_type": connector_type,
+                "target": target,
+                "count": 0,
+                "items": [],
+                "omitted": [],
+                "write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("preview_document_source_connector", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = build_document_source_connector_preview(
+            connector_type=connector_type,
+            target=target,
+            include_globs=include_globs,
+            max_files=max_files,
+            max_file_size_kb=max_file_size_kb,
+            max_source_text_chars=max_source_text_chars,
+            metadata=metadata,
+        )
+    except ValueError as e:
+        payload = {
+            "connector_type": connector_type,
+            "target": target,
+            "count": 0,
+            "items": [],
+            "omitted": [],
+            "write_performed": False,
+            "error": _tool_error("invalid_request", str(e)),
+        }
+    _record_usage_for_payload("preview_document_source_connector", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def list_document_extractors() -> dict[str, Any]:
+    """
+    List document extraction capabilities without running parsers or providers.
+
+    This no-write catalog distinguishes Engram's bundled text/markup preview path
+    from external PDF/DOCX and OCR/vision frameworks. Use it before selecting a
+    connector, parser, or visual extraction route.
+    """
+    started_at = time.perf_counter()
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("list_document_extractors", {})
+        except EngramDaemonClientError as e:
+            payload = {
+                "catalog": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("list_document_extractors", {}, payload, started_at)
+        return payload
+    try:
+        payload = {"catalog": build_document_extractor_catalog(), "error": None}
+    except Exception as e:
+        payload = {
+            "catalog": None,
+            "error": _tool_error("runtime_error", f"Unexpected document extractor catalog failure: {e}"),
+        }
+    _record_usage_for_payload("list_document_extractors", {}, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_disassembly(
+    source_path: str,
+    source_type: str = "pdf",
+    max_pages: int | None = None,
+    page_range: str | None = None,
+    resume_token: str | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write local document disassembly preview.
+
+    This beta helper currently supports PDF files through local Poppler-style
+    tools (`pdfinfo`, `pdftotext`, and `pdfimages`). It inventories pages,
+    available text, image-bearing pages, extraction receipts, quality seed
+    signals, portable artifact refs, visual/page-crop candidates, and a prepared
+    visual extraction request without storing memory or promoting graph edges.
+    Review the returned evidence before using preview_document_extraction,
+    visual extraction, or document draft promotion.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source_path": source_path,
+        "source_type": source_type,
+        "max_pages": max_pages,
+        "page_range": page_range,
+        "resume_token": resume_token,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_disassembly", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "disassembly": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_disassembly", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "disassembly": build_document_disassembly(
+                source_path=source_path,
+                source_type=source_type,
+                max_pages=max_pages,
+                page_range=page_range,
+                resume_token=resume_token,
+            ),
+            "error": None,
+        }
+        if payload["disassembly"].get("error") is not None:
+            payload["error"] = payload["disassembly"]["error"]
+    except ValueError as e:
+        payload = {"disassembly": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "disassembly": None,
+            "error": _tool_error("runtime_error", f"Unexpected document disassembly failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_disassembly", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_coverage_workbench(
+    source_path: str,
+    document_record: dict[str, Any] | None = None,
+    visual_request: dict[str, Any] | None = None,
+    image_refs: list[dict[str, Any]] | None = None,
+    output_dir: str | None = None,
+    render_pages: bool = True,
+    run_ocr: bool = False,
+    run_table_detection: bool = False,
+    max_pages: int | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a local no-write visual/OCR/table coverage workbench.
+
+    This helper creates reviewable page-render work packets and, when optional
+    local adapters are available and requested, OCR/table observations ready for
+    preview_visual_extraction. It never promotes memory or graph evidence.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source_path": source_path,
+        "document_record": document_record,
+        "visual_request": visual_request,
+        "image_refs": image_refs,
+        "output_dir": output_dir,
+        "render_pages": render_pages,
+        "run_ocr": run_ocr,
+        "run_table_detection": run_table_detection,
+        "max_pages": max_pages,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_coverage_workbench", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "workbench": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_coverage_workbench", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "workbench": build_document_coverage_workbench(
+                source_path=source_path,
+                document_record=document_record,
+                visual_request=visual_request,
+                image_refs=image_refs,
+                output_dir=output_dir,
+                render_pages=render_pages,
+                run_ocr=run_ocr,
+                run_table_detection=run_table_detection,
+                max_pages=max_pages,
+            ),
+            "error": None,
+        }
+        if payload["workbench"].get("error") is not None:
+            payload["error"] = payload["workbench"]["error"]
+    except ValueError as e:
+        payload = {"workbench": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "workbench": None,
+            "error": _tool_error("runtime_error", f"Unexpected document coverage workbench failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_coverage_workbench", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_intake_review(
+    source_path: str,
+    extractor_id: str | None = None,
+    max_pages: int | None = None,
+    require_visual_coverage: bool = True,
+    require_table_coverage: bool = True,
+    require_ocr_coverage: bool = True,
+    source_type: str = "pdf",
+    page_range: str | None = None,
+    resume_token: str | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare an end-to-end no-write document intake review packet.
+
+    This wraps local disassembly, text preview, quality signals, artifact
+    manifest, and missing OCR/visual/table coverage receipts into a single
+    read-only packet. It does not promote active memory or graph edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source_path": source_path,
+        "extractor_id": extractor_id,
+        "max_pages": max_pages,
+        "require_visual_coverage": require_visual_coverage,
+        "require_table_coverage": require_table_coverage,
+        "require_ocr_coverage": require_ocr_coverage,
+        "source_type": source_type,
+        "page_range": page_range,
+        "resume_token": resume_token,
+    }
+    payload = await build_document_intake_review_payload(
+        input_payload,
+        daemon_enabled=_daemon_enabled(),
+        call_daemon=_call_daemon,
+        build_document_intake_review=build_document_intake_review,
+        daemon_error_type=EngramDaemonClientError,
+        tool_error=_tool_error,
+    )
+    _record_usage_for_payload("prepare_document_intake_review", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_extraction_request(
+    source_ref: dict[str, Any],
+    source_type: str,
+    requested_outputs: list[str],
+    extractor_id: str = "engram-document-request",
+    extractor_kind: str = "external_document",
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write external document extraction request.
+
+    Use this for PDF, DOCX, image-bearing, or otherwise external-parser-backed
+    documents before running a local/framework extractor. The returned request is
+    reviewable provenance only; Engram does not run the provider or write memory.
+    Feed extracted text into preview_document_extraction and image/OCR observations
+    into preview_visual_extraction before any draft promotion.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source_ref": source_ref,
+        "source_type": source_type,
+        "requested_outputs": requested_outputs,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+        "instructions": instructions,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_extraction_request", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "request": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_extraction_request", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "request": build_document_extraction_request(
+                source_ref=source_ref,
+                source_type=source_type,
+                requested_outputs=requested_outputs,
+                extractor_id=extractor_id,
+                extractor_kind=extractor_kind,
+                instructions=instructions,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"request": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "request": None,
+            "error": _tool_error("runtime_error", f"Unexpected document extraction request failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_extraction_request", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_extraction_result(
+    extraction_request: dict[str, Any],
+    title: str,
+    content: str,
+    media_type: str,
+    metadata: dict[str, Any] | None = None,
+    image_refs: list[dict[str, Any]] | None = None,
+    requested_visual_capabilities: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Normalize external parser output into a no-write document extraction result.
+
+    This tool does not run a parser and does not store memory. Use it after an
+    external PDF/DOCX/OCR parser returns text and optional image refs. The result
+    preserves the extraction request provenance and returns arguments for
+    preview_document_extraction. When image refs and requested visual capabilities
+    are provided, it also returns prepare_visual_extraction_request arguments.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "extraction_request": extraction_request,
+        "title": title,
+        "content": content,
+        "media_type": media_type,
+        "metadata": metadata,
+        "image_refs": image_refs,
+        "requested_visual_capabilities": requested_visual_capabilities,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_extraction_result", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "result": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_extraction_result", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "result": build_document_extraction_result(
+                extraction_request=extraction_request,
+                title=title,
+                content=content,
+                media_type=media_type,
+                metadata=metadata,
+                image_refs=image_refs,
+                requested_visual_capabilities=requested_visual_capabilities,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"result": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "result": None,
+            "error": _tool_error("runtime_error", f"Unexpected document extraction result failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_extraction_result", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def preview_document_extraction(
+    title: str,
+    source_uri: str,
+    source_type: str,
+    content: str,
+    media_type: str,
+    metadata: dict[str, Any] | None = None,
+    extractor_id: str = "engram-text-preview",
+    extractor_kind: str = "agent_native",
+) -> dict[str, Any]:
+    """
+    Preview text/markdown document evidence and chunks without storing memory.
+
+    This is a no-write, review-first document-intelligence helper. It does not run
+    OCR or vision models; pair image-derived observations with preview_visual_extraction.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "title": title,
+        "source_uri": source_uri,
+        "source_type": source_type,
+        "content": content,
+        "media_type": media_type,
+        "metadata": metadata,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("preview_document_extraction", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "preview": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("preview_document_extraction", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "preview": build_document_extraction_preview(
+                title=title,
+                source_uri=source_uri,
+                source_type=source_type,
+                content=content,
+                media_type=media_type,
+                metadata=metadata,
+                extractor_id=extractor_id,
+                extractor_kind=extractor_kind,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"preview": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "preview": None,
+            "error": _tool_error("runtime_error", f"Unexpected document preview failure: {e}"),
+        }
+    _record_usage_for_payload("preview_document_extraction", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_draft(
+    document_record: dict[str, Any],
+    analysis: dict[str, Any],
+    chunk_refs: list[dict[str, Any]] | None = None,
+    visual_artifacts: list[dict[str, Any]] | None = None,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+    created_by: str = "agent",
+) -> dict[str, Any]:
+    """
+    Prepare a no-write document draft from reviewed document and visual evidence.
+
+    The draft may propose memories and graph edges, but it does not store or
+    promote them. Review the returned draft before calling memory or graph write
+    tools.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_record": document_record,
+        "analysis": analysis,
+        "chunk_refs": chunk_refs,
+        "visual_artifacts": visual_artifacts,
+        "candidate_graph_edges": candidate_graph_edges,
+        "created_by": created_by,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_draft", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "draft": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_draft", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "draft": build_document_draft(
+                document_record=document_record,
+                analysis=analysis,
+                chunk_refs=chunk_refs,
+                visual_artifacts=visual_artifacts,
+                candidate_graph_edges=candidate_graph_edges,
+                created_by=created_by,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"draft": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "draft": None,
+            "error": _tool_error("runtime_error", f"Unexpected document draft failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_draft", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_understanding_packet(
+    document_record: dict[str, Any],
+    analysis: dict[str, Any],
+    chunk_refs: list[dict[str, Any]] | None = None,
+    visual_artifacts: list[dict[str, Any]] | None = None,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+    created_by: str = "agent",
+) -> dict[str, Any]:
+    """
+    Normalize agent-supplied document understanding into reviewable evidence.
+
+    This tool does not analyze content by itself. The connected agent supplies
+    summaries, claims, concepts, entities, high-value sections, and graph edge
+    candidates; Engram normalizes them into a no-write packet with draft memory
+    and graph proposals for later explicit review.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_record": document_record,
+        "analysis": analysis,
+        "chunk_refs": chunk_refs,
+        "visual_artifacts": visual_artifacts,
+        "candidate_graph_edges": candidate_graph_edges,
+        "created_by": created_by,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_understanding_packet", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "packet": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_understanding_packet", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "packet": build_document_understanding_packet(
+                document_record=document_record,
+                analysis=analysis,
+                chunk_refs=chunk_refs,
+                visual_artifacts=visual_artifacts,
+                candidate_graph_edges=candidate_graph_edges,
+                created_by=created_by,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"packet": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "packet": None,
+            "error": _tool_error("runtime_error", f"Unexpected document understanding failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_understanding_packet", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_promotion_transaction(
+    document_draft: dict[str, Any],
+    approved_by: str,
+    selected_memory_indexes: list[int] | None = None,
+    selected_edge_indexes: list[int] | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write operation plan for reviewed document draft promotion.
+
+    The returned operations are explicit memory and graph write payloads. This
+    tool does not execute them; agents must review the transaction first.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_draft": document_draft,
+        "selected_memory_indexes": selected_memory_indexes,
+        "selected_edge_indexes": selected_edge_indexes,
+        "approved_by": approved_by,
+        "notes": notes,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_promotion_transaction", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "transaction": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_promotion_transaction", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "transaction": build_document_promotion_transaction(
+                document_draft=document_draft,
+                selected_memory_indexes=selected_memory_indexes,
+                selected_edge_indexes=selected_edge_indexes,
+                approved_by=approved_by,
+                notes=notes,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"transaction": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "transaction": None,
+            "error": _tool_error("runtime_error", f"Unexpected document promotion failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_document_promotion_transaction", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def apply_document_promotion_transaction(
+    document_promotion_transaction: dict[str, Any],
+    accept: bool = False,
+    approved_by: str | None = None,
+    selected_operation_indexes: list[int] | None = None,
+) -> dict[str, Any]:
+    """
+    Apply reviewed document promotion writes after explicit accept=True.
+
+    This is a write tool. It executes selected memory and graph operations from
+    a reviewed document promotion transaction through the daemon-owned Memory OS
+    runtime. Direct in-process mode returns unavailable instead of writing.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_promotion_transaction": document_promotion_transaction,
+        "accept": accept,
+        "approved_by": approved_by,
+        "selected_operation_indexes": selected_operation_indexes,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("apply_document_promotion_transaction", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("apply_document_promotion_transaction", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "apply_document_promotion_transaction requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("apply_document_promotion_transaction", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_artifact_store(
+    review_packet: dict[str, Any],
+    artifact_family: str = "document_evidence",
+) -> dict[str, Any]:
+    """
+    Prepare an explicit document evidence artifact-store transaction.
+
+    This requires the daemon-owned Memory OS path. The prepared transaction is
+    reviewable and does not promote active memory or graph edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"review_packet": review_packet, "artifact_family": artifact_family}
+    payload = await build_document_artifact_store_payload(
+        input_payload,
+        daemon_enabled=_daemon_enabled(),
+        call_daemon=_call_daemon,
+        daemon_error_type=EngramDaemonClientError,
+        tool_error=_tool_error,
+    )
+    _record_usage_for_payload("prepare_document_artifact_store", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def store_document_artifact(
+    prepared_transaction_id: str,
+    accept: bool = False,
+    review_packet: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Store ledgered document evidence only when accept=True.
+
+    This requires the daemon-owned Memory OS path. It stores document evidence
+    artifacts and coverage receipts without promoting active memory or graph
+    edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "prepared_transaction_id": prepared_transaction_id,
+        "accept": accept,
+        "review_packet": review_packet,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("store_document_artifact", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "stored": False,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("store_document_artifact", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "stored": False,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error("daemon_required", "store_document_artifact requires the daemon-owned Memory OS path."),
+    }
+    _record_usage_for_payload("store_document_artifact", input_payload, payload, started_at)
+    return payload
+
+
+def _document_ingestion_unavailable_payload(
+    *,
+    code: str,
+    message: str,
+    ingestion_id: str | None = None,
+    document_id: str | None = None,
+    source_path: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": "unavailable",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(code, message),
+    }
+    if ingestion_id is not None:
+        payload["ingestion_id"] = ingestion_id
+    if document_id is not None:
+        payload["document_id"] = document_id
+    if source_path is not None:
+        payload["source_path"] = source_path
+    return payload
+
+
+def _knowledge_pr_unavailable_payload(
+    *,
+    code: str,
+    message: str,
+    knowledge_pr_id: str | None = None,
+    branch_id: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": "unavailable",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(code, message),
+    }
+    if knowledge_pr_id is not None:
+        payload["knowledge_pr_id"] = knowledge_pr_id
+    if branch_id is not None:
+        payload["branch_id"] = branch_id
+    return payload
+
+
+def _benchmark_unavailable_payload(
+    *,
+    code: str,
+    message: str,
+    suite_id: str | None = None,
+    seed: int | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": "unavailable",
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(code, message),
+    }
+    if suite_id is not None:
+        payload["suite_id"] = suite_id
+    if seed is not None:
+        payload["seed"] = seed
+    if run_id is not None:
+        payload["run_id"] = run_id
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_ingestion_plan(
+    source_path: str,
+    project: str | None = None,
+    domain: str | None = None,
+    profile: str = "graph_coverage",
+    page_window_size: int = 25,
+    analysis_policy: str = "defer",
+    approval_mode: str = "agent_authorized",
+    budget: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write, resumable local document ingestion plan through engramd.
+
+    Direct in-process mode returns unavailable in this slice so document
+    ingestion state stays owned by the daemon.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source_path": source_path,
+        "project": project,
+        "domain": domain,
+        "profile": profile,
+        "page_window_size": page_window_size,
+        "analysis_policy": analysis_policy,
+        "approval_mode": approval_mode,
+        "budget": budget,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_ingestion_plan", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _document_ingestion_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                source_path=source_path,
+            )
+        _record_usage_for_payload("prepare_document_ingestion_plan", input_payload, payload, started_at)
+        return payload
+    payload = _document_ingestion_unavailable_payload(
+        code="daemon_required",
+        message="prepare_document_ingestion_plan requires the daemon-owned Memory OS path.",
+        source_path=source_path,
+    )
+    _record_usage_for_payload("prepare_document_ingestion_plan", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def run_document_ingestion(
+    ingestion_id: str,
+    accept: bool = False,
+    approved_by: str | None = None,
+    review_packets: list[dict[str, Any]] | None = None,
+    understanding_analysis: dict[str, Any] | None = None,
+    visual_preview: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Queue accepted document ingestion orchestration through engramd.
+
+    This is a write tool and requires the daemon-owned Memory OS path plus
+    explicit acceptance handled by the runtime. Poll inspect_document_ingestion
+    for progress, retries, dead-letter state, and checkpoints.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "ingestion_id": ingestion_id,
+        "accept": accept,
+        "approved_by": approved_by,
+        "review_packets": review_packets,
+        "understanding_analysis": understanding_analysis,
+        "visual_preview": visual_preview,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("run_document_ingestion", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _document_ingestion_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                ingestion_id=ingestion_id,
+            )
+        _record_usage_for_payload("run_document_ingestion", input_payload, payload, started_at)
+        return payload
+    payload = _document_ingestion_unavailable_payload(
+        code="daemon_required",
+        message="run_document_ingestion requires the daemon-owned Memory OS path.",
+        ingestion_id=ingestion_id,
+    )
+    _record_usage_for_payload("run_document_ingestion", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def resume_document_ingestion(
+    ingestion_id: str,
+    accept: bool = False,
+    approved_by: str | None = None,
+    review_packets: list[dict[str, Any]] | None = None,
+    understanding_analysis: dict[str, Any] | None = None,
+    visual_preview: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Queue accepted document ingestion resume orchestration through engramd.
+
+    This is a write tool and requires the daemon-owned Memory OS path plus
+    explicit acceptance handled by the runtime. Poll inspect_document_ingestion
+    for progress, retries, dead-letter state, and checkpoints.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "ingestion_id": ingestion_id,
+        "accept": accept,
+        "approved_by": approved_by,
+        "review_packets": review_packets,
+        "understanding_analysis": understanding_analysis,
+        "visual_preview": visual_preview,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("resume_document_ingestion", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _document_ingestion_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                ingestion_id=ingestion_id,
+            )
+        _record_usage_for_payload("resume_document_ingestion", input_payload, payload, started_at)
+        return payload
+    payload = _document_ingestion_unavailable_payload(
+        code="daemon_required",
+        message="resume_document_ingestion requires the daemon-owned Memory OS path.",
+        ingestion_id=ingestion_id,
+    )
+    _record_usage_for_payload("resume_document_ingestion", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def inspect_document_ingestion(
+    ingestion_id: str | None = None,
+    document_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Inspect document ingestion status through engramd without writing.
+
+    Direct in-process mode returns unavailable in this slice so document
+    ingestion state stays owned by the daemon.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"ingestion_id": ingestion_id, "document_id": document_id}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("inspect_document_ingestion", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _document_ingestion_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                ingestion_id=ingestion_id,
+                document_id=document_id,
+            )
+        _record_usage_for_payload("inspect_document_ingestion", input_payload, payload, started_at)
+        return payload
+    payload = _document_ingestion_unavailable_payload(
+        code="daemon_required",
+        message="inspect_document_ingestion requires the daemon-owned Memory OS path.",
+        ingestion_id=ingestion_id,
+        document_id=document_id,
+    )
+    _record_usage_for_payload("inspect_document_ingestion", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_coverage_pass(
+    ingestion_record: dict[str, Any],
+    review_packets: list[dict[str, Any]] | None = None,
+    coverage_policy: str = "auto_local",
+    coverage_options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare automatic visual/OCR/table coverage for a document ingestion record.
+
+    This writes only a daemon-owned review/event receipt. It does not promote
+    active memories or graph edges, and direct in-process mode is unavailable.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "ingestion_record": ingestion_record,
+        "review_packets": review_packets,
+        "coverage_policy": coverage_policy,
+        "coverage_options": coverage_options,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_coverage_pass", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _document_ingestion_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                ingestion_id=ingestion_record.get("ingestion_id") if isinstance(ingestion_record, dict) else None,
+                document_id=ingestion_record.get("document_id") if isinstance(ingestion_record, dict) else None,
+            )
+        _record_usage_for_payload("prepare_document_coverage_pass", input_payload, payload, started_at)
+        return payload
+    payload = _document_ingestion_unavailable_payload(
+        code="daemon_required",
+        message="prepare_document_coverage_pass requires the daemon-owned Memory OS path.",
+        ingestion_id=ingestion_record.get("ingestion_id") if isinstance(ingestion_record, dict) else None,
+        document_id=ingestion_record.get("document_id") if isinstance(ingestion_record, dict) else None,
+    )
+    _record_usage_for_payload("prepare_document_coverage_pass", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_knowledge_branch(
+    name: str,
+    source_refs: list[dict[str, Any]] | None = None,
+    base_snapshot_ref: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a Knowledge Branch review record through engramd.
+
+    This records review state only; it does not promote active memories or graph
+    edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "name": name,
+        "source_refs": source_refs,
+        "base_snapshot_ref": base_snapshot_ref,
+        "metadata": metadata,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_knowledge_branch", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _knowledge_pr_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+            )
+        _record_usage_for_payload("prepare_knowledge_branch", input_payload, payload, started_at)
+        return payload
+    payload = _knowledge_pr_unavailable_payload(
+        code="daemon_required",
+        message="prepare_knowledge_branch requires the daemon-owned Memory OS path.",
+    )
+    _record_usage_for_payload("prepare_knowledge_branch", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_knowledge_pr(
+    branch_id: str,
+    title: str,
+    proposed_operations: list[dict[str, Any]] | None = None,
+    source_refs: list[dict[str, Any]] | None = None,
+    document_refs: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a Knowledge PR review packet through engramd.
+
+    Proposed memory, graph, and document operations stay review-only until a
+    later explicit `merge_knowledge_pr`.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "branch_id": branch_id,
+        "title": title,
+        "proposed_operations": proposed_operations,
+        "source_refs": source_refs,
+        "document_refs": document_refs,
+        "metadata": metadata,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_knowledge_pr", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _knowledge_pr_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                branch_id=branch_id,
+            )
+        _record_usage_for_payload("prepare_knowledge_pr", input_payload, payload, started_at)
+        return payload
+    payload = _knowledge_pr_unavailable_payload(
+        code="daemon_required",
+        message="prepare_knowledge_pr requires the daemon-owned Memory OS path.",
+        branch_id=branch_id,
+    )
+    _record_usage_for_payload("prepare_knowledge_pr", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def run_memory_ci(
+    knowledge_pr_id: str,
+    gates: list[str] | None = None,
+    ci_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Run Memory CI gates for a Knowledge PR through engramd.
+
+    This records deterministic CI receipts only; it does not promote active
+    memories or graph edges.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "knowledge_pr_id": knowledge_pr_id,
+        "gates": gates,
+        "ci_context": ci_context,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("run_memory_ci", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _knowledge_pr_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                knowledge_pr_id=knowledge_pr_id,
+            )
+        _record_usage_for_payload("run_memory_ci", input_payload, payload, started_at)
+        return payload
+    payload = _knowledge_pr_unavailable_payload(
+        code="daemon_required",
+        message="run_memory_ci requires the daemon-owned Memory OS path.",
+        knowledge_pr_id=knowledge_pr_id,
+    )
+    _record_usage_for_payload("run_memory_ci", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def inspect_knowledge_pr(knowledge_pr_id: str) -> dict[str, Any]:
+    """Inspect a Knowledge PR, latest CI status, and mergeability through engramd."""
+    started_at = time.perf_counter()
+    input_payload = {"knowledge_pr_id": knowledge_pr_id}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("inspect_knowledge_pr", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _knowledge_pr_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                knowledge_pr_id=knowledge_pr_id,
+            )
+        _record_usage_for_payload("inspect_knowledge_pr", input_payload, payload, started_at)
+        return payload
+    payload = _knowledge_pr_unavailable_payload(
+        code="daemon_required",
+        message="inspect_knowledge_pr requires the daemon-owned Memory OS path.",
+        knowledge_pr_id=knowledge_pr_id,
+    )
+    _record_usage_for_payload("inspect_knowledge_pr", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def list_memory_benchmark_suites(suite_id: str | None = None) -> dict[str, Any]:
+    """List deterministic Memory CI benchmark suites through engramd."""
+    started_at = time.perf_counter()
+    input_payload = {"suite_id": suite_id}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("list_memory_benchmark_suites", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _benchmark_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+            )
+        _record_usage_for_payload("list_memory_benchmark_suites", input_payload, payload, started_at)
+        return payload
+    payload = _benchmark_unavailable_payload(
+        code="daemon_required",
+        message="list_memory_benchmark_suites requires the daemon-owned Memory OS path.",
+    )
+    _record_usage_for_payload("list_memory_benchmark_suites", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def run_memory_benchmark(
+    suite_id: str = "smoke",
+    seed: int = 42,
+    persist: bool = True,
+) -> dict[str, Any]:
+    """Run a reproducible Memory CI benchmark suite through engramd."""
+    started_at = time.perf_counter()
+    input_payload = {"suite_id": suite_id, "seed": seed, "persist": persist}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("run_memory_benchmark", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _benchmark_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                suite_id=suite_id,
+                seed=seed,
+            )
+        _record_usage_for_payload("run_memory_benchmark", input_payload, payload, started_at)
+        return payload
+    payload = _benchmark_unavailable_payload(
+        code="daemon_required",
+        message="run_memory_benchmark requires the daemon-owned Memory OS path.",
+        suite_id=suite_id,
+        seed=seed,
+    )
+    _record_usage_for_payload("run_memory_benchmark", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def inspect_benchmark_run(run_id: str) -> dict[str, Any]:
+    """Inspect a persisted Memory CI benchmark run through engramd."""
+    started_at = time.perf_counter()
+    input_payload = {"run_id": run_id}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("inspect_benchmark_run", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _benchmark_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                run_id=run_id,
+            )
+        _record_usage_for_payload("inspect_benchmark_run", input_payload, payload, started_at)
+        return payload
+    payload = _benchmark_unavailable_payload(
+        code="daemon_required",
+        message="inspect_benchmark_run requires the daemon-owned Memory OS path.",
+        run_id=run_id,
+    )
+    _record_usage_for_payload("inspect_benchmark_run", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def merge_knowledge_pr(
+    knowledge_pr_id: str,
+    accept: bool = False,
+    approved_by: str | None = None,
+    selected_operation_ids: list[str] | None = None,
+    selected_operation_indexes: list[int] | None = None,
+    ci_waivers: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Merge selected reviewed Knowledge PR operations after explicit acceptance.
+
+    This is the only Knowledge PR tool that can promote active memory, graph, or
+    document completion writes. The runtime enforces `accept=True` and
+    `approved_by`.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "knowledge_pr_id": knowledge_pr_id,
+        "accept": accept,
+        "approved_by": approved_by,
+        "selected_operation_ids": selected_operation_ids,
+        "selected_operation_indexes": selected_operation_indexes,
+        "ci_waivers": ci_waivers,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("merge_knowledge_pr", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _knowledge_pr_unavailable_payload(
+                code="runtime_error",
+                message=f"❌ Engram daemon error: {e}",
+                knowledge_pr_id=knowledge_pr_id,
+            )
+        _record_usage_for_payload("merge_knowledge_pr", input_payload, payload, started_at)
+        return payload
+    payload = _knowledge_pr_unavailable_payload(
+        code="daemon_required",
+        message="merge_knowledge_pr requires the daemon-owned Memory OS path.",
+        knowledge_pr_id=knowledge_pr_id,
+    )
+    _record_usage_for_payload("merge_knowledge_pr", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_document_ingestion_completion(
+    document_id: str,
+    artifact_id: str | None = None,
+    visual_request: dict[str, Any] | None = None,
+    visual_preview: dict[str, Any] | None = None,
+    understanding_packet: dict[str, Any] | None = None,
+    document_promotion_transaction: dict[str, Any] | None = None,
+    coverage_waivers: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Validate whether staged document evidence is ready to become usable.
+
+    This is a no-write gate over ledgered document artifacts, visual/OCR/table
+    evidence, understanding packets, and reviewed graph-promotion plans.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_id": document_id,
+        "artifact_id": artifact_id,
+        "visual_request": visual_request,
+        "visual_preview": visual_preview,
+        "understanding_packet": understanding_packet,
+        "document_promotion_transaction": document_promotion_transaction,
+        "coverage_waivers": coverage_waivers,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_document_ingestion_completion", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "document_id": document_id,
+                "usable": False,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_document_ingestion_completion", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "document_id": document_id,
+        "usable": False,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "prepare_document_ingestion_completion requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("prepare_document_ingestion_completion", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def complete_document_ingestion(
+    document_id: str,
+    artifact_id: str | None = None,
+    visual_request: dict[str, Any] | None = None,
+    visual_preview: dict[str, Any] | None = None,
+    understanding_packet: dict[str, Any] | None = None,
+    document_promotion_transaction: dict[str, Any] | None = None,
+    coverage_waivers: list[dict[str, Any]] | None = None,
+    accept: bool = False,
+    approved_by: str | None = None,
+    selected_operation_indexes: list[int] | None = None,
+) -> dict[str, Any]:
+    """
+    Mark staged document evidence usable after explicit accept=True.
+
+    This is a write tool. It requires full reviewed visual/OCR/table coverage,
+    a cited understanding packet, and at least one selected graph edge.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_id": document_id,
+        "artifact_id": artifact_id,
+        "visual_request": visual_request,
+        "visual_preview": visual_preview,
+        "understanding_packet": understanding_packet,
+        "document_promotion_transaction": document_promotion_transaction,
+        "coverage_waivers": coverage_waivers,
+        "accept": accept,
+        "approved_by": approved_by,
+        "selected_operation_indexes": selected_operation_indexes,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("complete_document_ingestion", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "document_id": document_id,
+                "usable": False,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("complete_document_ingestion", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "document_id": document_id,
+        "usable": False,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error("daemon_required", "complete_document_ingestion requires the daemon-owned Memory OS path."),
+    }
+    _record_usage_for_payload("complete_document_ingestion", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_graph_readiness_report(
+    scope: str = "memory_os",
+    project: str | None = None,
+    exact_project_match: bool = False,
+    domain: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Inventory graphable Memory OS memories and usable documents without writing.
+
+    This requires the daemon-owned Memory OS path and returns refs plus counts,
+    not full memory bodies or graph mutations.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "scope": scope,
+        "project": project,
+        "exact_project_match": exact_project_match,
+        "domain": domain,
+        "limit": limit,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_graph_readiness_report", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "scope": scope,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_graph_readiness_report", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "scope": scope,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "prepare_graph_readiness_report requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("prepare_graph_readiness_report", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_graph_proposal_batch(
+    scope: str = "memory_os",
+    project: str | None = None,
+    domain: str | None = None,
+    source_refs: list[dict[str, Any]] | None = None,
+    limit: int = 10,
+    budget_chars: int = 12000,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare cited graph proposal context and validate candidate edges without writing.
+
+    The connected agent performs synthesis. Engram validates refs, edge types,
+    evidence, and duplicate risk before any explicit promotion.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "scope": scope,
+        "project": project,
+        "domain": domain,
+        "source_refs": source_refs,
+        "limit": limit,
+        "budget_chars": budget_chars,
+        "candidate_graph_edges": candidate_graph_edges,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_graph_proposal_batch", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "scope": scope,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_graph_proposal_batch", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "scope": scope,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "prepare_graph_proposal_batch requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("prepare_graph_proposal_batch", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def apply_graph_proposal_batch(
+    scope: str = "memory_os",
+    project: str | None = None,
+    domain: str | None = None,
+    source_refs: list[dict[str, Any]] | None = None,
+    candidate_graph_edges: list[dict[str, Any]] | None = None,
+    accept: bool = False,
+    approved_by: str | None = None,
+    limit: int = 10,
+    budget_chars: int = 12000,
+) -> dict[str, Any]:
+    """
+    Promote reviewed graph proposal edges after explicit accept=True.
+
+    This is a write tool. It writes graph edges and any referenced concept/entity
+    registry records, never active memory bodies.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "scope": scope,
+        "project": project,
+        "domain": domain,
+        "source_refs": source_refs,
+        "candidate_graph_edges": candidate_graph_edges,
+        "accept": accept,
+        "approved_by": approved_by,
+        "limit": limit,
+        "budget_chars": budget_chars,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("apply_graph_proposal_batch", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "status": "unavailable",
+                "scope": scope,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("apply_graph_proposal_batch", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "status": "unavailable",
+        "scope": scope,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "apply_graph_proposal_batch requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("apply_graph_proposal_batch", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def repair_graph_edge_refs(
+    source: str | None = None,
+    limit: int = 1000,
+    accept: bool = False,
+    approved_by: str | None = None,
+) -> dict[str, Any]:
+    """
+    Repair graph edge refs by adding compact key/id identities.
+
+    This is a graph write tool only when accept=True and approved_by is supplied.
+    Dry-runs return candidate edges without changing memory bodies or graph meaning.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source": source,
+        "limit": limit,
+        "accept": accept,
+        "approved_by": approved_by,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("repair_graph_edge_refs", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "operation": "repair_graph_edge_refs",
+                "status": "unavailable",
+                "source": source,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("repair_graph_edge_refs", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "operation": "repair_graph_edge_refs",
+        "status": "unavailable",
+        "source": source,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "repair_graph_edge_refs requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("repair_graph_edge_refs", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def repair_graph_store_reconciliation(
+    repair_mode: str = "upsert_missing",
+    limit: int = 5000,
+    accept: bool = False,
+    approved_by: str | None = None,
+) -> dict[str, Any]:
+    """
+    Replay exact ledger graph-edge records into the graph store after review.
+
+    This is a graph write tool only when accept=True and approved_by is supplied.
+    It does not synthesize replacement evidence or mutate active memory bodies.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "repair_mode": repair_mode,
+        "limit": limit,
+        "accept": accept,
+        "approved_by": approved_by,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("repair_graph_store_reconciliation", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "operation": "repair_graph_store_reconciliation",
+                "status": "unavailable",
+                "repair_mode": repair_mode,
+                "write_performed": False,
+                "active_memory_write_performed": False,
+                "graph_write_performed": False,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("repair_graph_store_reconciliation", input_payload, payload, started_at)
+        return payload
+    payload = {
+        "operation": "repair_graph_store_reconciliation",
+        "status": "unavailable",
+        "repair_mode": repair_mode,
+        "write_performed": False,
+        "active_memory_write_performed": False,
+        "graph_write_performed": False,
+        "error": _tool_error(
+            "daemon_required",
+            "repair_graph_store_reconciliation requires the daemon-owned Memory OS path.",
+        ),
+    }
+    _record_usage_for_payload("repair_graph_store_reconciliation", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_visual_extraction_request(
+    document_record: dict[str, Any],
+    image_refs: list[dict[str, Any]],
+    requested_capabilities: list[str],
+    extractor_id: str = "engram-visual-request",
+    extractor_kind: str = "ocr_vision",
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write OCR/vision work request for image-bearing documents.
+
+    This does not run an OCR or vision provider. It gives agents a stable request
+    packet for external/local frameworks, whose observations should return through
+    preview_visual_extraction before any memory promotion. The request marks visual
+    interpretation and per-image-ref coverage as required for image-bearing sources.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_record": document_record,
+        "image_refs": image_refs,
+        "requested_capabilities": requested_capabilities,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+        "instructions": instructions,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_visual_extraction_request", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "request": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("prepare_visual_extraction_request", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "request": build_visual_extraction_request(
+                document_record=document_record,
+                image_refs=image_refs,
+                requested_capabilities=requested_capabilities,
+                extractor_id=extractor_id,
+                extractor_kind=extractor_kind,
+                instructions=instructions,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"request": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "request": None,
+            "error": _tool_error("runtime_error", f"Unexpected visual request failure: {e}"),
+        }
+    _record_usage_for_payload("prepare_visual_extraction_request", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def preview_visual_extraction(
+    document_record: dict[str, Any],
+    observations: list[dict[str, Any]],
+    extractor_id: str = "engram-visual-preview",
+    extractor_kind: str = "agent_native",
+    visual_request: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Preview caller-supplied OCR or vision observations as reviewable visual evidence.
+
+    This is a no-write helper. Engram records provenance, confidence, and whether an
+    external OCR/vision framework was used; it does not trust image-derived claims as
+    active memory until a later explicit promotion path reviews them. When passed the
+    originating visual_request, every requested image_ref must have at least one
+    returned observation before a draft can claim visual coverage.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "document_record": document_record,
+        "observations": observations,
+        "extractor_id": extractor_id,
+        "extractor_kind": extractor_kind,
+        "visual_request": visual_request,
+    }
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("preview_visual_extraction", input_payload)
+        except EngramDaemonClientError as e:
+            payload = {
+                "preview": None,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        _record_usage_for_payload("preview_visual_extraction", input_payload, payload, started_at)
+        return payload
+    try:
+        payload = {
+            "preview": build_visual_extraction_preview(
+                document_record=document_record,
+                observations=observations,
+                extractor_id=extractor_id,
+                extractor_kind=extractor_kind,
+                visual_request=visual_request,
+            ),
+            "error": None,
+        }
+    except ValueError as e:
+        payload = {"preview": None, "error": _tool_error("invalid_request", str(e))}
+    except Exception as e:
+        payload = {
+            "preview": None,
+            "error": _tool_error("runtime_error", f"Unexpected visual preview failure: {e}"),
+        }
+    _record_usage_for_payload("preview_visual_extraction", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def list_workflow_templates() -> dict[str, Any]:
+    """
+    List static agent workflow recipes for common Engram jobs.
+    """
+    return build_workflow_templates()
+
+
+@mcp.tool()
+async def retrieval_eval() -> dict[str, Any]:
+    """
+    Run deterministic retrieval-quality checks through the reliability harness.
+    """
+    started_at = time.perf_counter()
+    input_payload: dict[str, Any] = {}
+    try:
+        payload = run_retrieval_eval(memory_manager)
+    except RuntimeError as e:
+        payload = {"summary": {}, "scenarios": [], "warnings": [], "error": _tool_error("runtime_error", str(e))}
+    _record_usage_for_payload("retrieval_eval", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def list_operation_jobs(
+    operation_type: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Return compact operation job receipts.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"operation_type": operation_type, "status": status, "limit": limit}
+    normalized_limit = min(max(limit, 1), 500)
+    payload = operation_log.list_jobs(
+        operation_type=operation_type,
+        status=status,
+        limit=normalized_limit,
+    )
+    _record_usage_for_payload("list_operation_jobs", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def list_operation_events(
+    event_type: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Return compact operation event records.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"event_type": event_type, "limit": limit}
+    normalized_limit = min(max(limit, 1), 500)
+    payload = operation_log.list_events(event_type=event_type, limit=normalized_limit)
+    _record_usage_for_payload("list_operation_events", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_source_memory(
+    source_text: str,
+    source_type: str,
+    source_uri: str | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    budget_chars: int = 6000,
+    pipeline: str = "generic",
+) -> dict[str, Any]:
+    """
+    Prepare reviewable memory drafts from source text without storing active memories.
+
+    This is a no-promotion staging tool for transcripts, logs, scans, and handoffs.
+    Use store_prepared_memory only after explicitly choosing draft item indices.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "source_text": source_text,
+        "source_type": source_type,
+        "source_uri": source_uri,
+        "project": project,
+        "domain": domain,
+        "budget_chars": budget_chars,
+        "pipeline": pipeline,
+    }
+
+    def _record_success(draft: dict[str, Any]) -> None:
+        draft_result = {
+            "draft_id": draft.get("draft_id"),
+            "proposed_memory_count": len(draft.get("proposed_memories", [])),
+            "proposed_edge_count": len(draft.get("proposed_edges", [])),
+        }
+        _record_operation_job(
+            operation_type="source_intake",
+            status="completed",
+            result=draft_result,
+            metadata={
+                "source_type": source_type,
+                "project": project,
+                "domain": domain,
+                "pipeline": pipeline,
+            },
+        )
+        _record_operation_event(
+            event_type="source_draft_ready",
+            subject={"kind": "source_draft", "draft_id": draft.get("draft_id")},
+            summary="Source draft ready for review.",
+            metadata=draft_result,
+        )
+
+    def _record_failure(message: str) -> None:
+        _record_operation_job(
+            operation_type="source_intake",
+            status="failed",
+            result={"source_type": source_type},
+            error=message,
+        )
+
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("prepare_source_memory", input_payload)
+        except EngramDaemonClientError as e:
+            message = f"❌ Engram daemon error: {e}"
+            payload = {"draft": None, "error": _tool_error("runtime_error", message)}
+            _record_failure(message)
+            _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
+            return payload
+        draft = payload.get("draft")
+        if payload.get("error") is None and isinstance(draft, dict):
+            _record_success(draft)
+        elif payload.get("error"):
+            error = payload["error"]
+            message = (
+                error.get("message", str(error))
+                if isinstance(error, dict)
+                else str(error)
+            )
+            _record_failure(message)
+        _record_usage_for_payload(
+            "prepare_source_memory",
+            input_payload,
+            payload,
+            started_at,
+        )
+        return payload
+
+    try:
+        payload = {
+            "draft": source_intake_manager.prepare_source_memory(
+                source_text=source_text,
+                source_type=source_type,
+                source_uri=source_uri,
+                project=project,
+                domain=domain,
+                budget_chars=budget_chars,
+                pipeline=pipeline,
+            ),
+            "error": None,
+        }
+        draft = payload["draft"]
+        _record_success(draft)
+        _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
+        return payload
+    except ValueError as e:
+        payload = {"draft": None, "error": _tool_error("invalid_request", str(e))}
+        _record_failure(str(e))
+        _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
+        return payload
+    except RuntimeError as e:
+        payload = {"draft": None, "error": _tool_error("runtime_error", str(e))}
+        _record_failure(str(e))
+        _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
+        return payload
+    except Exception as e:
+        message = f"Unexpected source intake failure: {e}"
+        payload = {"draft": None, "error": _tool_error("runtime_error", message)}
+        _record_failure(message)
+        _record_usage_for_payload("prepare_source_memory", input_payload, payload, started_at)
+        return payload
+
+
+@mcp.tool()
+async def list_source_drafts(
+    project: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """
+    List source intake drafts and proposed memories without promoting them.
+    """
+    if _daemon_enabled():
+        try:
+            return await _call_daemon(
+                "list_source_drafts",
+                {
+                    "project": project,
+                    "status": status,
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
+        except EngramDaemonClientError as e:
+            return {
+                "count": 0,
+                "drafts": [],
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+    try:
+        return source_intake_manager.list_source_drafts(
+            project=project,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+    except RuntimeError as e:
+        return {
+            "count": 0,
+            "drafts": [],
+            "error": _tool_error("runtime_error", str(e)),
+        }
+
+
+@mcp.tool()
+async def discard_source_draft(draft_id: str) -> dict[str, Any]:
+    """
+    Mark a source intake draft rejected without deleting the audit trail.
+    """
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("discard_source_draft", {"draft_id": draft_id})
+        except EngramDaemonClientError as e:
+            return {
+                "discarded": False,
+                "draft_id": draft_id,
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+    try:
+        return source_intake_manager.discard_source_draft(draft_id)
+    except RuntimeError as e:
+        return {"discarded": False, "draft_id": draft_id, "error": _tool_error("runtime_error", str(e))}
+
+
+@mcp.tool()
+async def store_prepared_memory(
+    draft_id: str,
+    selected_items: list[int] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """
+    Store selected proposed memories from an existing source draft.
+
+    Only selected proposed memory indices are promoted. When selected_items is
+    omitted, all proposed memories are stored. Duplicate handling remains owned
+    by memory_manager.store_memory_async and is controlled with force.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"draft_id": draft_id, "selected_items": selected_items, "force": force}
+
+    def _finish(payload: dict[str, Any]) -> dict[str, Any]:
+        _record_usage_for_payload("store_prepared_memory", input_payload, payload, started_at)
+        return payload
+
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon(
+                "store_prepared_memory",
+                {
+                    "draft_id": draft_id,
+                    "selected_items": selected_items,
+                    "force": force,
+                },
+            )
+        except EngramDaemonClientError as e:
+            payload = {
+                "stored_count": 0,
+                "stored": [],
+                "skipped": [],
+                "error": _tool_error("runtime_error", f"❌ Engram daemon error: {e}"),
+            }
+        return _finish(payload)
+
+    draft = source_intake_manager.get_source_draft(draft_id)
+    if draft is None:
+        return _finish({
+            "stored_count": 0,
+            "stored": [],
+            "skipped": [],
+            "error": _tool_error("not_found", f"source draft not found: {draft_id}"),
+        })
+    if draft.get("status") == "rejected":
+        return _finish({
+            "stored_count": 0,
+            "stored": [],
+            "skipped": [],
+            "error": _tool_error("invalid_state", "source draft is rejected and cannot be promoted"),
+        })
+
+    proposed_memories = draft.get("proposed_memories", [])
+    indices = selected_items if selected_items is not None else list(range(len(proposed_memories)))
+    stored: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    valid_items: list[tuple[int, dict[str, Any]]] = []
+
+    for index in indices:
+        if not isinstance(index, int) or index < 0 or index >= len(proposed_memories):
+            skipped.append({"index": index, "reason": "invalid_index"})
+            continue
+        memory = proposed_memories[index]
+        valid_items.append((index, memory))
+        guardrail = evaluate_memory_write(
+            {
+                "key": memory.get("key"),
+                "content": memory.get("content"),
+                "memory_type": memory.get("memory_type"),
+                "citations": memory.get("citations"),
+                "project": memory.get("project"),
+                "domain": memory.get("domain"),
+                "status": memory.get("status"),
+            }
+        )
+        if guardrail.get("decision") in {"block", "require_review"}:
+            issue_codes = list(guardrail.get("issue_codes") or [])
+            status = "policy_denied" if guardrail.get("decision") == "block" else "review_required"
+            code = (
+                "memory_guardrail_blocked"
+                if guardrail.get("decision") == "block"
+                else "memory_guardrail_review_required"
+            )
+            return _finish({
+                "stored_count": 0,
+                "stored": [],
+                "skipped": [
+                    *skipped,
+                    {
+                        "index": index,
+                        "key": memory.get("key"),
+                        "reason": status,
+                        "guardrail": guardrail,
+                    },
+                ],
+                "error": {
+                    **_tool_error(
+                        code,
+                        "Memory guardrails blocked a selected source draft memory write."
+                        if guardrail.get("decision") == "block"
+                        else (
+                            "Memory guardrails require daemon-owned reviewed promotion "
+                            "for this source draft memory write."
+                        ),
+                    ),
+                    "category": "memory_guardrail",
+                    "issue_codes": issue_codes,
+                },
+            })
+
+    for index, memory in valid_items:
+        try:
+            result = await memory_manager.store_memory_async(
+                key=memory["key"],
+                content=memory["content"],
+                tags=memory.get("tags", []),
+                title=memory.get("title"),
+                related_to=memory.get("related_to"),
+                force=force,
+                project=memory.get("project"),
+                domain=memory.get("domain"),
+                status=memory.get("status"),
+                canonical=memory.get("canonical"),
+            )
+        except DuplicateMemoryError as e:
+            skipped.append({"index": index, "key": memory.get("key"), "reason": "duplicate", "message": str(e)})
+            continue
+        stored.append({"index": index, "key": memory["key"], "result": result})
+
+    return _finish({
+        "stored_count": len(stored),
+        "stored": stored,
+        "skipped": skipped,
+        "error": None,
+    })
+
+
+@mcp.tool()
+async def read_codebase_mapping_config(project_root: str) -> dict[str, Any]:
+    """
+    Read a repo's codebase mapping config and indexing status.
+
+    Use this before prepare_codebase_mapping when you need to know whether
+    .engram/config.json exists, what domains are configured, and whether the
+    post-commit evolve hook is installed. This does not read source files.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"project_root": project_root}
+    payload = codebase_mapping_manager.read_config(project_root=project_root)
+    _record_usage_for_payload("read_codebase_mapping_config", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def draft_codebase_mapping_config(
+    project_root: str,
+    project_name: str | None = None,
+) -> dict[str, Any]:
+    """
+    Draft a safe .engram/config.json for a repo without writing it.
+
+    The draft is heuristic and agent-reviewable. Call store_codebase_mapping_config
+    with the returned config, optionally edited, to persist it. Engram's own
+    repo draft uses current Memory OS domains such as daemon, memory_os,
+    migration, source, mcp_tools, and legacy_adapters.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"project_root": project_root, "project_name": project_name}
+    payload = codebase_mapping_manager.draft_config(
+        project_root=project_root,
+        project_name=project_name,
+    )
+    _record_usage_for_payload("draft_codebase_mapping_config", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def store_codebase_mapping_config(
+    project_root: str,
+    config: dict[str, Any],
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """
+    Validate and write a repo .engram/config.json for codebase mapping.
+
+    This is the non-interactive MCP replacement for the CLI --init prompt.
+    Existing configs are protected unless overwrite=True.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"project_root": project_root, "config": config, "overwrite": overwrite}
+    payload = codebase_mapping_manager.store_config(
+        project_root=project_root,
+        config=config,
+        overwrite=overwrite,
+    )
+    status = "failed" if payload.get("error") else "completed"
+    stored = payload.get("stored") or {}
+    _record_operation_job(
+        operation_type="codebase_mapping_config_store",
+        status=status,
+        result={"config_path": stored.get("config_path"), "overwrote": stored.get("overwrote")},
+        error=_payload_error_message(payload),
+        metadata={"project_root": project_root},
+    )
+    _record_usage_for_payload("store_codebase_mapping_config", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def preview_codebase_mapping(
+    project_root: str,
+    mode: str = "bootstrap",
+    domain: str | None = None,
+    budget_chars: int = 6000,
+) -> dict[str, Any]:
+    """
+    Dry-run configured codebase mapping domains without writing a mapping job.
+
+    Use this after config setup and before prepare_codebase_mapping when an
+    agent wants file counts, context sizes, selected domains, and warnings for
+    important central files excluded by size filters.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "project_root": project_root,
+        "mode": mode,
+        "domain": domain,
+        "budget_chars": budget_chars,
+    }
+    payload = codebase_mapping_manager.preview_mapping(
+        project_root=project_root,
+        mode=mode,
+        domain=domain,
+        budget_chars=budget_chars,
+    )
+    _record_usage_for_payload("preview_codebase_mapping", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_codebase_mapping(
+    project_root: str,
+    mode: str = "bootstrap",
+    domain: str | None = None,
+    budget_chars: int = 6000,
+) -> dict[str, Any]:
+    """
+    Prepare an agent-native codebase mapping job without invoking a model.
+
+    Engram scans the configured repo, computes target domains, and records a
+    bounded context job with source hashes. The connected agent should then call
+    read_codebase_mapping_context, synthesize markdown itself, and call
+    store_codebase_mapping_result.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "project_root": project_root,
+        "mode": mode,
+        "domain": domain,
+        "budget_chars": budget_chars,
+    }
+    payload = codebase_mapping_manager.prepare_mapping(
+        project_root=project_root,
+        mode=mode,
+        domain=domain,
+        budget_chars=budget_chars,
+    )
+    status = "failed" if payload.get("error") else "completed"
+    job = payload.get("job") or {}
+    _record_operation_job(
+        operation_type="codebase_mapping_prepare",
+        status=status,
+        result={
+            "job_id": job.get("job_id"),
+            "domain_count": len(job.get("domains", [])) if isinstance(job, dict) else 0,
+        },
+        error=_payload_error_message(payload),
+        metadata={"project_root": project_root, "mode": mode, "domain": domain},
+    )
+    _record_usage_for_payload("prepare_codebase_mapping", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def read_codebase_mapping_context(
+    job_id: str,
+    domain: str,
+    part_index: int = 0,
+) -> dict[str, Any]:
+    """
+    Read one bounded context part from a prepared codebase mapping job.
+
+    Call this for every part in a domain before synthesizing. The returned
+    context is source text plus source hashes, warnings, and a source-drift
+    receipt; Engram still does not invoke a model.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"job_id": job_id, "domain": domain, "part_index": part_index}
+    payload = codebase_mapping_manager.read_context(job_id, domain, part_index)
+    _record_usage_for_payload("read_codebase_mapping_context", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def store_codebase_mapping_result(
+    job_id: str,
+    domain: str,
+    content: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """
+    Store an agent-authored codebase mapping result as an Engram memory.
+
+    This is the promotion step after the connected agent has synthesized
+    architecture markdown from read_codebase_mapping_context output. If source
+    files changed since prepare, storage fails unless force=True; forced stores
+    still report the source-drift receipt.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"job_id": job_id, "domain": domain, "content": content, "force": force}
+    payload = codebase_mapping_manager.store_result(
+        job_id=job_id,
+        domain=domain,
+        content=content,
+        memory_manager=memory_manager,
+        force=force,
+    )
+    status = "failed" if payload.get("error") else "completed"
+    _record_operation_job(
+        operation_type="codebase_mapping_store",
+        status=status,
+        result={"job_id": job_id, "domain": domain, "memory_key": payload.get("memory_key")},
+        error=_payload_error_message(payload),
+    )
+    _record_usage_for_payload("store_codebase_mapping_result", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def install_codebase_mapping_hook(
+    project_root: str,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """
+    Install Engram's non-blocking post-commit evolve hook for a mapped repo.
+
+    The hook is overwrite-protected by default and only writes
+    .git/hooks/post-commit inside the target repo.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"project_root": project_root, "overwrite": overwrite}
+    payload = codebase_mapping_manager.install_hook(
+        project_root=project_root,
+        overwrite=overwrite,
+    )
+    status = "failed" if payload.get("error") else "completed"
+    hook = payload.get("hook") or {}
+    _record_operation_job(
+        operation_type="codebase_mapping_hook_install",
+        status=status,
+        result={"hook_path": hook.get("path"), "overwrote": hook.get("overwrote")},
+        error=_payload_error_message(payload),
+        metadata={"project_root": project_root},
+    )
+    _record_usage_for_payload("install_codebase_mapping_hook", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def search_memories(
+    query: str,
+    limit: int = 5,
+    session_id: str | None = None,
+    pinned_first: bool = False,
+    project: str | None = None,
+    exact_project_match: bool = False,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    include_stale: bool = True,
+    canonical_only: bool = False,
+    retrieval_mode: str = "semantic",
+) -> SearchPayload:
+    """
+    Semantic search across all stored memories. Returns structured scored snippets only — NOT full content.
+
+    This is ALWAYS your first step when looking for information. Results include the key and
+    chunk_id needed for retrieve_chunk(). Only escalate to retrieve_chunk() or retrieve_memory()
+    if the snippet alone isn't sufficient.
+
+    Args:
+        query: Natural language search query. Semantic — 'scheduling problems' will find
+               'dispatch calendar issues' even without exact keyword overlap.
+        limit: Max results to return (default 5, max 20).
+        session_id: Optional session identifier used to load session-scoped pinned keys.
+        pinned_first: When true, pinned results for the session sort ahead of unpinned results.
+        project: Optional project filter. Daemon-owned Memory OS mode resolves
+               known project aliases unless exact_project_match=True.
+        exact_project_match: When true, do not expand project aliases.
+        domain: Optional exact domain filter.
+        tags: Optional comma-separated string or list of required tags.
+        include_stale: When false, exclude time/code-stale memories.
+        canonical_only: When true, return only canonical memories.
+
+    Returns:
+        Structured payload: {query, count, results, error}. Daemon-backed
+        responses may also include backend_used, primary_backend, fallback_used,
+        fallback_reason, and memory_os_retrieval_status so agents can prove
+        whether Memory OS or legacy JSON/Chroma served the request. Each result
+        includes key, chunk_id, title, score, snippet, tags, and activation
+        metadata. Session-aware searches may also include structured explanation and pin metadata. On
+        validation or runtime failure, results is empty and error is {code,
+        message}.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "query": query,
+        "limit": limit,
+        "session_id": session_id,
+        "pinned_first": pinned_first,
+        "project": project,
+        "exact_project_match": exact_project_match,
+        "domain": domain,
+        "tags": tags,
+        "include_stale": include_stale,
+        "canonical_only": canonical_only,
+        "retrieval_mode": retrieval_mode,
+    }
+    validation_error = _validate_search_query(query)
+    if validation_error:
+        payload = build_search_error_payload(query, "invalid_query", validation_error)
+        _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+        return payload
+    try:
+        normalized_retrieval_mode = normalize_retrieval_mode(retrieval_mode)
+    except ValueError as e:
+        payload = build_search_error_payload(query, "invalid_request", f"❌ {e}")
+        _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+        return payload
+
+    try:
+        normalized_session_id = _normalize_session_id(session_id)
+        pinned_keys = (
+            session_pin_store.list_pins(normalized_session_id)
+            if normalized_session_id is not None
+            else []
+        )
+        normalized_tags = _normalize_string_list(tags)
+    except ValueError as e:
+        payload = build_search_error_payload(query, "invalid_session", f"❌ {e}")
+        _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+        return payload
+
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon(
+                "search_memories",
+                {
+                    "query": query.strip(),
+                    "limit": _clamp_search_limit(limit),
+                    "project": project,
+                    "exact_project_match": exact_project_match,
+                    "domain": domain,
+                    "tags": normalized_tags,
+                    "include_stale": include_stale,
+                    "canonical_only": canonical_only,
+                    "pinned_keys": pinned_keys,
+                    "pinned_first": pinned_first,
+                    "retrieval_mode": normalized_retrieval_mode,
+                },
+            )
+        except EngramDaemonClientError as e:
+            payload = build_search_error_payload(query, "runtime_error", f"❌ Engram daemon error: {e}")
+        _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+        return payload
+
+    try:
+        filters_supplied = any(
+            [
+                project is not None,
+                domain is not None,
+                bool(normalized_tags),
+                include_stale is False,
+                canonical_only,
+            ]
+        )
+        if pinned_keys or filters_supplied or normalized_retrieval_mode == "hybrid":
+            structured_kwargs: dict[str, Any] = {
+                "pinned_keys": pinned_keys,
+                "pinned_first": pinned_first,
+            }
+            if normalized_retrieval_mode != "semantic":
+                structured_kwargs["retrieval_mode"] = normalized_retrieval_mode
+            if filters_supplied:
+                structured_kwargs.update(
+                    {
+                        "project": project,
+                        "domain": domain,
+                        "tags": normalized_tags,
+                        "include_stale": include_stale,
+                        "canonical_only": canonical_only,
+                    }
+                )
+            payload = await memory_manager.search_memories_structured_async(
+                query.strip(),
+                limit=_clamp_search_limit(limit),
+                **structured_kwargs,
+            )
+            payload["error"] = None
+            _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+            return payload
+
+        results = await memory_manager.search_memories_async(query.strip(), limit=_clamp_search_limit(limit))
+    except RuntimeError as e:
+        payload = build_search_error_payload(query, "runtime_error", f"❌ Engram error: {e}")
+        _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+        return payload
+    except ValueError as e:
+        payload = build_search_error_payload(query, "invalid_session", f"❌ {e}")
+        _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+        return payload
+
+    payload = build_search_payload(query, results)
+    _record_usage_for_payload("search_memories", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def search_memories_text(query: str, limit: int = 5) -> str:
+    """
+    Semantic search across all stored memories. Returns scored snippets only — NOT full content.
+
+    This is ALWAYS your first step when looking for information. Results include the key and
+    chunk_id needed for retrieve_chunk(). Only escalate to retrieve_chunk() or retrieve_memory()
+    if the snippet alone isn't sufficient.
+
+    Args:
+        query: Natural language search query. Semantic — 'scheduling problems' will find
+               'dispatch calendar issues' even without exact keyword overlap.
+        limit: Max results to return (default 5, max 20).
+
+    Returns:
+        Human-readable scored list of matching chunks with snippets. Score is 0.0–1.0
+        (higher = more relevant). For structured output, use search_memories().
+    """
+    payload = await search_memories(query, limit)
+    return render_search_payload(payload)
+
+
+@mcp.tool()
+async def pin_memory(session_id: str, key: str) -> dict[str, Any]:
+    """
+    Pin a memory key for the current session so it can be promoted in session-aware searches.
+
+    Pins are session-scoped working state only. They do not modify stored memory JSON or
+    long-term memory metadata.
+
+    Args:
+        session_id: Session identifier for the active working context.
+        key: Existing memory key to pin.
+
+    Returns:
+        Structured payload: {session_id, count, pins, pinned, error}. When the key does not
+        exist, error is populated and the pin list is unchanged.
+    """
+    normalized_session_id = _normalize_session_id(session_id)
+    if normalized_session_id is None:
+        return _runtime_error_payload(
+            "❌ session_id is required.",
+            session_id="",
+            count=0,
+            pins=[],
+            pinned=False,
+        )
+
+    try:
+        normalized_key = _normalize_memory_key(key)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+            pinned=False,
+        )
+
+    if not await memory_manager.memory_exists_async(normalized_key):
+        return {
+            "session_id": normalized_session_id,
+            "count": 0,
+            "pins": session_pin_store.list_pins(normalized_session_id),
+            "pinned": False,
+            "error": {
+                "code": "not_found",
+                "message": f"❌ Memory not found: '{normalized_key}'",
+            },
+        }
+
+    try:
+        pins = session_pin_store.pin(normalized_session_id, normalized_key)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+            pinned=False,
+        )
+
+    return _pin_payload(normalized_session_id, pins, pinned=True)
+
+
+@mcp.tool()
+async def unpin_memory(session_id: str, key: str) -> dict[str, Any]:
+    """
+    Remove a pinned memory key from a session.
+
+    Args:
+        session_id: Session identifier for the active working context.
+        key: Memory key to remove from the session pin list.
+
+    Returns:
+        Structured payload: {session_id, count, pins, unpinned, error}.
+    """
+    normalized_session_id = _normalize_session_id(session_id)
+    if normalized_session_id is None:
+        return _runtime_error_payload(
+            "❌ session_id is required.",
+            session_id="",
+            count=0,
+            pins=[],
+            unpinned=False,
+        )
+
+    try:
+        pins = session_pin_store.unpin(normalized_session_id, key)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+            unpinned=False,
+        )
+
+    return _pin_payload(normalized_session_id, pins, unpinned=True)
+
+
+@mcp.tool()
+async def list_pins(session_id: str) -> dict[str, Any]:
+    """
+    List pinned memory keys for a session.
+
+    Args:
+        session_id: Session identifier for the active working context.
+
+    Returns:
+        Structured payload: {session_id, count, pins, error}.
+    """
+    normalized_session_id = _normalize_session_id(session_id)
+    if normalized_session_id is None:
+        return _runtime_error_payload(
+            "❌ session_id is required.",
+            session_id="",
+            count=0,
+            pins=[],
+        )
+
+    try:
+        pins = session_pin_store.list_pins(normalized_session_id)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+        )
+
+    return _pin_payload(normalized_session_id, pins)
+
+
+@mcp.tool()
+async def clear_pins(session_id: str) -> dict[str, Any]:
+    """
+    Clear all pinned memory keys for a session.
+
+    Args:
+        session_id: Session identifier for the active working context.
+
+    Returns:
+        Structured payload: {session_id, count, pins, cleared, error}.
+    """
+    normalized_session_id = _normalize_session_id(session_id)
+    if normalized_session_id is None:
+        return _runtime_error_payload(
+            "❌ session_id is required.",
+            session_id="",
+            count=0,
+            pins=[],
+            cleared=False,
+        )
+
+    try:
+        pins = session_pin_store.clear(normalized_session_id)
+    except ValueError as e:
+        return _runtime_error_payload(
+            f"❌ {e}",
+            session_id=normalized_session_id,
+            count=0,
+            pins=[],
+            cleared=False,
+        )
+
+    return _pin_payload(normalized_session_id, pins, cleared=True)
+
+
+@mcp.tool()
+async def list_memories(
+    limit: int = 50,
+    offset: int = 0,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    recent_first: bool = True,
+) -> MemoryListPayload:
+    """
+    List stored memories as structured metadata only — keys, titles, tags, timestamps, chunk counts.
+    No content is returned. Use this when you need to browse what exists, not search by topic.
+
+    Args:
+        limit: Max metadata rows to return (default 50, max 500). Use 0 for all.
+        offset: Zero-based pagination offset.
+        project: Optional exact project filter.
+        domain: Optional exact domain filter.
+        tags: Optional comma-separated string or list of required tags.
+        recent_first: Sort by updated_at descending when true; otherwise by key.
+
+    Returns:
+        Structured payload: {count, total, limit, offset, has_more, memories, error}.
+        Each memory includes key, title, tags, project/domain/status/canonical when
+        available, updated_at, created_at, chars, and chunk_count. On runtime failure,
+        memories is empty and error is {code, message}.
+
+    For topic-based lookup, prefer search_memories() or search_memories_text() instead.
+    """
+    try:
+        memories = await memory_manager.list_memories_async()
+    except Exception as e:
+        return build_list_error_payload("runtime_error", f"❌ Engram error: {e}")
+
+    required_tags = _normalize_string_list(tags)
+
+    def keep(memory: dict[str, Any]) -> bool:
+        if project is not None and memory.get("project") != project:
+            return False
+        if domain is not None and memory.get("domain") != domain:
+            return False
+        if required_tags and not all(tag in (memory.get("tags") or []) for tag in required_tags):
+            return False
+        return True
+
+    filtered = [memory for memory in memories if keep(memory)]
+    if recent_first:
+        filtered.sort(key=lambda memory: str(memory.get("updated_at", "")), reverse=True)
+    else:
+        filtered.sort(key=lambda memory: str(memory.get("key", "")))
+
+    normalized_limit = _clamp_list_limit(limit)
+    normalized_offset = _normalize_offset(offset)
+    if normalized_limit == 0:
+        page = filtered[normalized_offset:]
+        has_more = False
+    else:
+        end = normalized_offset + normalized_limit
+        page = filtered[normalized_offset:end]
+        has_more = end < len(filtered)
+
+    return build_list_payload(
+        page,
+        total=len(filtered),
+        limit=normalized_limit,
+        offset=normalized_offset,
+        has_more=has_more,
+    )
+
+
+@mcp.tool()
+async def audit_memory_quality(
+    limit: int = 100,
+    offset: int = 0,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Audit memory metadata quality without loading memory bodies or writing repairs.
+
+    This reports scope, lifecycle, chunking, and retrieval-risk signals so agents
+    can prefer well-scoped active memories and notice low-quality context before
+    relying on it. For repairable JSON hygiene, use audit_memory_metadata().
+    """
+    try:
+        memories = await memory_manager.list_memories_async()
+    except Exception as e:
+        return {
+            "schema_version": "2026-05-11.memory-quality.v1",
+            "count": 0,
+            "total": 0,
+            "issue_count": 0,
+            "limit": _clamp_list_limit(limit),
+            "offset": _normalize_offset(offset),
+            "has_more": False,
+            "summary": {"low_risk_count": 0, "medium_risk_count": 0, "high_risk_count": 0},
+            "memories": [],
+            "write_performed": False,
+            "error": _tool_error("runtime_error", f"❌ Engram error: {e}"),
+        }
+
+    required_tags = _normalize_string_list(tags)
+
+    def keep(memory: dict[str, Any]) -> bool:
+        if project is not None and memory.get("project") != project:
+            return False
+        if domain is not None and memory.get("domain") != domain:
+            return False
+        if required_tags and not all(tag in (memory.get("tags") or []) for tag in required_tags):
+            return False
+        return True
+
+    payload = build_memory_quality_audit(
+        [memory for memory in memories if keep(memory)],
+        limit=_clamp_list_limit(limit),
+        offset=_normalize_offset(offset),
+    )
+    payload["error"] = None
+    return payload
+
+
+@mcp.tool()
+async def list_all_memories() -> str:
+    """
+    List all stored memories as a directory — keys, titles, tags, timestamps, chunk counts.
+    No content is returned. Use this when you need to browse what exists, not search by topic.
+
+    For topic-based lookup, prefer search_memories() instead.
+    """
+    payload = await list_memories(limit=0)
+    return render_list_payload(payload)
+
+
+@mcp.tool()
+async def retrieve_chunk_text(key: str, chunk_id: int) -> str:
+    """
+    Retrieve a single chunk from a memory by key and chunk_id.
+
+    Use this AFTER search_memories_text() or search_memories() identifies the relevant key and chunk_id.
+    This is the middle tier — more content than a snippet, far fewer tokens than the full memory.
+
+    Args:
+        key: The memory's unique key (from search_memories(), search_memories_text(), or list_all_memories() results).
+        chunk_id: The chunk index returned by search results.
+
+    Returns:
+        Full text of the requested chunk, with its parent memory title. This is the
+        legacy text wrapper; for structured output, use retrieve_chunk().
+    """
+    payload = await retrieve_chunk(key, chunk_id)
+    return _render_retrieve_chunk_payload(payload)
+
+
+@mcp.tool()
+async def retrieve_chunk(key: str, chunk_id: int) -> dict[str, Any]:
+    """
+    Retrieve one chunk as structured data.
+
+    Use this AFTER search_memories() or search_memories_text() identifies the relevant key
+    and chunk_id. Prefer this middle tier before escalating to retrieve_memory().
+
+    Args:
+        key: The memory's unique key.
+        chunk_id: The chunk index returned by search results.
+
+    Returns:
+        Structured payload: {key, chunk_id, found, chunk, error}. When found is true,
+        chunk includes title, text, and chunk metadata. When not found, chunk is null.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"key": key, "chunk_id": chunk_id}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("retrieve_chunk", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                key=key,
+                chunk_id=chunk_id,
+                found=False,
+                chunk=None,
+            )
+        _record_usage_for_payload("retrieve_chunk", input_payload, payload, started_at)
+        return payload
+
+    try:
+        results = await memory_manager.retrieve_chunks_async([{"key": key, "chunk_id": chunk_id}])
+    except Exception as e:
+        payload = _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            chunk_id=chunk_id,
+            found=False,
+            chunk=None,
+        )
+        _record_usage_for_payload("retrieve_chunk", input_payload, payload, started_at)
+        return payload
+
+    result = results[0] if results else None
+    payload = _retrieve_chunk_payload(result, key, chunk_id)
+    _record_usage_for_payload("retrieve_chunk", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def retrieve_chunks(requests: list[dict]) -> dict[str, Any]:
+    """
+    Retrieve multiple chunks in one call as structured data.
+
+    Use this AFTER search_memories() when you need several chunk matches at once.
+    It preserves request order and keeps not-found results explicit so you can avoid
+    escalating to retrieve_memory() unless full memories are still necessary.
+
+    Args:
+        requests: Array of {key, chunk_id} objects.
+
+    Returns:
+        Structured payload: {requested_count, found_count, results, error}. Each result
+        includes key, chunk_id, found, chunk, and per-request validation details when needed.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"requests": requests}
+    if not isinstance(requests, list):
+        payload = {
+            "requested_count": 0,
+            "found_count": 0,
+            "results": [],
+            "error": {
+                "code": "invalid_requests",
+                "message": "❌ requests must be a list of {key, chunk_id} objects.",
+            },
+        }
+        _record_usage_for_payload("retrieve_chunks", input_payload, payload, started_at)
+        return payload
+
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("retrieve_chunks", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                requested_count=len(requests),
+                found_count=0,
+                results=[],
+            )
+        _record_usage_for_payload("retrieve_chunks", input_payload, payload, started_at)
+        return payload
+
+    try:
+        raw_results = await memory_manager.retrieve_chunks_async(requests)
+    except Exception as e:
+        payload = _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            requested_count=len(requests),
+            found_count=0,
+            results=[],
+        )
+        _record_usage_for_payload("retrieve_chunks", input_payload, payload, started_at)
+        return payload
+
+    results = [
+        _retrieve_chunk_payload(result, result.get("key", ""), result.get("chunk_id", -1))
+        for result in raw_results
+    ]
+    payload = {
+        "requested_count": len(requests),
+        "found_count": sum(1 for result in results if result["found"]),
+        "results": results,
+        "error": None,
+    }
+    _record_usage_for_payload("retrieve_chunks", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def list_context_profiles() -> dict[str, Any]:
+    """
+    List no-write retrieval profiles for task-focused context compilation.
+
+    Profiles tune prepare_context() defaults such as max chunks, budget,
+    retrieval mode, graph expansion, and workflow-oriented query terms. Listing
+    profiles does not search, read, write, or promote memory.
+    """
+    try:
+        payload = build_context_profile_catalog()
+        payload["error"] = None
+        return payload
+    except Exception as e:
+        return {
+            "schema_version": "2026-05-11.context-profiles.v1",
+            "count": 0,
+            "profiles": {},
+            "write_performed": False,
+            "error": _tool_error("runtime_error", str(e)),
+        }
+
+
+@mcp.tool()
+async def prepare_context(
+    task: str,
+    project: str | None = None,
+    profile: str = "repo_resume",
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    max_chunks: int | None = None,
+    budget_chars: int | None = None,
+    include_stale: bool | None = None,
+    canonical_only: bool | None = None,
+    retrieval_mode: str | None = None,
+    use_graph: bool | None = None,
+    max_hops: int | None = None,
+) -> dict[str, Any]:
+    """
+    Compile a no-write, cited context packet for an agent task.
+
+    This is an agent-workflow helper on top of context_pack(). It selects a
+    retrieval profile, builds a task-focused query, returns bounded cited
+    chunks plus stale/conflict warnings and next actions, and never writes or
+    promotes memory. Graph-enabled profiles run read-only conflict scans for
+    selected memory refs and return counts/types only, not neighbor bodies.
+    """
+    started_at = time.perf_counter()
+    normalized_tags = _normalize_string_list(tags)
+    input_payload = {
+        "task": task,
+        "project": project,
+        "profile": profile,
+        "domain": domain,
+        "tags": normalized_tags,
+        "max_chunks": max_chunks,
+        "budget_chars": budget_chars,
+        "include_stale": include_stale,
+        "canonical_only": canonical_only,
+        "retrieval_mode": retrieval_mode,
+        "use_graph": use_graph,
+        "max_hops": max_hops,
+    }
+
+    task_error = _validate_search_query(task)
+    if task_error:
+        payload = {
+            "task": task,
+            "profile": profile,
+            "packet": None,
+            "write_performed": False,
+            "error": _tool_error("invalid_task", task_error),
+        }
+        _record_usage_for_payload("prepare_context", input_payload, payload, started_at)
+        return payload
+
+    try:
+        profile_payload = get_context_profile(profile)
+    except ValueError as e:
+        payload = {
+            "task": task,
+            "profile": profile,
+            "packet": None,
+            "write_performed": False,
+            "error": _tool_error("invalid_profile", str(e)),
+        }
+        _record_usage_for_payload("prepare_context", input_payload, payload, started_at)
+        return payload
+
+    selected_max_chunks = int(max_chunks if max_chunks is not None else profile_payload["max_chunks"])
+    selected_budget_chars = int(budget_chars if budget_chars is not None else profile_payload["budget_chars"])
+    selected_include_stale = (
+        bool(include_stale) if include_stale is not None else bool(profile_payload["include_stale"])
+    )
+    selected_canonical_only = (
+        bool(canonical_only) if canonical_only is not None else bool(profile_payload["canonical_only"])
+    )
+    selected_retrieval_mode = str(retrieval_mode or profile_payload["retrieval_mode"])
+    selected_use_graph = bool(use_graph) if use_graph is not None else bool(profile_payload["use_graph"])
+    selected_max_hops = int(max_hops if max_hops is not None else profile_payload["max_hops"])
+    query = build_context_query(task, profile_payload, project=project)
+
+    metering_token = _USAGE_METERING_ENABLED.set(False)
+    try:
+        context_payload = await context_pack(
+            query=query,
+            project=project,
+            domain=domain,
+            tags=normalized_tags,
+            max_chunks=selected_max_chunks,
+            budget_chars=selected_budget_chars,
+            include_stale=selected_include_stale,
+            canonical_only=selected_canonical_only,
+            retrieval_mode=selected_retrieval_mode,
+            use_graph=selected_use_graph,
+            max_hops=selected_max_hops,
+        )
+    finally:
+        _USAGE_METERING_ENABLED.reset(metering_token)
+
+    conflict_scans = _collect_context_conflict_scans(
+        context_payload,
+        enabled=selected_use_graph,
+    )
+    packet = compile_context_packet(
+        task=task,
+        profile_id=profile_payload["id"],
+        profile=profile_payload,
+        context_payload=context_payload,
+        project=project,
+        domain=domain,
+        tags=normalized_tags,
+        query=query,
+        conflict_scans=conflict_scans,
+    )
+    payload = {
+        "task": task,
+        "profile": profile_payload["id"],
+        "packet": packet,
+        "write_performed": False,
+        "error": context_payload.get("error"),
+    }
+    _record_usage_for_payload("prepare_context", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def make_handoff(
+    task: str,
+    project: str | None = None,
+    profile: str = "repo_resume",
+    branch: str | None = None,
+    status: str | None = None,
+    next_steps: str | list[str] | None = None,
+    validation: str | list[str] | None = None,
+    blockers: str | list[str] | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    max_chunks: int | None = None,
+    budget_chars: int | None = None,
+    include_stale: bool | None = None,
+    use_graph: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Generate a no-write handoff packet for resuming agent work.
+
+    The packet includes a prepared context summary, citation refs, warnings,
+    next steps, validation commands, blockers, and a resume prompt. It does not
+    write memory; use write_memory/store_memory explicitly if the handoff should
+    become durable Engram memory.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "task": task,
+        "project": project,
+        "profile": profile,
+        "branch": branch,
+        "status": status,
+        "next_steps": next_steps,
+        "validation": validation,
+        "blockers": blockers,
+        "domain": domain,
+        "tags": tags,
+        "max_chunks": max_chunks,
+        "budget_chars": budget_chars,
+        "include_stale": include_stale,
+        "use_graph": use_graph,
+    }
+
+    metering_token = _USAGE_METERING_ENABLED.set(False)
+    try:
+        context_payload = await prepare_context(
+            task=task,
+            project=project,
+            profile=profile,
+            domain=domain,
+            tags=tags,
+            max_chunks=max_chunks,
+            budget_chars=budget_chars,
+            include_stale=include_stale,
+            use_graph=use_graph,
+        )
+    finally:
+        _USAGE_METERING_ENABLED.reset(metering_token)
+
+    if context_payload.get("error") is not None:
+        payload = {
+            "task": task,
+            "profile": profile,
+            "handoff": None,
+            "write_performed": False,
+            "error": context_payload["error"],
+        }
+        _record_usage_for_payload("make_handoff", input_payload, payload, started_at)
+        return payload
+
+    handoff = build_handoff_packet(
+        task=task,
+        project=project,
+        branch=branch,
+        status=status,
+        next_steps=next_steps,
+        validation=validation,
+        blockers=blockers,
+        context_packet=context_payload.get("packet") or {},
+    )
+    payload = {
+        "task": task,
+        "profile": context_payload.get("profile", profile),
+        "handoff": handoff,
+        "write_performed": False,
+        "error": None,
+    }
+    _record_usage_for_payload("make_handoff", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def prepare_project_capsule(
+    project: str,
+    task: str = "prepare project capsule",
+    profile: str = "repo_resume",
+    summary: str | None = None,
+    must_read_keys: str | list[str] | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    max_chunks: int | None = None,
+    budget_chars: int | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a no-write project capsule draft from context and quality signals.
+
+    Capsules are reviewable "read this first" packets for agents. This tool
+    compiles context refs and metadata quality summaries, but it does not store
+    or refresh durable memory. Use write_memory only after reviewing the draft.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "project": project,
+        "task": task,
+        "profile": profile,
+        "summary": summary,
+        "must_read_keys": must_read_keys,
+        "domain": domain,
+        "tags": tags,
+        "max_chunks": max_chunks,
+        "budget_chars": budget_chars,
+    }
+
+    metering_token = _USAGE_METERING_ENABLED.set(False)
+    try:
+        context_payload = await prepare_context(
+            task=task,
+            project=project,
+            profile=profile,
+            domain=domain,
+            tags=tags,
+            max_chunks=max_chunks,
+            budget_chars=budget_chars,
+        )
+        quality_payload = await audit_memory_quality(
+            project=project,
+            domain=domain,
+            tags=tags,
+            limit=0,
+        )
+    finally:
+        _USAGE_METERING_ENABLED.reset(metering_token)
+
+    if context_payload.get("error") is not None:
+        payload = {
+            "project": project,
+            "capsule": None,
+            "write_performed": False,
+            "error": context_payload["error"],
+        }
+        _record_usage_for_payload("prepare_project_capsule", input_payload, payload, started_at)
+        return payload
+    if quality_payload.get("error") is not None:
+        payload = {
+            "project": project,
+            "capsule": None,
+            "write_performed": False,
+            "error": quality_payload["error"],
+        }
+        _record_usage_for_payload("prepare_project_capsule", input_payload, payload, started_at)
+        return payload
+
+    capsule = build_project_capsule_draft(
+        project=project,
+        task=task,
+        summary=summary,
+        must_read_keys=must_read_keys,
+        context_packet=context_payload.get("packet") or {},
+        quality_payload=quality_payload,
+    )
+    payload = {
+        "project": project,
+        "capsule": capsule,
+        "write_performed": False,
+        "error": None,
+    }
+    _record_usage_for_payload("prepare_project_capsule", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def context_pack(
+    query: str,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    max_chunks: int = 5,
+    budget_chars: int = 6000,
+    include_stale: bool = False,
+    canonical_only: bool = False,
+    retrieval_mode: str = "semantic",
+    use_graph: bool = False,
+    max_hops: int = 1,
+    max_graph_candidates: int = 5,
+) -> dict[str, Any]:
+    """
+    Build a compact working set by searching, deduping, and retrieving chunks.
+
+    This is the fastest agent-friendly path when snippets are too small but full
+    memories would be wasteful. It follows the three-tier retrieval ladder on the
+    caller's behalf and returns bounded chunk text.
+
+    Args:
+        query: Natural language search query.
+        project: Optional exact project filter.
+        domain: Optional exact domain filter.
+        tags: Optional comma-separated string or list of required tags.
+        max_chunks: Max unique chunks to retrieve (default 5, max 20).
+        budget_chars: Approximate maximum chunk text characters returned.
+        include_stale: When false, exclude time/code-stale memories.
+        canonical_only: When true, return only canonical memories.
+        retrieval_mode: "semantic" by default, or "hybrid" to add lexical scoring for exact identifiers.
+
+        use_graph: When true, graph neighbor IDs may compete for remaining slots.
+        max_hops: Max graph traversal hops for ID-only graph inspection.
+        max_graph_candidates: Max graph-neighbor keys to consider.
+
+    Returns:
+        Structured payload: {query, count, chunks, omitted, used_chars, receipt, error}.
+    """
+    started_at = time.perf_counter()
+    input_payload = {
+        "query": query,
+        "project": project,
+        "domain": domain,
+        "tags": tags,
+        "max_chunks": max_chunks,
+        "budget_chars": budget_chars,
+        "include_stale": include_stale,
+        "canonical_only": canonical_only,
+        "retrieval_mode": retrieval_mode,
+        "use_graph": use_graph,
+        "max_hops": max_hops,
+        "max_graph_candidates": max_graph_candidates,
+    }
+    try:
+        normalized_retrieval_mode = normalize_retrieval_mode(retrieval_mode)
+    except ValueError as e:
+        normalized_retrieval_mode = "semantic"
+        validation_error = f"❌ {e}"
+    else:
+        validation_error = None
+    normalized_tags = _normalize_string_list(tags)
+    normalized_max_chunks = _clamp_search_limit(max_chunks)
+    normalized_budget = max(int(budget_chars), 1)
+    normalized_max_hops = min(max(int(max_hops), 0), 3)
+    normalized_max_graph_candidates = min(max(int(max_graph_candidates), 0), 20)
+    filters = make_filters(
+        project=project,
+        domain=domain,
+        tags=normalized_tags,
+        include_stale=include_stale,
+        canonical_only=canonical_only,
+    )
+
+    def _receipt(
+        *,
+        semantic_candidate_count: int = 0,
+        graph_candidate_count: int = 0,
+        selected_chunk_count: int = 0,
+        omitted_count: int = 0,
+        used_chars: int = 0,
+        citation_count: int = 0,
+    ) -> dict[str, object]:
+        return build_context_receipt(
+            query=query,
+            filters=filters,
+            semantic_candidate_count=semantic_candidate_count,
+            graph_candidate_count=graph_candidate_count,
+            selected_chunk_count=selected_chunk_count,
+            omitted_count=omitted_count,
+            budget_chars=normalized_budget,
+            used_chars=used_chars,
+            include_stale=include_stale,
+            graph_enabled=use_graph,
+            max_hops=normalized_max_hops,
+            retrieval_mode=normalized_retrieval_mode,
+            citation_count=citation_count,
+        )
+
+    def _finish(payload: dict[str, Any]) -> dict[str, Any]:
+        if use_graph and payload.get("error") is None:
+            receipt = payload.get("receipt", {})
+            _record_operation_event(
+                event_type="context_pack_graph_used",
+                subject={"kind": "context_pack", "graph_enabled": True},
+                summary="Context pack used graph-assisted candidate selection.",
+                metadata={
+                    "semantic_candidate_count": receipt.get("semantic_candidate_count"),
+                    "graph_candidate_count": receipt.get("graph_candidate_count"),
+                    "selected_chunk_count": receipt.get("selected_chunk_count"),
+                    "omitted_count": receipt.get("omitted_count"),
+                },
+            )
+        _record_usage_for_payload("context_pack", input_payload, payload, started_at)
+        return payload
+
+    query_validation_error = _validate_search_query(query)
+    if validation_error or query_validation_error:
+        return _finish({
+            "query": query,
+            "count": 0,
+            "chunks": [],
+            "citations": [],
+            "omitted": [],
+            "budget_chars": normalized_budget,
+            "used_chars": 0,
+            "receipt": _receipt(),
+            "error": {
+                "code": "invalid_query" if query_validation_error else "invalid_request",
+                "message": query_validation_error or validation_error,
+            },
+        })
+
+    metering_token = _USAGE_METERING_ENABLED.set(False)
+    try:
+        search_kwargs: dict[str, Any] = {
+            "limit": normalized_max_chunks,
+            "project": project,
+            "domain": domain,
+            "tags": tags,
+            "include_stale": include_stale,
+            "canonical_only": canonical_only,
+        }
+        if normalized_retrieval_mode != "semantic":
+            search_kwargs["retrieval_mode"] = normalized_retrieval_mode
+        search_payload = await search_memories(query, **search_kwargs)
+    finally:
+        _USAGE_METERING_ENABLED.reset(metering_token)
+    semantic_results = search_payload.get("results", [])
+    semantic_candidate_count = len(semantic_results)
+    if search_payload.get("error") is not None:
+        return _finish({
+            "query": query,
+            "count": 0,
+            "chunks": [],
+            "citations": [],
+            "omitted": [],
+            "budget_chars": normalized_budget,
+            "used_chars": 0,
+            "receipt": _receipt(semantic_candidate_count=semantic_candidate_count),
+            "error": search_payload["error"],
+        })
+
+    requests: list[dict[str, Any]] = []
+    result_by_ref: dict[tuple[str, int], dict[str, Any]] = {}
+    semantic_refs: list[dict[str, Any]] = []
+    for result in semantic_results:
+        ref = (result["key"], int(result["chunk_id"]))
+        if ref in result_by_ref:
+            continue
+        result_by_ref[ref] = result
+        semantic_refs.append({"key": ref[0], "chunk_id": ref[1]})
+        requests.append({"key": ref[0], "chunk_id": ref[1]})
+        if len(requests) >= normalized_max_chunks:
+            break
+
+    graph_candidates: list[dict[str, Any]] = []
+    if use_graph and requests and len(requests) < normalized_max_chunks:
+        graph_edges: list[dict[str, Any]] = []
+        for ref in semantic_refs:
+            scan = graph_manager.impact_scan(
+                root_ref={"kind": "memory", "key": ref["key"]},
+                max_hops=normalized_max_hops,
+            )
+            graph_edges.extend(scan.get("edges", []))
+        graph_candidates = merge_graph_candidates(
+            semantic_refs=semantic_refs,
+            graph_edges=graph_edges,
+            max_graph_candidates=normalized_max_graph_candidates,
+        )
+        for candidate in graph_candidates:
+            if len(requests) >= normalized_max_chunks:
+                break
+            ref = (candidate["key"], 0)
+            if ref in result_by_ref:
+                continue
+            result_by_ref[ref] = {
+                "key": candidate["key"],
+                "chunk_id": 0,
+                "title": candidate["key"],
+                "score": None,
+                "snippet": "",
+                "tags": [],
+                "explanation": candidate.get("reason"),
+            }
+            requests.append({"key": candidate["key"], "chunk_id": 0})
+
+    if not requests:
+        return _finish({
+            "query": query,
+            "count": 0,
+            "chunks": [],
+            "citations": [],
+            "omitted": [],
+            "budget_chars": normalized_budget,
+            "used_chars": 0,
+            "receipt": _receipt(
+                semantic_candidate_count=semantic_candidate_count,
+                graph_candidate_count=len(graph_candidates),
+            ),
+            "error": None,
+        })
+
+    metering_token = _USAGE_METERING_ENABLED.set(False)
+    try:
+        chunk_payload = await retrieve_chunks(requests)
+    finally:
+        _USAGE_METERING_ENABLED.reset(metering_token)
+    if chunk_payload.get("error") is not None:
+        return _finish({
+            "query": query,
+            "count": 0,
+            "chunks": [],
+            "citations": [],
+            "omitted": requests,
+            "budget_chars": normalized_budget,
+            "used_chars": 0,
+            "receipt": _receipt(
+                semantic_candidate_count=semantic_candidate_count,
+                graph_candidate_count=len(graph_candidates),
+                omitted_count=len(requests),
+            ),
+            "error": chunk_payload["error"],
+        })
+
+    chunks: list[dict[str, Any]] = []
+    citations: list[dict[str, Any]] = []
+    omitted: list[dict[str, Any]] = []
+    used_chars = 0
+    for result in chunk_payload.get("results", []):
+        ref = (result.get("key", ""), int(result.get("chunk_id", -1)))
+        search_result = result_by_ref.get(ref, {})
+        if not result.get("found"):
+            omitted.append(
+                {
+                    "key": ref[0],
+                    "chunk_id": ref[1],
+                    "reason": "not_found",
+                    "error": result.get("error"),
+                }
+            )
+            continue
+
+        chunk = result.get("chunk") or {}
+        text = chunk.get("text") or ""
+        remaining = normalized_budget - used_chars
+        if remaining <= 0:
+            omitted.append({"key": ref[0], "chunk_id": ref[1], "reason": "budget_exhausted"})
+            continue
+
+        returned_text = text[:remaining]
+        used_chars += len(returned_text)
+        citation = {
+            "citation_id": f"engram:{ref[0]}#{ref[1]}",
+            "source": "memory",
+            "key": ref[0],
+            "chunk_id": ref[1],
+            "title": chunk.get("title") or search_result.get("title") or ref[0],
+            "section_title": chunk.get("section_title"),
+            "retrieval_mode": search_result.get("retrieval_mode", normalized_retrieval_mode),
+            "score": search_result.get("score"),
+            "semantic_score": search_result.get("semantic_score"),
+            "lexical_score": search_result.get("lexical_score"),
+            "snippet": search_result.get("snippet"),
+        }
+        citations.append(citation)
+        chunks.append(
+            {
+                "key": ref[0],
+                "chunk_id": ref[1],
+                "title": chunk.get("title") or search_result.get("title") or ref[0],
+                "score": search_result.get("score"),
+                "snippet": search_result.get("snippet"),
+                "explanation": search_result.get("explanation"),
+                "section_title": chunk.get("section_title"),
+                "heading_path": chunk.get("heading_path", []),
+                "chunk_kind": chunk.get("chunk_kind"),
+                "text": returned_text,
+                "truncated": len(returned_text) < len(text),
+                "citation": citation,
+            }
+        )
+
+    return _finish({
+        "query": query,
+        "count": len(chunks),
+        "chunks": chunks,
+        "citations": citations,
+        "omitted": omitted,
+        "budget_chars": normalized_budget,
+        "used_chars": used_chars,
+        "receipt": _receipt(
+            semantic_candidate_count=semantic_candidate_count,
+            graph_candidate_count=len(graph_candidates),
+            selected_chunk_count=len(chunks),
+            omitted_count=len(omitted),
+            used_chars=used_chars,
+            citation_count=len(citations),
+        ),
+        "error": None,
+    })
+
+
+@mcp.tool()
+async def retrieve_memory_text(key: str) -> str:
+    """
+    Retrieve the full content of a memory by key.
+
+    Use this ONLY when you need the complete memory and chunk retrieval isn't sufficient.
+    This is the most token-expensive operation — use it intentionally.
+
+    Args:
+        key: The memory's unique key.
+
+    Returns:
+        Full memory content with metadata header. This is the legacy text wrapper;
+        for structured output, use retrieve_memory().
+    """
+    payload = await retrieve_memory(key)
+    return _render_retrieve_memory_payload(payload)
+
+
+@mcp.tool()
+async def retrieve_memory(key: str) -> dict[str, Any]:
+    """
+    Retrieve the full memory as structured metadata plus content.
+
+    Use this ONLY when chunk retrieval is not sufficient. This is still the most
+    token-expensive read path, so prefer search_memories(), retrieve_chunk(),
+    or retrieve_chunks() first.
+
+    Args:
+        key: The memory's unique key.
+
+    Returns:
+        Structured payload: {key, found, memory, error}. When found is true, memory
+        contains the normalized metadata, lifecycle fields, related keys, and content.
+    """
+    started_at = time.perf_counter()
+    input_payload = {"key": key}
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("retrieve_memory", input_payload)
+        except EngramDaemonClientError as e:
+            payload = _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                key=key,
+                found=False,
+                memory=None,
+            )
+        _record_usage_for_payload("retrieve_memory", input_payload, payload, started_at)
+        return payload
+
+    try:
+        result = await memory_manager.retrieve_memory_async(key)
+    except Exception as e:
+        payload = _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            found=False,
+            memory=None,
+        )
+        _record_usage_for_payload("retrieve_memory", input_payload, payload, started_at)
+        return payload
+    payload = _retrieve_memory_payload(key, result)
+    _record_usage_for_payload("retrieve_memory", input_payload, payload, started_at)
+    return payload
+
+
+@mcp.tool()
+async def store_memory(
+    key: str,
+    content: str,
+    title: str = "",
+    tags: str | list[str] = "",
+    related_to: str | list[str] = "",
+    force: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+    memory_type: str | None = None,
+    scope: str | None = None,
+    trust_state: str | None = None,
+    retention_policy: str | None = None,
+    sync_policy: str | None = None,
+) -> str:
+    """
+    Store a new memory or update an existing one.
+
+    The key is the stable identifier — updates overwrite the previous content.
+    In daemon-owned Memory OS mode, content is chunked, semantically indexed,
+    and given automatic metadata plus semantic graph coverage with cited chunk
+    evidence.
+
+    Args:
+        key: Unique identifier (e.g. 'example_integration_decision', 'example_architecture').
+             Use snake_case. Be specific — keys are used for deterministic retrieval.
+        content: The memory content (max 15,000 chars). Markdown is supported and improves
+                 chunking quality. Use headers (##, ###) to create natural chunk boundaries.
+                 For larger documents, split into multiple memories with specific keys
+                 (e.g. 'example_adr_018', 'example_adr_019').
+        title: Human-readable title (optional, defaults to key).
+        tags: Comma-separated tags or tag list for browsing (e.g. 'example,decision,architecture').
+        related_to: Comma-separated keys or key list of related memories to link to (optional).
+                    Maximum 10 keys. Links are bidirectional at query time.
+        force: Pass True to store even if a near-duplicate already exists (default False).
+               When False, a duplicate warning is returned instead of storing.
+        project: Optional project label for scoped search/listing.
+        domain: Optional domain label for scoped search/listing.
+        status: Optional lifecycle status: active, draft, historical, superseded, archived.
+        canonical: Optional canonical-memory flag.
+
+    Returns:
+        Confirmation with chunk count, or duplicate warning if near-duplicate detected.
+    """
+    tag_list = _normalize_string_list(tags)
+    related_list = _normalize_string_list(related_to)
+    if _daemon_enabled():
+        try:
+            response = await _call_daemon(
+                "store_memory",
+                {
+                    "key": key,
+                    "content": content,
+                    "tags": tag_list,
+                    "title": title or None,
+                    "related_to": related_list,
+                    "force": force,
+                    "project": project,
+                    "domain": domain,
+                    "status": status,
+                    "canonical": canonical,
+                    "memory_type": memory_type,
+                    "scope": scope,
+                    "trust_state": trust_state,
+                    "retention_policy": retention_policy,
+                    "sync_policy": sync_policy,
+                },
+            )
+            return _format_daemon_store_response(key, response)
+        except EngramDaemonClientError as e:
+            return f"❌ Engram daemon error: {e}"
+
+    try:
+        result = await memory_manager.store_memory_async(
+            key=key,
+            content=content,
+            tags=tag_list,
+            title=title or None,
+            related_to=related_list,
+            force=force,
+            project=project,
+            domain=domain,
+            status=status,
+            canonical=canonical,
+        )
+        return _format_store_success(key, result)
+    except DuplicateMemoryError as e:
+        return _format_duplicate_warning(e.duplicate)
+    except ValueError as e:
+        return f"⚠️ Memory too large or invalid: {e}"
+    except RuntimeError as e:
+        return f"❌ Engram error: {e}"
+    except Exception as e:
+        return f"❌ Failed to store '{key}': {e}"
+
+
+@mcp.tool()
+async def find_memories(
+    query: str,
+    limit: int = 5,
+    session_id: str | None = None,
+    pinned_first: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    tags: str | list[str] | None = None,
+    include_stale: bool = True,
+    canonical_only: bool = False,
+) -> SearchPayload:
+    """
+    Alias for search_memories().
+
+    Some agents naturally look for a "find" verb. This wrapper keeps that path
+    discoverable while preserving the canonical search_memories contract.
+    """
+    kwargs: dict[str, Any] = {}
+    if limit != 5:
+        kwargs["limit"] = limit
+    if session_id is not None:
+        kwargs["session_id"] = session_id
+    if pinned_first:
+        kwargs["pinned_first"] = pinned_first
+    if project is not None:
+        kwargs["project"] = project
+    if domain is not None:
+        kwargs["domain"] = domain
+    if tags is not None:
+        kwargs["tags"] = tags
+    if include_stale is not True:
+        kwargs["include_stale"] = include_stale
+    if canonical_only:
+        kwargs["canonical_only"] = canonical_only
+    return await search_memories(query, **kwargs)
+
+
+@mcp.tool()
+async def read_chunk(key: str, chunk_id: int) -> dict[str, Any]:
+    """
+    Alias for retrieve_chunk().
+
+    Prefer this/read_chunk after search_memories or context_pack identifies a
+    specific key + chunk_id.
+    """
+    return await retrieve_chunk(key, chunk_id)
+
+
+@mcp.tool()
+async def read_memory(
+    key: str,
+    chunk_id: int | None = None,
+    full: bool = False,
+) -> dict[str, Any]:
+    """
+    Tier-aware read helper.
+
+    With chunk_id, this returns a chunk via retrieve_chunk(). With full=True, it
+    returns retrieve_memory(). With only key, it returns metadata without content
+    plus guidance to use chunk reads before full reads.
+    """
+    if chunk_id is not None:
+        return {
+            "mode": "chunk",
+            "result": await retrieve_chunk(key, chunk_id),
+            "error": None,
+        }
+
+    if full:
+        return {
+            "mode": "full",
+            "result": await retrieve_memory(key),
+            "error": None,
+        }
+
+    payload = await retrieve_memory(key)
+    if payload.get("error") is not None or not payload.get("found"):
+        return {
+            "mode": "metadata",
+            "key": key,
+            "found": payload.get("found", False),
+            "memory": None,
+            "guidance": "Use read_chunk(key, chunk_id) after search_memories; pass full=True only when the full memory is required.",
+            "error": payload.get("error"),
+        }
+
+    memory = dict(payload.get("memory") or {})
+    memory.pop("content", None)
+    return {
+        "mode": "metadata",
+        "key": key,
+        "found": True,
+        "memory": memory,
+        "guidance": "Use read_chunk(key, chunk_id) after search_memories; pass full=True only when the full memory is required.",
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def write_memory(
+    key: str,
+    content: str,
+    title: str = "",
+    tags: str | list[str] = "",
+    related_to: str | list[str] = "",
+    force: bool = False,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+    memory_type: str | None = None,
+    scope: str | None = None,
+    trust_state: str | None = None,
+    retention_policy: str | None = None,
+    sync_policy: str | None = None,
+) -> str:
+    """
+    Alias for store_memory().
+
+    This exists for agents that search for a write verb; store_memory remains
+    the canonical write tool.
+    """
+    kwargs: dict[str, Any] = {}
+    if title:
+        kwargs["title"] = title
+    if tags:
+        kwargs["tags"] = tags
+    if related_to:
+        kwargs["related_to"] = related_to
+    if force:
+        kwargs["force"] = force
+    if project is not None:
+        kwargs["project"] = project
+    if domain is not None:
+        kwargs["domain"] = domain
+    if status is not None:
+        kwargs["status"] = status
+    if canonical is not None:
+        kwargs["canonical"] = canonical
+    if memory_type is not None:
+        kwargs["memory_type"] = memory_type
+    if scope is not None:
+        kwargs["scope"] = scope
+    if trust_state is not None:
+        kwargs["trust_state"] = trust_state
+    if retention_policy is not None:
+        kwargs["retention_policy"] = retention_policy
+    if sync_policy is not None:
+        kwargs["sync_policy"] = sync_policy
+    return await store_memory(key, content, **kwargs)
+
+
+@mcp.tool()
+async def check_duplicate(key: str, content: str) -> dict[str, Any]:
+    """
+    Check whether proposed content is a near-duplicate of an existing memory.
+
+    Use this before store_memory() when you want a structured duplicate warning
+    without attempting a write.
+
+    Args:
+        key: Proposed memory key. Self-updates for the same key are allowed.
+        content: Proposed memory content to compare semantically.
+
+    Returns:
+        Structured payload: {key, duplicate, match, error}. When duplicate is true,
+        match includes the existing key, title, and similarity score.
+    """
+    if _daemon_enabled():
+        try:
+            return await _call_daemon(
+                "check_duplicate",
+                {
+                    "key": key,
+                    "content": content,
+                },
+            )
+        except EngramDaemonClientError as e:
+            return _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                key=key,
+                duplicate=False,
+                match=None,
+            )
+
+    try:
+        result = await memory_manager.check_duplicate_async(key, content)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            duplicate=False,
+            match=None,
+        )
+
+    return {
+        "key": key,
+        "duplicate": result["duplicate"],
+        "match": result["match"],
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def suggest_memory_metadata(content: str) -> dict[str, Any]:
+    """
+    Suggest lightweight metadata defaults from markdown content.
+
+    Args:
+        content: Proposed memory content.
+
+    Returns:
+        Structured payload: {suggestion, error}. suggestion includes a title,
+        tags, lifecycle defaults, and empty related metadata fields.
+    """
+    try:
+        suggestion = await memory_manager.suggest_memory_metadata_async(content)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            suggestion=None,
+        )
+
+    return {
+        "suggestion": suggestion,
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def prepare_memory(
+    content: str,
+    key: str = "",
+    title: str = "",
+    tags: str | list[str] = "",
+    related_to: str | list[str] = "",
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Prepare a memory draft before writing.
+
+    This combines metadata suggestions, key generation, validation, and duplicate
+    checking without storing anything. Use it when an agent has content but wants
+    a safe, inspectable draft for store_memory/write_memory.
+
+    Args:
+        content: Proposed memory body.
+        key: Optional explicit key. When omitted, a snake_case key is derived from title.
+        title: Optional title. When omitted, Engram suggests one from content.
+        tags: Optional comma-separated tags or tag list.
+        related_to: Optional comma-separated related keys or key list.
+        project: Optional project label.
+        domain: Optional domain label.
+        status: Optional lifecycle status.
+        canonical: Optional canonical-memory flag.
+
+    Returns:
+        Structured payload: {ready, draft, validation, duplicate, suggestion, guidance, error}.
+        ready is true only when validation passes and no duplicate is detected.
+    """
+    try:
+        suggestion = await memory_manager.suggest_memory_metadata_async(content)
+        resolved_title = title.strip() if title and title.strip() else suggestion.get("title") or "Untitled memory"
+        resolved_key = key.strip() if key and key.strip() else _slugify_memory_key(resolved_title)
+        resolved_tags = _normalize_string_list(tags) or suggestion.get("tags", [])
+        resolved_related_to = _normalize_string_list(related_to) or suggestion.get("related_to", [])
+        resolved_project = project if project is not None else suggestion.get("project")
+        resolved_domain = domain if domain is not None else suggestion.get("domain")
+        resolved_status = status if status is not None else suggestion.get("status")
+        resolved_canonical = canonical if canonical is not None else suggestion.get("canonical")
+
+        validation = await memory_manager.validate_memory_async(
+            content=content,
+            title=resolved_title,
+            tags=resolved_tags,
+            related_to=resolved_related_to,
+            project=resolved_project,
+            domain=resolved_domain,
+            status=resolved_status,
+            canonical=resolved_canonical,
+        )
+        if _daemon_enabled():
+            duplicate = await _call_daemon(
+                "check_duplicate",
+                {
+                    "key": resolved_key,
+                    "content": content,
+                },
+            )
+        else:
+            duplicate = await memory_manager.check_duplicate_async(resolved_key, content)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            ready=False,
+            draft=None,
+            validation=None,
+            duplicate=None,
+            suggestion=None,
+            guidance="Fix the reported error, then retry prepare_memory before storing.",
+        )
+
+    draft = {
+        "key": resolved_key,
+        "content": content,
+        "title": resolved_title,
+        "tags": validation["normalized"]["tags"],
+        "related_to": validation["normalized"]["related_to"],
+        "project": validation["normalized"]["project"],
+        "domain": validation["normalized"]["domain"],
+        "status": validation["normalized"]["status"],
+        "canonical": validation["normalized"]["canonical"],
+    }
+    ready = bool(validation["valid"] and not duplicate["duplicate"])
+    return {
+        "ready": ready,
+        "draft": draft,
+        "validation": validation,
+        "duplicate": duplicate,
+        "suggestion": suggestion,
+        "guidance": (
+            "Call store_memory/write_memory with draft fields. "
+            "Use force=True only when duplicate.duplicate is true and the overlap is intentional."
+        ),
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def validate_memory(
+    content: str,
+    title: str | None = None,
+    tags: list[str] | None = None,
+    related_to: list[str] | None = None,
+    status: str | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    canonical: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Validate memory content and metadata before storing or updating.
+
+    Args:
+        content: Proposed memory content.
+        title: Optional display title.
+        tags: Optional tag list.
+        related_to: Optional related memory keys.
+        status: Optional lifecycle status.
+        project: Optional project label.
+        domain: Optional domain label.
+        canonical: Optional canonical-memory flag.
+
+    Returns:
+        Structured payload: {valid, errors, normalized, error}. Validation errors
+        are returned in errors; runtime failures populate error instead.
+    """
+    try:
+        result = await memory_manager.validate_memory_async(
+            content=content,
+            title=title,
+            tags=tags,
+            related_to=related_to,
+            status=status,
+            project=project,
+            domain=domain,
+            canonical=canonical,
+        )
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            valid=False,
+            errors=[],
+            normalized=None,
+        )
+
+    return {
+        "valid": result["valid"],
+        "errors": result["errors"],
+        "normalized": result["normalized"],
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def update_memory_metadata(
+    key: str,
+    title: str | None = None,
+    tags: list[str] | None = None,
+    related_to: list[str] | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    status: str | None = None,
+    canonical: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Update metadata on an existing memory and reindex its current content.
+
+    This preserves the JSON-first / Chroma-second safety guarantee. Content is
+    unchanged; only metadata fields are updated and the existing chunks are reindexed.
+
+    Args:
+        key: Existing memory key to update.
+        title: Optional replacement title.
+        tags: Optional replacement tag list.
+        related_to: Optional replacement related-memory list.
+        project: Optional replacement project label.
+        domain: Optional replacement domain label.
+        status: Optional replacement lifecycle status.
+        canonical: Optional replacement canonical-memory flag.
+
+    Returns:
+        Structured payload: {key, updated, memory, error}. When updated is true,
+        memory contains the normalized stored record after reindexing.
+    """
+    changes = {
+        name: value
+        for name, value in {
+            "title": title,
+            "tags": tags,
+            "related_to": related_to,
+            "project": project,
+            "domain": domain,
+            "status": status,
+            "canonical": canonical,
+        }.items()
+        if value is not None
+    }
+
+    if _daemon_enabled():
+        try:
+            return await _call_daemon("update_memory_metadata", {"key": key, **changes})
+        except EngramDaemonClientError as e:
+            return _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                key=key,
+                updated=False,
+                memory=None,
+            )
+
+    try:
+        memory = await memory_manager.update_memory_metadata_async(key, **changes)
+    except KeyError:
+        return {
+            "key": key,
+            "updated": False,
+            "memory": None,
+            "error": {
+                "code": "not_found",
+                "message": f"❌ Memory not found: '{key}'",
+            },
+        }
+    except ValueError as e:
+        return {
+            "key": key,
+            "updated": False,
+            "memory": None,
+            "error": {
+                "code": "invalid_metadata",
+                "message": str(e),
+            },
+        }
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            updated=False,
+            memory=None,
+        )
+
+    return {
+        "key": key,
+        "updated": True,
+        "memory": memory,
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def audit_memory_metadata(
+    limit: int = 100,
+    offset: int = 0,
+    project: str | None = None,
+) -> dict[str, Any]:
+    """
+    Audit stored memory JSON metadata for repairable drift.
+
+    This is a read-only hygiene tool. It does not modify memory JSON or ChromaDB.
+
+    Args:
+        limit: Max issue rows to return (default 100). Use 0 for all.
+        offset: Zero-based pagination offset across memories with issues.
+        project: Optional exact project filter.
+
+    Returns:
+        Structured payload with counts and per-memory issue lists.
+    """
+    try:
+        payload = await memory_manager.audit_memory_metadata_async(
+            limit=limit,
+            offset=offset,
+            project=project,
+        )
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            count=0,
+            total=0,
+            issue_count=0,
+            repairable_count=0,
+            memories=[],
+        )
+
+    payload["error"] = None
+    return payload
+
+
+@mcp.tool()
+async def repair_memory_metadata(
+    keys: str | list[str],
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """
+    Repair selected memory metadata drift.
+
+    Defaults to dry_run=True. When dry_run=False, Engram writes normalized JSON
+    first, then reindexes chunks so JSON and Chroma stay aligned.
+
+    Args:
+        keys: Memory key or comma-separated/list of memory keys to repair.
+        dry_run: Preview changes without writing when true.
+
+    Returns:
+        Structured payload with one repair result per requested key.
+    """
+    normalized_keys = _normalize_string_list(keys)
+    if not normalized_keys:
+        return {
+            "requested_count": 0,
+            "repaired_count": 0,
+            "dry_run": dry_run,
+            "repairs": [],
+            "error": {
+                "code": "invalid_keys",
+                "message": "❌ keys must include at least one memory key.",
+            },
+        }
+
+    if _daemon_enabled():
+        try:
+            return await _call_daemon(
+                "repair_memory_metadata",
+                {
+                    "keys": normalized_keys,
+                    "dry_run": dry_run,
+                },
+            )
+        except EngramDaemonClientError as e:
+            return _runtime_error_payload(
+                f"❌ Engram daemon error: {e}",
+                requested_count=len(normalized_keys),
+                repaired_count=0,
+                dry_run=dry_run,
+                repairs=[],
+            )
+
+    try:
+        payload = await memory_manager.repair_memory_metadata_async(
+            normalized_keys,
+            dry_run=dry_run,
+        )
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            requested_count=len(normalized_keys),
+            repaired_count=0,
+            dry_run=dry_run,
+            repairs=[],
+        )
+
+    payload["error"] = None
+    return payload
+
+
+@mcp.tool()
+async def get_related_memories_text(key: str) -> str:
+    """
+    Retrieve all memories related to the given key, bidirectionally.
+
+    Returns memories that this key explicitly links to (forward links) AND
+    memories that link to this key (reverse links). Dangling references to
+    deleted memories are silently ignored.
+
+    Args:
+        key: The memory key to find relationships for.
+
+    Returns:
+        List of related memories with keys and titles, grouped by direction.
+    """
+    result = await memory_manager.get_related_memories_async(key)
+    if not result["found"]:
+        return f"❌ Memory not found: '{key}'"
+
+    forward = result["forward"]
+    reverse = result["reverse"]
+
+    if not forward and not reverse:
+        return f"🔗 No related memories found for '{key}'."
+
+    lines = [f"🔗 Related memories for '{key}':\n"]
+    if forward:
+        lines.append(f"Links to ({len(forward)}):")
+        for m in forward:
+            tags = ", ".join(m["tags"]) if m["tags"] else "none"
+            lines.append(f"  → {m['key']}: {m['title']}  [tags: {tags}]")
+    if reverse:
+        lines.append(f"\nLinked by ({len(reverse)}):")
+        for m in reverse:
+            tags = ", ".join(m["tags"]) if m["tags"] else "none"
+            lines.append(f"  ← {m['key']}: {m['title']}  [tags: {tags}]")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def get_related_memories(key: str) -> dict[str, Any]:
+    """
+    Retrieve related memories as structured forward and reverse link lists.
+
+    Args:
+        key: The memory key to inspect.
+
+    Returns:
+        Structured payload: {key, found, forward, reverse, forward_count, reverse_count, error}.
+    """
+    try:
+        result = await memory_manager.get_related_memories_async(key)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            key=key,
+            found=False,
+            forward=[],
+            reverse=[],
+            forward_count=0,
+            reverse_count=0,
+        )
+
+    return {
+        "key": key,
+        "found": result["found"],
+        "forward": result["forward"],
+        "reverse": result["reverse"],
+        "forward_count": len(result["forward"]),
+        "reverse_count": len(result["reverse"]),
+        "error": None,
+    }
+
+
+@mcp.tool()
+async def get_stale_memories_text(days: int = 90, type: str = "all") -> str:
+    """
+    Return memories that are time-stale (not accessed in N days) or code-stale
+    (source files changed since last index run). No memories are deleted — surfacing only.
+
+    Args:
+        days: Threshold in days for time-staleness (default 90, configurable in config.json).
+        type: Filter results — 'time' (access-based only), 'code' (indexer-flagged only),
+              or 'all' (both types, default).
+
+    Returns:
+        List of stale memories with staleness type, detail, and last access info.
+    """
+    if type not in ("time", "code", "all"):
+        return "❌ type must be 'time', 'code', or 'all'."
+    try:
+        results = await memory_manager.get_stale_memories_async(days=days, type=type)
+    except Exception as e:
+        return f"❌ Engram error: {e}"
+
+    if not results:
+        label = {"time": "time-stale", "code": "code-stale", "all": "stale"}.get(type, "stale")
+        return f"✅ No {label} memories found (threshold: {days} days)."
+
+    lines = [f"⚠️  {len(results)} stale memory/memories (threshold: {days}d, filter: {type}):\n"]
+    for r in results:
+        tags = ", ".join(r["tags"]) if r["tags"] else "none"
+        badge = {"time": "[Time stale]", "code": "[Code changed]", "both": "[Time + Code]"}.get(r["stale_type"], "")
+        lines.append(
+            f"{badge} {r['title']}\n"
+            f"  key={r['key']}  tags={tags}\n"
+            f"  detail: {r['stale_detail']}\n"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def get_stale_memories(days: int = 90, type: str = "all") -> dict[str, Any]:
+    """
+    Return stale memories as structured metadata.
+
+    Args:
+        days: Threshold in days for time-staleness.
+        type: 'time', 'code', or 'all'.
+
+    Returns:
+        Structured payload: {days, type, count, memories, error}.
+    """
+    if type not in ("time", "code", "all"):
+        return {
+            "days": days,
+            "type": type,
+            "count": 0,
+            "memories": [],
+            "error": {
+                "code": "invalid_type",
+                "message": "❌ type must be 'time', 'code', or 'all'.",
+            },
+        }
+
+    try:
+        results = await memory_manager.get_stale_memories_async(days=days, type=type)
+    except Exception as e:
+        return _runtime_error_payload(
+            f"❌ Engram error: {e}",
+            days=days,
+            type=type,
+            count=0,
+            memories=[],
+        )
+
+    return {
+        "days": days,
+        "type": type,
+        "count": len(results),
+        "memories": results,
+        "error": None,
+    }
+
+
+# Python-level compatibility aliases from the additive rollout. These are intentionally
+# not registered as MCP tools, but they keep direct module callers from breaking
+# immediately after the tool-surface cleanup.
+search_memories_v2 = search_memories
+list_memories_v2 = list_memories
+retrieve_chunk_v2 = retrieve_chunk
+retrieve_chunks_v2 = retrieve_chunks
+retrieve_memory_v2 = retrieve_memory
+get_related_memories_v2 = get_related_memories
+get_stale_memories_v2 = get_stale_memories
+
+
+@mcp.tool()
+async def delete_memory(key: str) -> str:
+    """
+    Permanently delete a memory and all its indexed chunks.
+
+    Args:
+        key: The memory key to delete.
+
+    Returns:
+        Confirmation or not-found message.
+    """
+    if _daemon_enabled():
+        try:
+            payload = await _call_daemon("delete_memory", {"key": key})
+        except EngramDaemonClientError as e:
+            return f"❌ Engram daemon error: {e}"
+        error = payload.get("error")
+        if error is not None:
+            message = error.get("message") if isinstance(error, dict) else str(error)
+            return f"❌ Engram daemon error: {message}"
+        if payload.get("deleted"):
+            session_pin_store.remove_key(key)
+            return f"🗑  Deleted memory: '{key}'"
+        return f"❌ Memory not found: '{key}'"
+
+    try:
+        deleted = await memory_manager.delete_memory_async(key)
+    except RuntimeError as e:
+        return f"❌ Engram error: {e}"
+    if deleted:
+        session_pin_store.remove_key(key)
+        return f"🗑  Deleted memory: '{key}'"
+    return f"❌ Memory not found: '{key}'"
+
+
+
+def _server_cli_dependencies() -> ServerCliDependencies:
+    return ServerCliDependencies(
+        product_name=PRODUCT_NAME,
+        product_version=PRODUCT_VERSION,
+        default_sse_host=DEFAULT_SSE_HOST,
+        script_path=Path(__file__).resolve(),
+        normalize_daemon_url=_normalize_daemon_url,
+        mcp_env=_mcp_env,
+        embedder=embedder,
+        memory_manager=memory_manager,
+        duplicate_memory_error=DuplicateMemoryError,
+        build_health_payload=_build_health_payload,
+        run_agent_reliability_harness=run_agent_reliability_harness,
+        context_pack=context_pack,
+        graph_manager=graph_manager,
+        list_graph_edges=list_graph_edges,
+        impact_scan=impact_scan,
+        audit_graph=audit_graph,
+        prepare_source_memory=prepare_source_memory,
+        list_source_drafts=list_source_drafts,
+        discard_source_draft=discard_source_draft,
+        usage_summary=usage_summary,
+        list_usage_calls=list_usage_calls,
+        list_operation_jobs=list_operation_jobs,
+        list_operation_events=list_operation_events,
+        memory_protocol=memory_protocol,
+        validate_raw_service_bind=validate_raw_service_bind,
+        public_bind_denied=PublicBindDenied,
+        prepare_mcp_runtime_before_start=_prepare_mcp_runtime_before_start,
+        mcp=mcp,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run_server_cli(_server_cli_dependencies(), argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
